@@ -119,6 +119,12 @@ pub struct FixedDecimalFormatter {
     symbols: DataPayload<provider::DecimalSymbolsV1Marker>,
 }
 
+impl AsRef<FixedDecimalFormatter> for FixedDecimalFormatter {
+    fn as_ref(&self) -> &FixedDecimalFormatter {
+        self
+    }
+}
+
 impl FixedDecimalFormatter {
     icu_provider::gen_any_buffer_data_constructors!(
 
@@ -138,7 +144,12 @@ impl FixedDecimalFormatter {
     ) -> Result<Self, DataError> {
         let symbols = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(locale),
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::from_str_or_panic(
+                        locale.get_single_unicode_ext("nu").unwrap_or_default(),
+                    ),
+                    locale,
+                ),
                 ..Default::default()
             })?
             .payload;
