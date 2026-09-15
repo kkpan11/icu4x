@@ -3,12 +3,12 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use super::*;
-use crate::error::Error;
+use crate::error::ZeroTrieBuildError;
 use alloc::vec;
 use alloc::vec::Vec;
 
 /// To speed up the search algorithm, we limit the number of times the level-2 parameter (q)
-/// can hit its max value (initially Q_FAST_MAX) before we try the next level-1 parameter (p).
+/// can hit its max value (initially `Q_FAST_MAX`) before we try the next level-1 parameter (p).
 /// In practice, this has a small impact on the resulting perfect hash, resulting in about
 /// 1 in 10000 hash maps that fall back to the slow path.
 const MAX_L2_SEARCH_MISSES: usize = 24;
@@ -17,7 +17,8 @@ const MAX_L2_SEARCH_MISSES: usize = 24;
 ///
 /// Returns `(p, [q_0, q_1, ..., q_(N-1)])`, or an error if the PHF could not be computed.
 #[allow(unused_labels)] // for readability
-pub fn find(bytes: &[u8]) -> Result<(u8, Vec<u8>), Error> {
+#[allow(clippy::indexing_slicing)] // carefully reviewed to not panic
+pub fn find(bytes: &[u8]) -> Result<(u8, Vec<u8>), ZeroTrieBuildError> {
     let n_usize = bytes.len();
 
     let mut p = 0u8;
@@ -37,6 +38,7 @@ pub fn find(bytes: &[u8]) -> Result<(u8, Vec<u8>), Error> {
     };
 
     'p_loop: loop {
+        // Vec of tuples: (index, bucket count)
         let mut buckets: Vec<(usize, Vec<u8>)> = (0..n_usize).map(|i| (i, vec![])).collect();
         for byte in bytes {
             let l1 = f1(*byte, p, N) as usize;
@@ -49,8 +51,11 @@ pub fn find(bytes: &[u8]) -> Result<(u8, Vec<u8>), Error> {
         bqs.fill(0);
         seen.fill(false);
         'q_loop: loop {
+            // Loop condition: exit when i is beyond the buckets length
             if i == buckets.len() {
                 for (local_j, real_j) in buckets.iter().map(|(j, _)| *j).enumerate() {
+                    debug_assert!(local_j < n_usize); // comes from .enumerate()
+                    debug_assert!(real_j < n_usize); // first item of bucket tuple is an index
                     qq[real_j] = bqs[local_j];
                 }
                 // println!("Success: p={p:?}, num_max_q={num_max_q:?}, bqs={bqs:?}, qq={qq:?}");
@@ -87,7 +92,7 @@ pub fn find(bytes: &[u8]) -> Result<(u8, Vec<u8>), Error> {
                                 // and re-run the loop with a higher `max_allowable_p`.
                                 debug_assert_eq!(max_allowable_p, P_REAL_MAX);
                                 // println!("Could not solve PHF function");
-                                return Err(Error::CouldNotSolvePerfectHash);
+                                return Err(ZeroTrieBuildError::CouldNotSolvePerfectHash);
                             } else {
                                 p += 1;
                                 continue 'p_loop;
@@ -117,7 +122,8 @@ impl PerfectByteHashMap<Vec<u8>> {
     /// Computes a new [`PerfectByteHashMap`].
     ///
     /// (this is a doc-hidden API)
-    pub fn try_new(keys: &[u8]) -> Result<Self, Error> {
+    #[allow(clippy::indexing_slicing)] // carefully reviewed to not panic
+    pub fn try_new(keys: &[u8]) -> Result<Self, ZeroTrieBuildError> {
         let n_usize = keys.len();
         let n = n_usize as u8;
         let (p, mut qq) = find(keys)?;
@@ -156,9 +162,10 @@ mod tests {
     fn random_alphanums(seed: u64, len: usize) -> Vec<u8> {
         use rand::seq::SliceRandom;
         use rand::SeedableRng;
-        const BYTES: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let mut bytes: Vec<u8> =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".into();
         let mut rng = rand_pcg::Lcg64Xsh32::seed_from_u64(seed);
-        BYTES.choose_multiple(&mut rng, len).copied().collect()
+        bytes.partial_shuffle(&mut rng, len).0.into()
     }
 
     #[test]
@@ -185,8 +192,8 @@ mod tests {
 
         assert_eq!(2500, fast_p);
         assert_eq!(0, slow_p);
-        assert_eq!(61247, fast_q);
-        assert_eq!(3, slow_q);
+        assert_eq!(61243, fast_q);
+        assert_eq!(7, slow_q);
 
         let bytes = random_alphanums(0, 16);
 

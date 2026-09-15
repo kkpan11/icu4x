@@ -2,9 +2,6 @@
   "main": {
     "en-ZA": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "en",
         "territory": "ZA"
       },
@@ -15,8 +12,10 @@
         },
         "minimumGroupingDigits": "1",
         "symbols-numberSystem-latn": {
-          "decimal": ".",
-          "group": ",",
+          "decimal": ",",
+          "decimal-alt-us": ".",
+          "group": " ",
+          "group-alt-us": ",",
           "list": ";",
           "percentSign": "%",
           "plusSign": "+",
@@ -88,6 +87,12 @@
             }
           }
         },
+        "rationalFormats-numberSystem-latn": {
+          "rationalPattern": "{0}⁄{1}",
+          "integerAndRationalPattern": "{0} {1}",
+          "integerAndRationalPattern-alt-superSub": "{0}⁠{1}",
+          "rationalUsage": "sometimes"
+        },
         "scientificFormats-numberSystem-latn": {
           "standard": "#E0"
         },
@@ -108,7 +113,7 @@
             }
           },
           "standard": "¤#,##0.00",
-          "standard-alphaNextToNumber": "¤ #,##0.00",
+          "standard-alphaNextToNumber": "¤#,##0.00",
           "standard-noCurrency": "#,##0.00",
           "accounting": "¤#,##0.00;(¤#,##0.00)",
           "accounting-alphaNextToNumber": "¤ #,##0.00;(¤ #,##0.00)",
@@ -176,12 +181,12 @@
           "range": "{0}–{1}"
         },
         "minimalPairs": {
-          "pluralMinimalPairs-count-one": "{0} day",
-          "pluralMinimalPairs-count-other": "{0} days",
-          "few": "Take the {0}rd right.",
-          "one": "Take the {0}st right.",
-          "other": "Take the {0}th right.",
-          "two": "Take the {0}nd right."
+          "pluralMinimalPairs-count-one": "{0} day",
+          "pluralMinimalPairs-count-other": "{0} days",
+          "one": "Take the {0}st right.",
+          "two": "Take the {0}nd right.",
+          "few": "Take the {0}rd right.",
+          "other": "Take the {0}th right."
         }
       }
     }

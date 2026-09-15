@@ -3,6 +3,8 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use icu_casemap::CaseMapper;
+use icu_casemap::options::{TitlecaseOptions, TrailingCase};
+
 use icu_locale_core::langid;
 
 #[test]
@@ -238,127 +240,147 @@ fn test_armenian() {
 fn test_dutch() {
     let cm = CaseMapper::new();
     let nl = langid!("nl");
-    let default_options = Default::default();
 
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ijssel", &nl, default_options),
-        "IJssel"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("igloo", &nl, default_options),
-        "Igloo"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("IJMUIDEN", &nl, default_options),
-        "IJmuiden"
-    );
+    for trailing_case in [TrailingCase::Unchanged, TrailingCase::Lower] {
+        let mut default_options = TitlecaseOptions::default();
+        default_options.trailing_case = Some(trailing_case);
 
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ij", &nl, default_options),
-        "IJ"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("IJ", &nl, default_options),
-        "IJ"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íj́", &nl, default_options),
-        "ÍJ́"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ÍJ́", &nl, default_options),
-        "ÍJ́"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íJ́", &nl, default_options),
-        "ÍJ́"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("Ij́", &nl, default_options),
-        "Ij́"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ij́", &nl, default_options),
-        "Ij́"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ïj́", &nl, default_options),
-        "Ïj́"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íj\u{0308}", &nl, default_options),
-        "Íj\u{0308}"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íj́\u{1D16E}", &nl, default_options),
-        "Íj́\u{1D16E}"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íj\u{1ABE}", &nl, default_options),
-        "Íj\u{1ABE}"
-    );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ijssel", &nl, default_options),
+            "IJssel"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("igloo", &nl, default_options),
+            "Igloo"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("IJMUIDEN", &nl, default_options),
+            if trailing_case == TrailingCase::Lower {
+                "IJmuiden"
+            } else {
+                "IJMUIDEN"
+            }
+        );
 
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ijabc", &nl, default_options),
-        "IJabc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("IJabc", &nl, default_options),
-        "IJabc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íj́abc", &nl, default_options),
-        "ÍJ́abc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ÍJ́abc", &nl, default_options),
-        "ÍJ́abc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íJ́abc", &nl, default_options),
-        "ÍJ́abc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("Ij́abc", &nl, default_options),
-        "Ij́abc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ij́abc", &nl, default_options),
-        "Ij́abc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("ïj́abc", &nl, default_options),
-        "Ïj́abc"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íjabc\u{0308}", &nl, default_options),
-        "Íjabc\u{0308}"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íj́abc\u{1D16E}", &nl, default_options),
-        "ÍJ́abc\u{1D16E}"
-    );
-    assert_eq!(
-        cm.titlecase_segment_with_only_case_data_to_string("íjabc\u{1ABE}", &nl, default_options),
-        "Íjabc\u{1ABE}"
-    );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ij", &nl, default_options),
+            "IJ"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("IJ", &nl, default_options),
+            "IJ"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íj́", &nl, default_options),
+            "ÍJ́"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ÍJ́", &nl, default_options),
+            "ÍJ́"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íJ́", &nl, default_options),
+            "ÍJ́"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("Ij́", &nl, default_options),
+            "Ij́"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ij́", &nl, default_options),
+            "Ij́"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ïj́", &nl, default_options),
+            "Ïj́"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íj\u{0308}", &nl, default_options),
+            "Íj\u{0308}"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íj́\u{1D16E}", &nl, default_options),
+            "Íj́\u{1D16E}"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íj\u{1ABE}", &nl, default_options),
+            "Íj\u{1ABE}"
+        );
+
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ijabc", &nl, default_options),
+            "IJabc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("IJabc", &nl, default_options),
+            "IJabc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íj́abc", &nl, default_options),
+            "ÍJ́abc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ÍJ́abc", &nl, default_options),
+            "ÍJ́abc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("íJ́abc", &nl, default_options),
+            "ÍJ́abc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("Ij́abc", &nl, default_options),
+            "Ij́abc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ij́abc", &nl, default_options),
+            "Ij́abc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string("ïj́abc", &nl, default_options),
+            "Ïj́abc"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string(
+                "íjabc\u{0308}",
+                &nl,
+                default_options
+            ),
+            "Íjabc\u{0308}"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string(
+                "íj́abc\u{1D16E}",
+                &nl,
+                default_options
+            ),
+            "ÍJ́abc\u{1D16E}"
+        );
+        assert_eq!(
+            cm.titlecase_segment_with_only_case_data_to_string(
+                "íjabc\u{1ABE}",
+                &nl,
+                default_options
+            ),
+            "Íjabc\u{1ABE}"
+        );
+    }
 }
 
 #[test]
 fn test_greek_upper() {
-    let nfc = icu_normalizer::ComposingNormalizer::new_nfc();
-    let nfd = icu_normalizer::DecomposingNormalizer::new_nfd();
+    let nfc = icu_normalizer::ComposingNormalizerBorrowed::new_nfc();
+    let nfd = icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
 
     let cm = CaseMapper::new();
     let modern_greek = &langid!("el");
 
     let assert_greek_uppercase = |input: &str, expected: &str| {
         assert_eq!(
-            cm.uppercase_to_string(nfc.normalize(input).as_str(), modern_greek),
+            cm.uppercase_to_string(nfc.normalize(input).as_ref(), modern_greek),
             nfc.normalize(expected)
         );
         assert_eq!(
-            cm.uppercase_to_string(nfd.normalize(input).as_str(), modern_greek),
+            cm.uppercase_to_string(nfd.normalize(input).as_ref(), modern_greek),
             nfd.normalize(expected)
         );
     };

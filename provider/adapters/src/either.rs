@@ -5,6 +5,8 @@
 //! Helpers for switching between multiple providers.
 
 use alloc::collections::BTreeSet;
+#[cfg(feature = "export")]
+use icu_provider::export::ExportableProvider;
 use icu_provider::prelude::*;
 
 /// A provider that is one of two types determined at runtime.
@@ -18,17 +20,6 @@ pub enum EitherProvider<P0, P1> {
     A(P0),
     /// A value of type `P1`.
     B(P1),
-}
-
-impl<P0: AnyProvider, P1: AnyProvider> AnyProvider for EitherProvider<P0, P1> {
-    #[inline]
-    fn load_any(&self, marker: DataMarkerInfo, req: DataRequest) -> Result<AnyResponse, DataError> {
-        use EitherProvider::*;
-        match self {
-            A(p) => p.load_any(marker, req),
-            B(p) => p.load_any(marker, req),
-        }
-    }
 }
 
 impl<M: DynamicDataMarker, P0: DynamicDataProvider<M>, P1: DynamicDataProvider<M>>
@@ -91,17 +82,14 @@ impl<M: DataMarker, P0: DryDataProvider<M>, P1: DryDataProvider<M>> DryDataProvi
     }
 }
 
-impl<
-        M: DynamicDataMarker,
-        P0: IterableDynamicDataProvider<M>,
-        P1: IterableDynamicDataProvider<M>,
-    > IterableDynamicDataProvider<M> for EitherProvider<P0, P1>
+impl<M: DynamicDataMarker, P0: IterableDynamicDataProvider<M>, P1: IterableDynamicDataProvider<M>>
+    IterableDynamicDataProvider<M> for EitherProvider<P0, P1>
 {
     #[inline]
     fn iter_ids_for_marker(
         &self,
         marker: DataMarkerInfo,
-    ) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    ) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         use EitherProvider::*;
         match self {
             A(p) => p.iter_ids_for_marker(marker),
@@ -114,11 +102,26 @@ impl<M: DataMarker, P0: IterableDataProvider<M>, P1: IterableDataProvider<M>>
     IterableDataProvider<M> for EitherProvider<P0, P1>
 {
     #[inline]
-    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         use EitherProvider::*;
         match self {
             A(p) => p.iter_ids(),
             B(p) => p.iter_ids(),
+        }
+    }
+}
+
+#[cfg(feature = "export")]
+impl<P0, P1> ExportableProvider for EitherProvider<P0, P1>
+where
+    P0: ExportableProvider,
+    P1: ExportableProvider,
+{
+    fn supported_markers(&self) -> BTreeSet<DataMarkerInfo> {
+        use EitherProvider::*;
+        match self {
+            A(p) => p.supported_markers(),
+            B(p) => p.supported_markers(),
         }
     }
 }

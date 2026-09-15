@@ -3,10 +3,10 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use super::*;
-use crate::ule::{AsULE, EncodeAsVarULE, VarULE};
-use crate::{VarZeroVec, ZeroSlice, ZeroVec, ZeroVecError};
-use alloc::borrow::Borrow;
+use crate::ule::{AsULE, EncodeAsVarULE, UleError, VarULE};
+use crate::{VarZeroVec, ZeroSlice, ZeroVec};
 use alloc::boxed::Box;
+use core::borrow::Borrow;
 use core::cmp::Ordering;
 use core::fmt;
 use core::iter::FromIterator;
@@ -296,9 +296,9 @@ where
     > {
         (0..self.keys.zvl_len()).map(move |idx| {
             (
-                #[allow(clippy::unwrap_used)] // idx is in-range
+                #[expect(clippy::unwrap_used)] // idx is in-range
                 self.keys.zvl_get(idx).unwrap(),
-                #[allow(clippy::unwrap_used)] // idx is in-range
+                #[expect(clippy::unwrap_used)] // idx is in-range
                 self.values.zvl_get(idx).unwrap(),
             )
         })
@@ -308,7 +308,7 @@ where
     pub fn iter_keys<'b>(
         &'b self,
     ) -> impl ExactSizeIterator<Item = &'b <K as ZeroMapKV<'a>>::GetType> {
-        #[allow(clippy::unwrap_used)] // idx is in-range
+        #[expect(clippy::unwrap_used)] // idx is in-range
         (0..self.keys.zvl_len()).map(move |idx| self.keys.zvl_get(idx).unwrap())
     }
 
@@ -316,7 +316,7 @@ where
     pub fn iter_values<'b>(
         &'b self,
     ) -> impl ExactSizeIterator<Item = &'b <V as ZeroMapKV<'a>>::GetType> {
-        #[allow(clippy::unwrap_used)] // idx is in-range
+        #[expect(clippy::unwrap_used)] // idx is in-range
         (0..self.values.zvl_len()).map(move |idx| self.values.zvl_get(idx).unwrap())
     }
 }
@@ -352,7 +352,7 @@ where
     /// # Panics
     ///
     /// Panics if `K::ULE` and `P::ULE` are not the same size.
-    pub fn try_convert_zv_k_unchecked<P>(self) -> Result<ZeroMap<'a, P, V>, ZeroVecError>
+    pub fn try_convert_zv_k_unchecked<P>(self) -> Result<ZeroMap<'a, P, V>, UleError>
     where
         P: AsULE + ZeroMapKV<'a, Container = ZeroVec<'a, P>>,
     {
@@ -394,7 +394,7 @@ where
     /// # Panics
     ///
     /// Panics if `V::ULE` and `P::ULE` are not the same size.
-    pub fn try_convert_zv_v_unchecked<P>(self) -> Result<ZeroMap<'a, K, P>, ZeroVecError>
+    pub fn try_convert_zv_v_unchecked<P>(self) -> Result<ZeroMap<'a, K, P>, UleError>
     where
         P: AsULE + ZeroMapKV<'a, Container = ZeroVec<'a, P>>,
     {
@@ -411,7 +411,7 @@ where
     V: ZeroMapKV<'a, Container = VarZeroVec<'a, V>> + ?Sized,
     V: VarULE,
 {
-    /// Same as `insert()`, but allows using [EncodeAsVarULE](crate::ule::EncodeAsVarULE)
+    /// Same as `insert()`, but allows using [`EncodeAsVarULE`](crate::ule::EncodeAsVarULE)
     /// types with the value to avoid an extra allocation when dealing with custom ULE types.
     ///
     /// ```rust
@@ -446,7 +446,7 @@ where
     pub fn insert_var_v<VE: EncodeAsVarULE<V>>(&mut self, key: &K, value: &VE) -> Option<Box<V>> {
         match self.keys.zvl_binary_search(key) {
             Ok(index) => {
-                #[allow(clippy::unwrap_used)] // binary search
+                #[expect(clippy::unwrap_used)] // binary search
                 let ret = self.values.get(index).unwrap().to_boxed();
                 self.values.make_mut().replace(index, value);
                 Some(ret)
@@ -512,7 +512,7 @@ where
         let ule = self.values.zvl_get(index)?;
         let mut result = Option::<V>::None;
         V::Container::zvl_get_as_t(ule, |v| result.replace(*v));
-        #[allow(clippy::unwrap_used)] // `zvl_get_as_t` guarantees that the callback is invoked
+        #[expect(clippy::unwrap_used)] // `zvl_get_as_t` guarantees that the callback is invoked
         Some(result.unwrap())
     }
 }
@@ -529,9 +529,9 @@ where
     ) -> impl Iterator<Item = (&'b <K as ZeroMapKV<'a>>::GetType, V)> {
         (0..self.keys.zvl_len()).map(move |idx| {
             (
-                #[allow(clippy::unwrap_used)] // idx in 0..keys.zvl_len()
+                #[expect(clippy::unwrap_used)] // idx in 0..keys.zvl_len()
                 self.keys.zvl_get(idx).unwrap(),
-                #[allow(clippy::unwrap_used)] // idx in 0..keys.zvl_len() = values.zvl_len()
+                #[expect(clippy::unwrap_used)] // idx in 0..keys.zvl_len() = values.zvl_len()
                 ZeroSlice::get(&*self.values, idx).unwrap(),
             )
         })
@@ -545,15 +545,14 @@ where
 {
     /// Similar to [`Self::iter()`] except it returns a direct copy of the keys values instead of references
     /// to `K::ULE` and `V::ULE`, in cases when `K` and `V` are fixed-size
-    #[allow(clippy::needless_lifetimes)] // Lifetime is necessary in impl Trait
     pub fn iter_copied<'b>(&'b self) -> impl Iterator<Item = (K, V)> + 'b {
         let keys = &self.keys;
         let values = &self.values;
         (0..keys.len()).map(move |idx| {
             (
-                #[allow(clippy::unwrap_used)] // idx in 0..keys.zvl_len()
+                #[expect(clippy::unwrap_used)] // idx in 0..keys.zvl_len()
                 ZeroSlice::get(&**keys, idx).unwrap(),
-                #[allow(clippy::unwrap_used)] // idx in 0..keys.zvl_len() = values.zvl_len()
+                #[expect(clippy::unwrap_used)] // idx in 0..keys.zvl_len() = values.zvl_len()
                 ZeroSlice::get(&**values, idx).unwrap(),
             )
         })

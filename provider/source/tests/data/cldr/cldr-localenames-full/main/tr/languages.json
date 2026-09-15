@@ -2,9 +2,6 @@
   "main": {
     "tr": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "tr"
       },
       "localeDisplayNames": {
@@ -54,7 +51,6 @@
           "awa": "Awadhi",
           "ay": "Aymara",
           "az": "Azerbaycan dili",
-          "az-alt-short": "Azerbaycan dili",
           "az-Arab": "Güney Azerice",
           "ba": "Başkırtça",
           "bal": "Beluçça",
@@ -81,6 +77,7 @@
           "bjn": "Banjar Dili",
           "bkm": "Kom",
           "bla": "Karaayak dili",
+          "blo": "Aniice",
           "bm": "Bambara",
           "bn": "Bengalce",
           "bo": "Tibetçe",
@@ -223,7 +220,6 @@
           "gmh": "Ortaçağ Yüksek Almancası",
           "gn": "Guarani dili",
           "goh": "Eski Yüksek Almanca",
-          "gom": "Goa Konkanicesi",
           "gon": "Gondi dili",
           "gor": "Gorontalo dili",
           "got": "Gotça",
@@ -329,11 +325,14 @@
           "ksf": "Bafia",
           "ksh": "Köln lehçesi",
           "ku": "Kürtçe",
+          "ku-menu-core": "Kürtçe",
+          "ku-menu-extension": "Kurmanci",
           "kum": "Kumukça",
           "kut": "Kutenai dili",
           "kv": "Komi",
           "kw": "Kernevekçe",
           "kwk": "Kwakʼwala dili",
+          "kxv": "Kuvi",
           "ky": "Kırgızca",
           "la": "Latince",
           "lad": "Ladino",
@@ -630,6 +629,7 @@
           "vi": "Vietnamca",
           "vls": "Batı Flamanca",
           "vmf": "Main Frankonya Dili",
+          "vmw": "Makuaca",
           "vo": "Volapük",
           "vot": "Votça",
           "vro": "Võro",
@@ -645,6 +645,7 @@
           "xal": "Kalmıkça",
           "xh": "Zosa dili",
           "xmf": "Megrelce",
+          "xnr": "Kangrice",
           "xog": "Soga",
           "yao": "Yao",
           "yap": "Yapça",

@@ -6,13 +6,11 @@ use rand::SeedableRng;
 use rand_distr::{Distribution, Triangular};
 use rand_pcg::Lcg64Xsh32;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
-use fixed_decimal::FixedDecimal;
-use icu_decimal::provider::DecimalSymbolsV1Marker;
-use icu_decimal::FixedDecimalFormatter;
-use icu_locale_core::Locale;
-use icu_provider_adapters::any_payload::AnyPayloadProvider;
+use icu_decimal::input::Decimal;
+use icu_decimal::{DecimalFormatter, DecimalFormatterPreferences};
+use icu_locale_core::locale;
 
 fn triangular_nums(range: f64) -> Vec<isize> {
     // Use Lcg64Xsh32, a small, fast PRNG.
@@ -27,20 +25,17 @@ fn triangular_nums(range: f64) -> Vec<isize> {
 
 fn overview_bench(c: &mut Criterion) {
     let nums = triangular_nums(1e9);
-    let provider = AnyPayloadProvider::new_default::<DecimalSymbolsV1Marker>();
+    let locale = locale!("en-US");
+    let prefs = DecimalFormatterPreferences::from(&locale);
+    let options = Default::default();
     c.bench_function("icu_decimal/overview", |b| {
         b.iter(|| {
             // This benchmark demonstrates the performance of the format function on 1000 numbers
             // ranging from -1e9 to 1e9.
-            let fdf = FixedDecimalFormatter::try_new_unstable(
-                &provider,
-                &Locale::UND.into(),
-                Default::default(),
-            )
-            .unwrap();
+            let formatter = DecimalFormatter::try_new(prefs, options).unwrap();
             for &num in &nums {
-                let fd = FixedDecimal::from(black_box(num));
-                fdf.format_to_string(&fd);
+                let decimal = Decimal::from(black_box(num));
+                formatter.format_to_string(&decimal);
             }
         });
     });

@@ -2,12 +2,14 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::parser::{ParseError, SubtagIterator};
+use crate::parser::ParseError;
+use crate::parser::SubtagIterator;
 use crate::shortvec::{ShortBoxSlice, ShortBoxSliceIntoIter};
-use crate::subtags::{subtag, Subtag};
+use crate::subtags::{Subtag, subtag};
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
+#[cfg(feature = "alloc")]
 use core::str::FromStr;
-use writeable::Writeable;
 
 /// A value used in a list of [`Keywords`](super::Keywords).
 ///
@@ -20,7 +22,7 @@ use writeable::Writeable;
 /// # Examples
 ///
 /// ```
-/// use icu::locale::extensions::unicode::{value, Value};
+/// use icu::locale::extensions::unicode::{Value, value};
 /// use writeable::assert_writeable_eq;
 ///
 /// assert_writeable_eq!(value!("gregory"), "gregory");
@@ -48,6 +50,12 @@ impl Value {
     ///
     /// Value::try_from_str("buddhist").expect("Parsing failed.");
     /// ```
+    ///
+    /// # `alloc` Cargo feature
+    ///
+    /// Without the `alloc` Cargo feature, this only supports parsing
+    /// up to two (non-`true`) subtags, and will return an error for
+    /// longer strings.
     #[inline]
     pub fn try_from_str(s: &str) -> Result<Self, ParseError> {
         Self::try_from_utf8(s.as_bytes())
@@ -61,7 +69,16 @@ impl Value {
             for chunk in SubtagIterator::new(code_units) {
                 let subtag = Subtag::try_from_utf8(chunk)?;
                 if subtag != TRUE_VALUE {
+                    #[cfg(feature = "alloc")]
                     v.push(subtag);
+                    #[cfg(not(feature = "alloc"))]
+                    if v.is_empty() {
+                        v = ShortBoxSlice::new_single(subtag);
+                    } else if let &[prev] = &*v {
+                        v = ShortBoxSlice::new_double(prev, subtag);
+                    } else {
+                        return Err(ParseError::InvalidSubtag);
+                    }
                 }
             }
         }
@@ -74,13 +91,11 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use core::str::FromStr;
     /// use icu::locale::extensions::unicode::Value;
-    /// use std::str::FromStr;
     ///
-    /// let value1 = Value::from_str("foo")
-    ///     .expect("failed to parse a Value");
-    /// let value2 = Value::from_str("foo-bar")
-    ///     .expect("failed to parse a Value");
+    /// let value1 = Value::from_str("foo").expect("failed to parse a Value");
+    /// let value2 = Value::from_str("foo-bar").expect("failed to parse a Value");
     ///
     /// assert!(value1.as_single_subtag().is_some());
     /// assert!(value2.as_single_subtag().is_none());
@@ -95,13 +110,11 @@ impl Value {
     /// # Examples
     ///
     /// ```
+    /// use core::str::FromStr;
     /// use icu::locale::extensions::unicode::Value;
-    /// use std::str::FromStr;
     ///
-    /// let value1 = Value::from_str("foo")
-    ///     .expect("failed to parse a Value");
-    /// let value2 = Value::from_str("foo-bar")
-    ///     .expect("failed to parse a Value");
+    /// let value1 = Value::from_str("foo").expect("failed to parse a Value");
+    /// let value2 = Value::from_str("foo-bar").expect("failed to parse a Value");
     ///
     /// assert!(value1.into_single_subtag().is_some());
     /// assert!(value2.into_single_subtag().is_none());
@@ -117,21 +130,25 @@ impl Value {
 
     /// Appends a subtag to the back of a [`Value`].
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{
-    ///     extensions::unicode::Value,
-    ///     subtags::subtag,
-    /// };
+    /// use icu::locale::{extensions::unicode::Value, subtags::subtag};
     ///
     /// let mut v = Value::default();
     /// v.push_subtag(subtag!("foo"));
+    /// // The `true` subtag is ignored
+    /// v.push_subtag(subtag!("true"));
     /// v.push_subtag(subtag!("bar"));
     /// assert_eq!(v, "foo-bar");
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn push_subtag(&mut self, subtag: Subtag) {
-        self.0.push(subtag);
+        if subtag != TRUE_VALUE {
+            self.0.push(subtag);
+        }
     }
 
     /// Returns the number of subtags in the [`Value`].
@@ -139,10 +156,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{
-    ///     extensions::unicode::Value,
-    ///     subtags::subtag,
-    /// };
+    /// use icu::locale::{extensions::unicode::Value, subtags::subtag};
     ///
     /// let mut v = Value::default();
     /// assert_eq!(v.subtag_count(), 0);
@@ -153,18 +167,28 @@ impl Value {
         self.0.len()
     }
 
+    /// Creates an empty [`Value`], which corresponds to a "true" value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use icu::locale::extensions::unicode::{Value, value};
+    ///
+    /// assert_eq!(value!("true"), Value::new_empty());
+    /// ```
+    pub const fn new_empty() -> Self {
+        Self(ShortBoxSlice::new())
+    }
+
     /// Returns `true` if the Value has no subtags.
     ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{
-    ///     extensions::unicode::Value,
-    ///     subtags::subtag,
-    /// };
+    /// use icu::locale::{extensions::unicode::Value, subtags::subtag};
     ///
     /// let mut v = Value::default();
-    /// assert_eq!(v.is_empty(), true);
+    /// assert!(v.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -176,10 +200,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{
-    ///     extensions::unicode::Value,
-    ///     subtags::subtag,
-    /// };
+    /// use icu::locale::{extensions::unicode::Value, subtags::subtag};
     /// let mut v = Value::default();
     /// v.push_subtag(subtag!("foo"));
     /// v.push_subtag(subtag!("bar"));
@@ -202,10 +223,7 @@ impl Value {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{
-    ///     extensions::unicode::Value,
-    ///     subtags::subtag,
-    /// };
+    /// use icu::locale::{extensions::unicode::Value, subtags::subtag};
     /// let mut v = Value::default();
     /// v.push_subtag(subtag!("foo"));
     /// v.push_subtag(subtag!("bar"));
@@ -226,8 +244,14 @@ impl Value {
         }
     }
 
+    #[doc(hidden)]
+    pub fn from_two_subtags(f: Subtag, s: Subtag) -> Self {
+        Self(ShortBoxSlice::new_double(f, s))
+    }
+
     /// A constructor which takes a pre-sorted list of [`Value`] elements.
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
     ///
     /// # Examples
     ///
@@ -247,24 +271,18 @@ impl Value {
     /// Notice: For performance- and memory-constrained environments, it is recommended
     /// for the caller to use [`binary_search`](slice::binary_search) instead of [`sort`](slice::sort)
     /// and [`dedup`](Vec::dedup()).
+    #[cfg(feature = "alloc")]
     pub fn from_vec_unchecked(input: Vec<Subtag>) -> Self {
         Self(input.into())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn from_short_slice_unchecked(input: ShortBoxSlice<Subtag>) -> Self {
         Self(input)
     }
 
-    pub(crate) fn parse_subtag(t: &[u8]) -> Result<Option<Subtag>, ParseError> {
-        Self::parse_subtag_from_utf8_manual_slice(t, 0, t.len())
-    }
-
-    pub(crate) const fn parse_subtag_from_utf8_manual_slice(
-        code_units: &[u8],
-        start: usize,
-        end: usize,
-    ) -> Result<Option<Subtag>, ParseError> {
-        match Subtag::try_from_utf8_manual_slice(code_units, start, end) {
+    pub(crate) const fn parse_subtag_from_utf8(t: &[u8]) -> Result<Option<Subtag>, ParseError> {
+        match Subtag::try_from_utf8(t) {
             Ok(TRUE_VALUE) => Ok(None),
             Ok(s) => Ok(Some(s)),
             Err(_) => Err(ParseError::InvalidSubtag),
@@ -289,12 +307,16 @@ impl IntoIterator for Value {
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl FromIterator<Subtag> for Value {
     fn from_iter<T: IntoIterator<Item = Subtag>>(iter: T) -> Self {
         Self(ShortBoxSlice::from_iter(iter))
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl Extend<Subtag> for Value {
     fn extend<T: IntoIterator<Item = Subtag>>(&mut self, iter: T) {
         for i in iter {
@@ -303,6 +325,8 @@ impl Extend<Subtag> for Value {
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl FromStr for Value {
     type Err = ParseError;
 
@@ -314,7 +338,7 @@ impl FromStr for Value {
 
 impl PartialEq<&str> for Value {
     fn eq(&self, other: &&str) -> bool {
-        self.writeable_cmp_bytes(other.as_bytes()).is_eq()
+        writeable::cmp_utf8(self, other.as_bytes()).is_eq()
     }
 }
 
@@ -327,8 +351,8 @@ impl_writeable_for_subtag_list!(Value, "islamic", "civil");
 /// # Examples
 ///
 /// ```
-/// use icu::locale::extensions::unicode::{key, value};
 /// use icu::locale::Locale;
+/// use icu::locale::extensions::unicode::{key, value};
 ///
 /// let loc: Locale = "de-u-ca-buddhist".parse().unwrap();
 ///
@@ -342,24 +366,16 @@ impl_writeable_for_subtag_list!(Value, "islamic", "civil");
 #[macro_export]
 #[doc(hidden)] // macro
 macro_rules! extensions_unicode_value {
-    ($value:literal) => {{
-        // What we want:
-        // const R: $crate::extensions::unicode::Value =
-        //     match $crate::extensions::unicode::Value::try_from_single_subtag($value.as_bytes()) {
-        //         Ok(r) => r,
-        //         #[allow(clippy::panic)] // const context
-        //         _ => panic!(concat!("Invalid Unicode extension value: ", $value)),
-        //     };
-        // Workaround until https://github.com/rust-lang/rust/issues/73255 lands:
-        const R: $crate::extensions::unicode::Value =
+    ($value:literal) => {
+        const {
             $crate::extensions::unicode::Value::from_subtag(
                 match $crate::subtags::Subtag::try_from_utf8($value.as_bytes()) {
                     Ok(r) => Some(r),
                     _ => panic!(concat!("Invalid Unicode extension value: ", $value)),
                 },
-            );
-        R
-    }};
+            )
+        }
+    };
 }
 #[doc(inline)]
 pub use extensions_unicode_value as value;

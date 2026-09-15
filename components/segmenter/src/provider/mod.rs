@@ -15,13 +15,18 @@
 // Provider structs must be stable
 #![allow(clippy::exhaustive_structs, clippy::exhaustive_enums)]
 
-mod lstm;
-pub use lstm::*;
+mod v1;
+pub use v1::*;
+#[cfg(feature = "unstable")]
+#[allow(missing_docs)]
+mod v2;
+#[cfg(feature = "unstable")]
+pub use v2::*;
+mod complex;
+pub use complex::*;
 
-use crate::WordType;
-use icu_collections::codepointtrie::CodePointTrie;
+#[cfg(feature = "datagen")]
 use icu_provider::prelude::*;
-use zerovec::ZeroVec;
 
 #[cfg(feature = "compiled_data")]
 #[derive(Debug)]
@@ -35,7 +40,7 @@ use zerovec::ZeroVec;
 pub struct Baked;
 
 #[cfg(feature = "compiled_data")]
-#[allow(unused_imports)]
+#[allow(unused_imports, missing_docs)]
 const _: () = {
     use icu_segmenter_data::*;
     pub mod icu {
@@ -43,228 +48,77 @@ const _: () = {
         pub use icu_collections as collections;
     }
     make_provider!(Baked);
-    impl_dictionary_for_word_only_auto_v1_marker!(Baked);
-    impl_dictionary_for_word_line_extended_v1_marker!(Baked);
-    impl_grapheme_cluster_break_data_v2_marker!(Baked);
-    impl_line_break_data_v2_marker!(Baked);
+    impl_segmenter_break_sentence_v1!(Baked);
+    impl_segmenter_dictionary_auto_v1!(Baked);
+    impl_segmenter_break_grapheme_cluster_v1!(Baked);
+    impl_segmenter_dictionary_extended_v1!(Baked);
+    impl_segmenter_break_line_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_line_v3!(Baked);
     #[cfg(feature = "lstm")]
-    impl_lstm_for_word_line_auto_v1_marker!(Baked);
-    impl_sentence_break_data_v2_marker!(Baked);
-    impl_word_break_data_v2_marker!(Baked);
+    impl_segmenter_lstm_auto_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_unihan_radical_v1!(Baked);
+    impl_segmenter_break_word_v1!(Baked);
+    impl_segmenter_break_word_override_v1!(Baked);
+    impl_segmenter_break_sentence_override_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_line_v2!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_word_v2!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_sentence_v2!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_grapheme_cluster_v2!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_line_override_v2!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_segmenter_break_sentence_override_v2!(Baked);
 };
 
 #[cfg(feature = "datagen")]
 /// The latest minimum set of markers required by this component.
 pub const MARKERS: &[DataMarkerInfo] = &[
-    DictionaryForWordLineExtendedV1Marker::INFO,
-    DictionaryForWordOnlyAutoV1Marker::INFO,
-    GraphemeClusterBreakDataV2Marker::INFO,
-    LineBreakDataV2Marker::INFO,
-    LstmForWordLineAutoV1Marker::INFO,
-    SentenceBreakDataV2Marker::INFO,
-    WordBreakDataV2Marker::INFO,
+    SegmenterBreakGraphemeClusterV1::INFO,
+    SegmenterBreakLineV1::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakLineV3::INFO,
+    SegmenterBreakSentenceOverrideV1::INFO,
+    SegmenterBreakSentenceV1::INFO,
+    SegmenterBreakWordOverrideV1::INFO,
+    SegmenterBreakWordV1::INFO,
+    SegmenterDictionaryAutoV1::INFO,
+    SegmenterDictionaryExtendedV1::INFO,
+    SegmenterLstmAutoV1::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterUnihanRadicalV1::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakLineV2::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakWordV2::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakSentenceV2::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakGraphemeClusterV2::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakLineOverrideV2::INFO,
+    #[cfg(feature = "unstable")]
+    SegmenterBreakSentenceOverrideV2::INFO,
 ];
 
-/// Pre-processed Unicode data in the form of tables to be used for rule-based breaking.
-///
-/// <div class="stab unstable">
-/// 🚧 This code is considered unstable; it may change at any time, in breaking or non-breaking ways,
-/// including in SemVer minor releases. While the serde representation of data structs is guaranteed
-/// to be stable, their Rust representation might not be. Use with caution.
-/// </div>
-#[icu_provider::data_struct(
-    marker(LineBreakDataV2Marker, "segmenter/line@2", singleton),
-    marker(WordBreakDataV2Marker, "segmenter/word@2", singleton),
-    marker(GraphemeClusterBreakDataV2Marker, "segmenter/grapheme@2", singleton),
-    marker(SentenceBreakDataV2Marker, "segmenter/sentence@2", singleton)
-)]
-#[derive(Debug, PartialEq, Clone)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(serde::Serialize,databake::Bake),
-    databake(path = icu_segmenter::provider),
-)]
+/// A complex script that requires special handling in the segmenter.
+#[allow(missing_docs)] // trivial
+#[zerovec::make_ule(ComplexScriptULE)]
+#[derive(PartialEq, Debug, Copy, Clone, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
-pub struct RuleBreakDataV2<'data> {
-    /// Property table.
-    #[cfg_attr(feature = "serde", serde(borrow))]
-    pub property_table: CodePointTrie<'data, u8>,
-
-    /// Break state table.
-    #[cfg_attr(feature = "serde", serde(borrow))]
-    pub break_state_table: ZeroVec<'data, BreakState>,
-
-    /// Word type table. Only used for word segmenter.
-    #[cfg_attr(feature = "serde", serde(borrow, rename = "rule_status_table"))]
-    pub word_type_table: ZeroVec<'data, WordType>,
-
-    /// Number of properties; should be the square root of the length of [`Self::break_state_table`].
-    pub property_count: u8,
-
-    /// The index of the last simple state for [`Self::break_state_table`]. (A simple state has no
-    /// `left` nor `right` in SegmenterProperty).
-    pub last_codepoint_property: u8,
-
-    /// The index of SOT (start of text) state for [`Self::break_state_table`].
-    pub sot_property: u8,
-
-    /// The index of EOT (end of text) state [`Self::break_state_table`].
-    pub eot_property: u8,
-
-    /// The index of "SA" state (or 127 if the complex language isn't handled) for
-    /// [`Self::break_state_table`].
-    pub complex_property: u8,
-}
-
-/// char16trie data for dictionary break
-///
-/// <div class="stab unstable">
-/// 🚧 This code is considered unstable; it may change at any time, in breaking or non-breaking ways,
-/// including in SemVer minor releases. While the serde representation of data structs is guaranteed
-/// to be stable, their Rust representation might not be. Use with caution.
-/// </div>
-#[icu_provider::data_struct(
-    DictionaryForWordOnlyAutoV1Marker = "segmenter/dictionary/w_auto@1",
-    DictionaryForWordLineExtendedV1Marker = "segmenter/dictionary/wl_ext@1"
-)]
-#[derive(Debug, PartialEq, Clone)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(serde::Serialize,databake::Bake),
-    databake(path = icu_segmenter::provider),
-)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
-pub struct UCharDictionaryBreakDataV1<'data> {
-    /// Dictionary data of char16trie.
-    #[cfg_attr(feature = "serde", serde(borrow))]
-    pub trie_data: ZeroVec<'data, u16>,
-}
-
-pub(crate) struct UCharDictionaryBreakDataV1Marker;
-
-impl DynamicDataMarker for UCharDictionaryBreakDataV1Marker {
-    type Yokeable = UCharDictionaryBreakDataV1<'static>;
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(databake::Bake),
-    databake(path = icu_segmenter::provider),
-)]
-/// Break state
-///
-/// <div class="stab unstable">
-/// 🚧 This code is considered unstable; it may change at any time, in breaking or non-breaking ways,
-/// including in SemVer minor releases. In particular, the `DataProvider` implementations are only
-/// guaranteed to match with this version's `*_unstable` providers. Use with caution.
-/// </div>
-pub enum BreakState {
-    /// Break
-    Break,
-    /// Keep rule
-    Keep,
-    /// Non-matching rule
-    NoMatch,
-    /// We have to look ahead one more character.
-    Intermediate(u8),
-    /// Index of a state.
-    Index(u8),
-}
-
-#[cfg(feature = "datagen")]
-impl serde::Serialize for BreakState {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // would be nice to use the derive serde for JSON, but can't break serialization
-        if serializer.is_human_readable() {
-            i8::from_le_bytes([zerovec::ule::AsULE::to_unaligned(*self)]).serialize(serializer)
-        } else {
-            zerovec::ule::AsULE::to_unaligned(*self).serialize(serializer)
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for BreakState {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        if deserializer.is_human_readable() {
-            Ok(zerovec::ule::AsULE::from_unaligned(
-                i8::deserialize(deserializer)?.to_le_bytes()[0],
-            ))
-        } else {
-            u8::deserialize(deserializer).map(zerovec::ule::AsULE::from_unaligned)
-        }
-    }
-}
-
-impl zerovec::ule::AsULE for BreakState {
-    type ULE = u8;
-
-    fn to_unaligned(self) -> Self::ULE {
-        match self {
-            BreakState::Break => 253,
-            BreakState::Keep => 255,
-            BreakState::NoMatch => 254,
-            BreakState::Intermediate(i) => i + 120,
-            BreakState::Index(i) => i,
-        }
-    }
-
-    fn from_unaligned(unaligned: Self::ULE) -> Self {
-        match unaligned {
-            253 => BreakState::Break,
-            255 => BreakState::Keep,
-            254 => BreakState::NoMatch,
-            i if (120..253).contains(&i) => BreakState::Intermediate(i - 120),
-            i => BreakState::Index(i),
-        }
-    }
-}
-
-#[cfg(feature = "datagen")]
-impl serde::Serialize for WordType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        if serializer.is_human_readable() {
-            (*self as u8).serialize(serializer)
-        } else {
-            unreachable!("only used as ULE")
-        }
-    }
-}
-
-#[cfg(feature = "datagen")]
-impl databake::Bake for WordType {
-    fn bake(&self, _crate_env: &databake::CrateEnv) -> databake::TokenStream {
-        unreachable!("only used as ULE")
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for WordType {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        if deserializer.is_human_readable() {
-            use serde::de::Error;
-            match u8::deserialize(deserializer) {
-                Ok(0) => Ok(WordType::None),
-                Ok(1) => Ok(WordType::Number),
-                Ok(2) => Ok(WordType::Letter),
-                Ok(_) => Err(D::Error::custom("invalid value")),
-                Err(e) => Err(e),
-            }
-        } else {
-            unreachable!("only used as ULE")
-        }
-    }
+#[cfg_attr(feature = "datagen", derive(serde::Serialize, databake::Bake))]
+#[cfg_attr(feature = "datagen", databake(path = icu_segmenter::provider))]
+#[repr(u8)]
+pub enum ComplexScript {
+    None = 0,
+    Myanmar = 1,
+    ChineseOrJapanese = 2,
+    Khmer = 3,
+    Lao = 4,
+    Thai = 5,
 }

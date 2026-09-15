@@ -4,6 +4,8 @@
 
 use super::ForkByErrorPredicate;
 use alloc::{collections::BTreeSet, vec::Vec};
+#[cfg(feature = "export")]
+use icu_provider::export::ExportableProvider;
 use icu_provider::prelude::*;
 
 /// A provider that returns data from one of two child providers based on a predicate function.
@@ -11,8 +13,12 @@ use icu_provider::prelude::*;
 /// This is an abstract forking provider that must be provided with a type implementing the
 /// [`ForkByErrorPredicate`] trait.
 ///
-/// [`ForkByErrorProvider`] does not support forking between [`DataProvider`]s. However, it
-/// supports forking between [`AnyProvider`], [`BufferProvider`], and [`DynamicDataProvider`].
+/// This provider supports any data provider trait as long as it is implemented by both
+/// child providers.
+///
+/// Some traits like [`BufferProvider`] work on all markers. However, [`DataProvider<M>`]
+/// is specific to a single marker type `M`. For this reason, [`DataProvider<M>`] is only
+/// implemented if both child providers implement it for the same `M`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ForkByErrorProvider<P0, P1, F>(P0, P1, F);
 
@@ -77,23 +83,6 @@ where
     }
 }
 
-impl<P0, P1, F> AnyProvider for ForkByErrorProvider<P0, P1, F>
-where
-    P0: AnyProvider,
-    P1: AnyProvider,
-    F: ForkByErrorPredicate,
-{
-    fn load_any(&self, marker: DataMarkerInfo, req: DataRequest) -> Result<AnyResponse, DataError> {
-        let result = self.0.load_any(marker, req);
-        match result {
-            Ok(ok) => return Ok(ok),
-            Err(err) if !self.2.test(marker, Some(req), err) => return Err(err),
-            _ => (),
-        };
-        self.1.load_any(marker, req)
-    }
-}
-
 impl<M, P0, P1, F> DynamicDataProvider<M> for ForkByErrorProvider<P0, P1, F>
 where
     M: DynamicDataMarker,
@@ -148,7 +137,7 @@ where
     fn iter_ids_for_marker(
         &self,
         marker: DataMarkerInfo,
-    ) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    ) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         let result = self.0.iter_ids_for_marker(marker);
         match result {
             Ok(ok) => return Ok(ok),
@@ -159,13 +148,31 @@ where
     }
 }
 
+#[cfg(feature = "export")]
+impl<P0, P1, F> ExportableProvider for ForkByErrorProvider<P0, P1, F>
+where
+    P0: ExportableProvider,
+    P1: ExportableProvider,
+    F: ForkByErrorPredicate + Sync,
+{
+    fn supported_markers(&self) -> BTreeSet<DataMarkerInfo> {
+        let mut markers = self.0.supported_markers();
+        markers.extend(self.1.supported_markers());
+        markers
+    }
+}
+
 /// A provider that returns data from the first child provider passing a predicate function.
 ///
 /// This is an abstract forking provider that must be provided with a type implementing the
 /// [`ForkByErrorPredicate`] trait.
 ///
-/// [`MultiForkByErrorProvider`] does not support forking between [`DataProvider`]s. However, it
-/// supports forking between [`AnyProvider`], [`BufferProvider`], and [`DynamicDataProvider`].
+/// This provider supports any data provider trait as long as it is implemented by all
+/// child providers.
+///
+/// Some traits like [`BufferProvider`] work on all markers. However, [`DataProvider<M>`]
+/// is specific to a single marker type `M`. For this reason, [`DataProvider<M>`] is only
+/// implemented if all child providers implement it for the same `M`.
 #[derive(Debug)]
 pub struct MultiForkByErrorProvider<P, F> {
     providers: Vec<P>,
@@ -245,25 +252,6 @@ where
     }
 }
 
-impl<P, F> AnyProvider for MultiForkByErrorProvider<P, F>
-where
-    P: AnyProvider,
-    F: ForkByErrorPredicate,
-{
-    fn load_any(&self, marker: DataMarkerInfo, req: DataRequest) -> Result<AnyResponse, DataError> {
-        let mut last_error = F::UNIT_ERROR.with_marker(marker);
-        for provider in self.providers.iter() {
-            let result = provider.load_any(marker, req);
-            match result {
-                Ok(ok) => return Ok(ok),
-                Err(err) if !self.predicate.test(marker, Some(req), err) => return Err(err),
-                Err(err) => last_error = err,
-            };
-        }
-        Err(last_error)
-    }
-}
-
 impl<M, P, F> DynamicDataProvider<M> for MultiForkByErrorProvider<P, F>
 where
     M: DynamicDataMarker,
@@ -321,7 +309,7 @@ where
     fn iter_ids_for_marker(
         &self,
         marker: DataMarkerInfo,
-    ) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    ) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         let mut last_error = F::UNIT_ERROR.with_marker(marker);
         for provider in self.providers.iter() {
             let result = provider.iter_ids_for_marker(marker);
@@ -332,5 +320,19 @@ where
             };
         }
         Err(last_error)
+    }
+}
+
+#[cfg(feature = "export")]
+impl<P, F> ExportableProvider for MultiForkByErrorProvider<P, F>
+where
+    P: ExportableProvider,
+    F: ForkByErrorPredicate + Sync,
+{
+    fn supported_markers(&self) -> BTreeSet<DataMarkerInfo> {
+        self.providers
+            .iter()
+            .flat_map(|p| p.supported_markers())
+            .collect()
     }
 }

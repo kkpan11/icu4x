@@ -1,46 +1,52 @@
-#ifndef icu4x_CollatorAlternateHandling_D_HPP
-#define icu4x_CollatorAlternateHandling_D_HPP
+#ifndef ICU4X_CollatorAlternateHandling_D_HPP
+#define ICU4X_CollatorAlternateHandling_D_HPP
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <memory>
+#include <functional>
 #include <optional>
-#include "../diplomat_runtime.hpp"
+#include <cstdlib>
+#include "diplomat_runtime.hpp"
 
 
 namespace icu4x {
 namespace capi {
     enum CollatorAlternateHandling {
-      CollatorAlternateHandling_Auto = 0,
-      CollatorAlternateHandling_NonIgnorable = 1,
-      CollatorAlternateHandling_Shifted = 2,
+      CollatorAlternateHandling_NonIgnorable = 0,
+      CollatorAlternateHandling_Shifted = 1,
     };
+
+    typedef struct CollatorAlternateHandling_option {union { CollatorAlternateHandling ok; }; bool is_ok; } CollatorAlternateHandling_option;
 } // namespace capi
 } // namespace
 
 namespace icu4x {
+/**
+ * See the [Rust documentation for `AlternateHandling`](https://docs.rs/icu/2.3.1/icu/collator/options/enum.AlternateHandling.html) for more information.
+ */
 class CollatorAlternateHandling {
 public:
-  enum Value {
-    Auto = 0,
-    NonIgnorable = 1,
-    Shifted = 2,
-  };
+    enum Value {
+        NonIgnorable = 0,
+        Shifted = 1,
+    };
 
-  CollatorAlternateHandling() = default;
-  // Implicit conversions between enum and ::Value
-  constexpr CollatorAlternateHandling(Value v) : value(v) {}
-  constexpr operator Value() const { return value; }
-  // Prevent usage as boolean value
-  explicit operator bool() const = delete;
+    CollatorAlternateHandling(): value(Value::NonIgnorable) {}
 
-  inline icu4x::capi::CollatorAlternateHandling AsFFI() const;
-  inline static icu4x::CollatorAlternateHandling FromFFI(icu4x::capi::CollatorAlternateHandling c_enum);
+    // Implicit conversions between enum and ::Value
+    constexpr CollatorAlternateHandling(Value v) : value(v) {}
+    constexpr operator Value() const { return value; }
+    // Prevent usage as boolean value
+    explicit operator bool() const = delete;
+
+    inline icu4x::capi::CollatorAlternateHandling AsFFI() const;
+    inline static icu4x::CollatorAlternateHandling FromFFI(icu4x::capi::CollatorAlternateHandling c_enum);
 private:
     Value value;
 };
 
 } // namespace
-#endif // icu4x_CollatorAlternateHandling_D_HPP
+#endif // ICU4X_CollatorAlternateHandling_D_HPP

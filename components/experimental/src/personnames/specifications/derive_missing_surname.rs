@@ -5,13 +5,13 @@
 use crate::personnames::api::{NameField, NameFieldKind};
 
 /// Returns a remapped field for missing surname.
-/// https://www.unicode.org/reports/tr35/tr35-personNames.html#handle-missing-surname
+/// <https://www.unicode.org/reports/tr35/tr35-personNames.html#handle-missing-surname>
 pub fn derive_missing_surname(
-    available_name_field: &[&NameField],
-    requested_name_field: &NameField,
+    available_name_field: &[NameField],
+    requested_name_field: NameField,
     requires_given_name: bool,
 ) -> Option<NameField> {
-    return match requested_name_field.kind {
+    match requested_name_field.kind {
         NameFieldKind::Surname | NameFieldKind::Given => {
             let has_surname = available_name_field
                 .iter()
@@ -25,10 +25,10 @@ pub fn derive_missing_surname(
                 }
                 return None;
             }
-            return Some(*requested_name_field);
+            Some(requested_name_field)
         }
-        _ => Some(*requested_name_field),
-    };
+        _ => Some(requested_name_field),
+    }
 }
 
 #[cfg(test)]
@@ -39,11 +39,11 @@ mod tests {
 
     #[test]
     fn test_given_name_unused_no_surname_available_should_be_none_for_given() {
-        let requested_name_field = &NameField {
+        let requested_name_field = NameField {
             kind: Given,
             modifier: Default::default(),
         };
-        let available_name_field = &[&NameField {
+        let available_name_field = &[NameField {
             kind: Given,
             modifier: Default::default(),
         }];
@@ -55,11 +55,11 @@ mod tests {
 
     #[test]
     fn test_given_name_unused_no_surname_available_should_be_some_for_surname_and_swapped() {
-        let requested_name_field = &NameField {
+        let requested_name_field = NameField {
             kind: Surname,
             modifier: Default::default(),
         };
-        let available_name_field = &[&NameField {
+        let available_name_field = &[NameField {
             kind: Given,
             modifier: Default::default(),
         }];
@@ -77,11 +77,11 @@ mod tests {
 
     #[test]
     fn test_given_name_used_no_surname_available_should_be_some() {
-        let requested_name_field = &NameField {
+        let requested_name_field = NameField {
             kind: Given,
             modifier: Default::default(),
         };
-        let available_name_field = &[&NameField {
+        let available_name_field = &[NameField {
             kind: Given,
             modifier: Default::default(),
         }];
@@ -99,16 +99,16 @@ mod tests {
 
     #[test]
     fn test_given_name_used_surname_available_should_be_some() {
-        let requested_name_field = &NameField {
+        let requested_name_field = NameField {
             kind: Given,
             modifier: Default::default(),
         };
         let available_name_field = &[
-            &NameField {
+            NameField {
                 kind: Given,
                 modifier: Default::default(),
             },
-            &NameField {
+            NameField {
                 kind: Surname,
                 modifier: Default::default(),
             },
@@ -127,16 +127,16 @@ mod tests {
 
     #[test]
     fn test_given_name_unused_surname_available_should_be_some() {
-        let requested_name_field = &NameField {
+        let requested_name_field = NameField {
             kind: Given,
             modifier: Default::default(),
         };
         let available_name_field = &[
-            &NameField {
+            NameField {
                 kind: Given,
                 modifier: Default::default(),
             },
-            &NameField {
+            NameField {
                 kind: Surname,
                 modifier: Default::default(),
             },

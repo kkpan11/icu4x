@@ -2,27 +2,19 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+// https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
+// #![cfg_attr(not(any(test, doc)), no_std)]
+// #![cfg_attr(
+//     not(test),
+//     deny(
+//         clippy::indexing_slicing,
+//         clippy::unwrap_used,
+//         clippy::expect_used,
+//         clippy::panic,
+//     )
+// )]
+#![warn(missing_docs)]
+
 //! Tooling for the baked provider.
 
-#![cfg_attr(not(feature = "export"), no_std)]
-
-extern crate alloc;
-
-#[cfg(feature = "export")]
 pub mod export;
-
-pub use icu_provider::prelude::*;
-
-pub mod binary_search;
-pub mod zerotrie;
-
-pub trait DataStore<M: DataMarker> {
-    fn get(
-        &self,
-        req: DataIdentifierBorrowed,
-        attributes_prefix_match: bool,
-    ) -> Option<&'static M::Yokeable>;
-
-    type IterReturn: Iterator<Item = DataIdentifierCow<'static>>;
-    fn iter(&'static self) -> Self::IterReturn;
-}

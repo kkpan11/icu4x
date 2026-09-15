@@ -1,0 +1,576 @@
+{
+  "defaults": [
+    [
+      [
+        1,
+        "Standard"
+      ],
+      "Acre Standart Saati"
+    ],
+    [
+      [
+        7,
+        "Standard"
+      ],
+      "Alaska Standart Saati"
+    ],
+    [
+      [
+        7,
+        "Daylight"
+      ],
+      "Alaska Yaz Saati"
+    ],
+    [
+      [
+        8,
+        "Standard"
+      ],
+      "Amazon Standart Saati"
+    ],
+    [
+      [
+        8,
+        "Daylight"
+      ],
+      "Amazon Yaz Saati"
+    ],
+    [
+      [
+        9,
+        "Standard"
+      ],
+      "Kuzey Amerika Merkezi Standart Saati"
+    ],
+    [
+      [
+        9,
+        "Daylight"
+      ],
+      "Kuzey Amerika Merkezi Yaz Saati"
+    ],
+    [
+      [
+        10,
+        "Standard"
+      ],
+      "Kuzey Amerika Doğu Standart Saati"
+    ],
+    [
+      [
+        10,
+        "Daylight"
+      ],
+      "Kuzey Amerika Doğu Yaz Saati"
+    ],
+    [
+      [
+        11,
+        "Standard"
+      ],
+      "Kuzey Amerika Dağ Standart Saati"
+    ],
+    [
+      [
+        11,
+        "Daylight"
+      ],
+      "Kuzey Amerika Dağ Yaz Saati"
+    ],
+    [
+      [
+        12,
+        "Standard"
+      ],
+      "Kuzey Amerika Pasifik Standart Saati"
+    ],
+    [
+      [
+        12,
+        "Daylight"
+      ],
+      "Kuzey Amerika Pasifik Yaz Saati"
+    ],
+    [
+      [
+        13,
+        "Standard"
+      ],
+      "Apia Standart Saati"
+    ],
+    [
+      [
+        13,
+        "Daylight"
+      ],
+      "Apia Yaz Saati"
+    ],
+    [
+      [
+        14,
+        "Standard"
+      ],
+      "Arabistan Standart Saati"
+    ],
+    [
+      [
+        15,
+        "Standard"
+      ],
+      "Arjantin Standart Saati"
+    ],
+    [
+      [
+        17,
+        "Standard"
+      ],
+      "Atlantik Standart Saati"
+    ],
+    [
+      [
+        17,
+        "Daylight"
+      ],
+      "Atlantik Yaz Saati"
+    ],
+    [
+      [
+        18,
+        "Standard"
+      ],
+      "Orta Avustralya Standart Saati"
+    ],
+    [
+      [
+        18,
+        "Daylight"
+      ],
+      "Orta Avustralya Yaz Saati"
+    ],
+    [
+      [
+        19,
+        "Standard"
+      ],
+      "İç Batı Avustralya Standart Saati"
+    ],
+    [
+      [
+        20,
+        "Standard"
+      ],
+      "Doğu Avustralya Standart Saati"
+    ],
+    [
+      [
+        20,
+        "Daylight"
+      ],
+      "Doğu Avustralya Yaz Saati"
+    ],
+    [
+      [
+        21,
+        "Standard"
+      ],
+      "Batı Avustralya Standart Saati"
+    ],
+    [
+      [
+        23,
+        "Standard"
+      ],
+      "Azorlar Standart Saati"
+    ],
+    [
+      [
+        23,
+        "Daylight"
+      ],
+      "Azorlar Yaz Saati"
+    ],
+    [
+      [
+        27,
+        "Standard"
+      ],
+      "Brasilia Standart Saati"
+    ],
+    [
+      [
+        27,
+        "Daylight"
+      ],
+      "Brasilia Yaz Saati"
+    ],
+    [
+      [
+        28,
+        "Standard"
+      ],
+      "Greenwich Ortalama Saati"
+    ],
+    [
+      [
+        28,
+        "Daylight"
+      ],
+      "İngiltere Yaz Saati"
+    ],
+    [
+      [
+        30,
+        "Standard"
+      ],
+      "Cape Verde Standart Saati"
+    ],
+    [
+      [
+        34,
+        "Standard"
+      ],
+      "Şili Standart Saati"
+    ],
+    [
+      [
+        34,
+        "Daylight"
+      ],
+      "Şili Yaz Saati"
+    ],
+    [
+      [
+        35,
+        "Standard"
+      ],
+      "Çin Standart Saati"
+    ],
+    [
+      [
+        46,
+        "Standard"
+      ],
+      "Orta Avrupa Standart Saati"
+    ],
+    [
+      [
+        46,
+        "Daylight"
+      ],
+      "Orta Avrupa Yaz Saati"
+    ],
+    [
+      [
+        47,
+        "Standard"
+      ],
+      "Doğu Avrupa Standart Saati"
+    ],
+    [
+      [
+        47,
+        "Daylight"
+      ],
+      "Doğu Avrupa Yaz Saati"
+    ],
+    [
+      [
+        48,
+        "Standard"
+      ],
+      "Batı Avrupa Standart Saati"
+    ],
+    [
+      [
+        48,
+        "Daylight"
+      ],
+      "Batı Avrupa Yaz Saati"
+    ],
+    [
+      [
+        58,
+        "Standard"
+      ],
+      "Grönland Standart Saati"
+    ],
+    [
+      [
+        58,
+        "Daylight"
+      ],
+      "Grönland Yaz Saati"
+    ],
+    [
+      [
+        59,
+        "Standard"
+      ],
+      "Doğu Grönland Standart Saati"
+    ],
+    [
+      [
+        59,
+        "Daylight"
+      ],
+      "Doğu Grönland Yaz Saati"
+    ],
+    [
+      [
+        60,
+        "Standard"
+      ],
+      "Batı Grönland Standart Saati"
+    ],
+    [
+      [
+        60,
+        "Daylight"
+      ],
+      "Batı Grönland Yaz Saati"
+    ],
+    [
+      [
+        64,
+        "Standard"
+      ],
+      "Hawaii-Aleut Standart Saati"
+    ],
+    [
+      [
+        64,
+        "Daylight"
+      ],
+      "Hawaii-Aleut Yaz Saati"
+    ],
+    [
+      [
+        66,
+        "Standard"
+      ],
+      "Hovd Standart Saati"
+    ],
+    [
+      [
+        66,
+        "Daylight"
+      ],
+      "Hovd Yaz Saati"
+    ],
+    [
+      [
+        74,
+        "Standard"
+      ],
+      "Greenwich Ortalama Saati"
+    ],
+    [
+      [
+        74,
+        "Daylight"
+      ],
+      "İrlanda Standart Saati"
+    ],
+    [
+      [
+        75,
+        "Standard"
+      ],
+      "İrkutsk Standart Saati"
+    ],
+    [
+      [
+        78,
+        "Standard"
+      ],
+      "Petropavlovsk-Kamçatski Standart Saati"
+    ],
+    [
+      [
+        82,
+        "Standard"
+      ],
+      "Kore Standart Saati"
+    ],
+    [
+      [
+        84,
+        "Standard"
+      ],
+      "Krasnoyarsk Standart Saati"
+    ],
+    [
+      [
+        88,
+        "Standard"
+      ],
+      "Magadan Standart Saati"
+    ],
+    [
+      [
+        95,
+        "Standard"
+      ],
+      "Meksika Pasifik Kıyısı Standart Saati"
+    ],
+    [
+      [
+        95,
+        "Daylight"
+      ],
+      "Meksika Pasifik Kıyısı Yaz Saati"
+    ],
+    [
+      [
+        97,
+        "Standard"
+      ],
+      "Moskova Standart Saati"
+    ],
+    [
+      [
+        102,
+        "Standard"
+      ],
+      "Yeni Zelanda Standart Saati"
+    ],
+    [
+      [
+        102,
+        "Daylight"
+      ],
+      "Yeni Zelanda Yaz Saati"
+    ],
+    [
+      [
+        103,
+        "Standard"
+      ],
+      "Newfoundland Standart Saati"
+    ],
+    [
+      [
+        103,
+        "Daylight"
+      ],
+      "Newfoundland Yaz Saati"
+    ],
+    [
+      [
+        122,
+        "Standard"
+      ],
+      "Samara Standart Saati"
+    ],
+    [
+      [
+        131,
+        "Standard"
+      ],
+      "Taipei Standart Saati"
+    ],
+    [
+      [
+        141,
+        "Standard"
+      ],
+      "Özbekistan Standart Saati"
+    ],
+    [
+      [
+        144,
+        "Standard"
+      ],
+      "Vladivostok Standart Saati"
+    ],
+    [
+      [
+        149,
+        "Standard"
+      ],
+      "Yakutsk Standart Saati"
+    ]
+  ],
+  "overrides": [
+    [
+      [
+        "utc",
+        "Standard"
+      ],
+      "Eş Güdümlü Evrensel Zaman"
+    ]
+  ],
+  "use_standard": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    25,
+    26,
+    29,
+    31,
+    32,
+    36,
+    37,
+    41,
+    42,
+    43,
+    45,
+    51,
+    52,
+    53,
+    54,
+    55,
+    57,
+    61,
+    62,
+    63,
+    67,
+    68,
+    69,
+    70,
+    71,
+    72,
+    79,
+    80,
+    81,
+    83,
+    85,
+    86,
+    89,
+    90,
+    91,
+    92,
+    94,
+    98,
+    99,
+    100,
+    104,
+    110,
+    111,
+    115,
+    117,
+    118,
+    119,
+    120,
+    121,
+    123,
+    124,
+    126,
+    127,
+    128,
+    129,
+    130,
+    132,
+    133,
+    135,
+    138,
+    140,
+    143,
+    146,
+    147,
+    148,
+    151
+  ]
+}

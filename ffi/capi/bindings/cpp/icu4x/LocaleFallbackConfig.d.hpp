@@ -1,42 +1,45 @@
-#ifndef icu4x_LocaleFallbackConfig_D_HPP
-#define icu4x_LocaleFallbackConfig_D_HPP
+#ifndef ICU4X_LocaleFallbackConfig_D_HPP
+#define ICU4X_LocaleFallbackConfig_D_HPP
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <memory>
+#include <functional>
 #include <optional>
-#include "../diplomat_runtime.hpp"
+#include <cstdlib>
 #include "LocaleFallbackPriority.d.hpp"
-#include "LocaleFallbackSupplement.d.hpp"
-
+#include "diplomat_runtime.hpp"
 namespace icu4x {
 class LocaleFallbackPriority;
-class LocaleFallbackSupplement;
-}
+} // namespace icu4x
+
 
 
 namespace icu4x {
 namespace capi {
     struct LocaleFallbackConfig {
       icu4x::capi::LocaleFallbackPriority priority;
-      diplomat::capi::DiplomatStringView extension_key;
-      icu4x::capi::LocaleFallbackSupplement fallback_supplement;
     };
+
+    typedef struct LocaleFallbackConfig_option {union { LocaleFallbackConfig ok; }; bool is_ok; } LocaleFallbackConfig_option;
 } // namespace capi
 } // namespace
 
 
 namespace icu4x {
+/**
+ * Collection of configurations for the ICU4X fallback algorithm.
+ *
+ * See the [Rust documentation for `LocaleFallbackConfig`](https://docs.rs/icu/2.3.1/icu/locale/fallback/struct.LocaleFallbackConfig.html) for more information.
+ */
 struct LocaleFallbackConfig {
-  icu4x::LocaleFallbackPriority priority;
-  std::string_view extension_key;
-  icu4x::LocaleFallbackSupplement fallback_supplement;
+    icu4x::LocaleFallbackPriority priority;
 
-  inline icu4x::capi::LocaleFallbackConfig AsFFI() const;
-  inline static icu4x::LocaleFallbackConfig FromFFI(icu4x::capi::LocaleFallbackConfig c_struct);
+    inline icu4x::capi::LocaleFallbackConfig AsFFI() const;
+    inline static icu4x::LocaleFallbackConfig FromFFI(icu4x::capi::LocaleFallbackConfig c_struct);
 };
 
 } // namespace
-#endif // icu4x_LocaleFallbackConfig_D_HPP
+#endif // ICU4X_LocaleFallbackConfig_D_HPP

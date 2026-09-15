@@ -2,9 +2,6 @@
   "main": {
     "en-001": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "en",
         "territory": "001"
       },
@@ -87,6 +84,12 @@
               "100000000000000-count-other": "000T"
             }
           }
+        },
+        "rationalFormats-numberSystem-latn": {
+          "rationalPattern": "{0}⁄{1}",
+          "integerAndRationalPattern": "{0} {1}",
+          "integerAndRationalPattern-alt-superSub": "{0}⁠{1}",
+          "rationalUsage": "sometimes"
         },
         "scientificFormats-numberSystem-latn": {
           "standard": "#E0"
@@ -176,12 +179,12 @@
           "range": "{0}–{1}"
         },
         "minimalPairs": {
-          "pluralMinimalPairs-count-one": "{0} day",
-          "pluralMinimalPairs-count-other": "{0} days",
-          "few": "Take the {0}rd right.",
-          "one": "Take the {0}st right.",
-          "other": "Take the {0}th right.",
-          "two": "Take the {0}nd right."
+          "pluralMinimalPairs-count-one": "{0} day",
+          "pluralMinimalPairs-count-other": "{0} days",
+          "one": "Take the {0}st right.",
+          "two": "Take the {0}nd right.",
+          "few": "Take the {0}rd right.",
+          "other": "Take the {0}th right."
         }
       }
     }

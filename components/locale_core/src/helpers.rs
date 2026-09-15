@@ -19,7 +19,6 @@ macro_rules! impl_tinystr_subtag {
         [$bad_example:literal $(, $more_bad_examples:literal)*],
     ) => {
         #[derive(Debug, PartialEq, Eq, Clone, Hash, PartialOrd, Ord, Copy)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize))]
         #[repr(transparent)]
         $(#[$doc])*
         pub struct $name(tinystr::TinyAsciiStr<$len_end>);
@@ -42,26 +41,14 @@ macro_rules! impl_tinystr_subtag {
             }
 
             /// See [`Self::try_from_str`]
-            #[inline]
-            pub const fn try_from_utf8(code_units: &[u8]) -> Result<Self, crate::parser::errors::ParseError> {
-                Self::try_from_utf8_manual_slice(code_units, 0, code_units.len())
-            }
-
-            /// Equivalent to [`try_from_utf8(bytes[start..end])`](Self::try_from_utf8),
-            /// but callable in a `const` context (which range indexing is not).
-            pub const fn try_from_utf8_manual_slice(
+            pub const fn try_from_utf8(
                 code_units: &[u8],
-                start: usize,
-                end: usize,
             ) -> Result<Self, crate::parser::errors::ParseError> {
-                let slen = end - start;
-
-                #[allow(clippy::double_comparisons)] // if len_start == len_end
-                if slen < $len_start || slen > $len_end {
+                if code_units.len() < $len_start || code_units.len() > $len_end {
                     return Err(crate::parser::errors::ParseError::$error);
                 }
 
-                match tinystr::TinyAsciiStr::try_from_utf8_manual_slice(code_units, start, end) {
+                match tinystr::TinyAsciiStr::try_from_utf8(code_units) {
                     Ok($tinystr_ident) if $validate => Ok(Self($normalize)),
                     _ => Err(crate::parser::errors::ParseError::$error),
                 }
@@ -92,9 +79,9 @@ macro_rules! impl_tinystr_subtag {
             ///
             /// This function is safe iff [`Self::try_from_raw`] returns an `Ok`. This is the case
             /// for inputs that are correctly normalized.
-            pub const unsafe fn from_raw_unchecked(v: [u8; $len_end]) -> Self {
+            pub const unsafe fn from_raw_unchecked(v: [u8; $len_end]) -> Self { unsafe {
                 Self(tinystr::TinyAsciiStr::from_utf8_unchecked(v))
-            }
+            }}
 
             /// Deconstructs into a raw format to be consumed by
             /// [`from_raw_unchecked`](Self::from_raw_unchecked()) or
@@ -110,7 +97,7 @@ macro_rules! impl_tinystr_subtag {
             }
 
             #[doc(hidden)]
-            pub const fn into_tinystr(&self) -> tinystr::TinyAsciiStr<$len_end> {
+            pub const fn to_tinystr(&self) -> tinystr::TinyAsciiStr<$len_end> {
                 self.0
             }
 
@@ -155,26 +142,12 @@ macro_rules! impl_tinystr_subtag {
 
         impl From<$name> for tinystr::TinyAsciiStr<$len_end> {
             fn from(input: $name) -> Self {
-                input.into_tinystr()
+                input.to_tinystr()
             }
         }
 
-        impl writeable::Writeable for $name {
-            #[inline]
-            fn write_to<W: core::fmt::Write + ?Sized>(&self, sink: &mut W) -> core::fmt::Result {
-                sink.write_str(self.as_str())
-            }
-            #[inline]
-            fn writeable_length_hint(&self) -> writeable::LengthHint {
-                writeable::LengthHint::exact(self.0.len())
-            }
-            #[inline]
-            fn write_to_string(&self) -> alloc::borrow::Cow<str> {
-                alloc::borrow::Cow::Borrowed(self.0.as_str())
-            }
-        }
-
-        writeable::impl_display_with_writeable!($name);
+        writeable::impl_writeable_delegate!($name, |&self| self.as_str(), #[cfg(feature = "alloc")] fn write_to_string);
+        writeable::impl_display_with_writeable!($name, #[cfg(feature = "alloc")]);
 
         #[doc = concat!("A macro allowing for compile-time construction of valid [`", stringify!($name), "`] subtags.")]
         ///
@@ -197,15 +170,12 @@ macro_rules! impl_tinystr_subtag {
         #[macro_export]
         #[doc(hidden)] // macro
         macro_rules! $internal_macro_name {
-            ($string:literal) => {{
+            ($string:literal) => { const {
                 use $crate::$($path ::)+ $name;
-                const R: $name =
-                    match $name::try_from_utf8($string.as_bytes()) {
-                        Ok(r) => r,
-                        #[allow(clippy::panic)] // const context
-                        _ => panic!(concat!("Invalid ", $(stringify!($path), "::",)+ stringify!($name), ": ", $string)),
-                    };
-                R
+                match $name::try_from_utf8($string.as_bytes()) {
+                    Ok(r) => r,
+                    _ => panic!(concat!("Invalid ", $(stringify!($path), "::",)+ stringify!($name), ": ", $string)),
+                }
             }};
         }
         #[doc(inline)]
@@ -254,6 +224,16 @@ macro_rules! impl_tinystr_subtag {
         }
 
         #[cfg(feature = "serde")]
+        impl serde::Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                self.0.serialize(serializer)
+            }
+        }
+
+        #[cfg(feature = "serde")]
         impl<'de> serde::Deserialize<'de> for $name {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
@@ -289,27 +269,32 @@ macro_rules! impl_tinystr_subtag {
         //
         // 1. Must not include any uninitialized or padding bytes (true since transparent over a ULE).
         // 2. Must have an alignment of 1 byte (true since transparent over a ULE).
-        // 3. ULE::validate_byte_slice() checks that the given byte slice represents a valid slice.
-        // 4. ULE::validate_byte_slice() checks that the given byte slice has a valid length.
+        // 3. ULE::validate_bytes() checks that the given byte slice represents a valid slice.
+        // 4. ULE::validate_bytes() checks that the given byte slice has a valid length.
         // 5. All other methods must be left with their default impl.
         // 6. Byte equality is semantic equality.
         #[cfg(feature = "zerovec")]
         unsafe impl zerovec::ule::ULE for $name {
-            fn validate_byte_slice(bytes: &[u8]) -> Result<(), zerovec::ZeroVecError> {
-                let it = bytes.chunks_exact(core::mem::size_of::<Self>());
+            fn validate_bytes(bytes: &[u8]) -> Result<(), zerovec::ule::UleError> {
+                let it = bytes.chunks_exact(size_of::<Self>());
                 if !it.remainder().is_empty() {
-                    return Err(zerovec::ZeroVecError::length::<Self>(bytes.len()));
+                    return Err(zerovec::ule::UleError::length::<Self>(bytes.len()));
                 }
                 for v in it {
                     // The following can be removed once `array_chunks` is stabilized.
-                    let mut a = [0; core::mem::size_of::<Self>()];
+                    let mut a = [0; size_of::<Self>()];
                     a.copy_from_slice(v);
                     if Self::try_from_raw(a).is_err() {
-                        return Err(zerovec::ZeroVecError::parse::<Self>());
+                        return Err(zerovec::ule::UleError::parse::<Self>());
                     }
                 }
                 Ok(())
             }
+        }
+
+        #[cfg(feature = "zerovec")]
+        impl zerovec::ule::NicheBytes<$len_end> for $name {
+            const NICHE_BIT_PATTERN: [u8; $len_end] = <tinystr::TinyAsciiStr<$len_end>>::NICHE_BIT_PATTERN;
         }
 
         #[cfg(feature = "zerovec")]
@@ -324,6 +309,7 @@ macro_rules! impl_tinystr_subtag {
         }
 
         #[cfg(feature = "zerovec")]
+        #[cfg(feature = "alloc")]
         impl<'a> zerovec::maps::ZeroMapKV<'a> for $name {
             type Container = zerovec::ZeroVec<'a, $name>;
             type Slice = zerovec::ZeroSlice<$name>;
@@ -333,6 +319,8 @@ macro_rules! impl_tinystr_subtag {
     };
 }
 
+#[macro_export]
+#[doc(hidden)]
 macro_rules! impl_writeable_for_each_subtag_str_no_test {
     ($type:tt $(, $self:ident, $borrow_cond:expr => $borrow:expr)?) => {
         impl writeable::Writeable for $type {
@@ -366,27 +354,24 @@ macro_rules! impl_writeable_for_each_subtag_str_no_test {
             }
 
             $(
-                fn write_to_string(&self) -> alloc::borrow::Cow<str> {
-                    #[allow(clippy::unwrap_used)] // impl_writeable_for_subtag_list's $borrow uses unwrap
+                fn writeable_borrow(&self) -> Option<&str> {
                     let $self = self;
                     if $borrow_cond {
                         $borrow
                     } else {
-                        let mut output = alloc::string::String::with_capacity(self.writeable_length_hint().capacity());
-                        let _ = self.write_to(&mut output);
-                        alloc::borrow::Cow::Owned(output)
+                        None
                     }
                 }
             )?
         }
 
-        writeable::impl_display_with_writeable!($type);
+        writeable::impl_display_with_writeable!($type, #[cfg(feature = "alloc")]);
     };
 }
 
 macro_rules! impl_writeable_for_subtag_list {
     ($type:tt, $sample1:literal, $sample2:literal) => {
-        impl_writeable_for_each_subtag_str_no_test!($type, selff, selff.0.len() == 1 => alloc::borrow::Cow::Borrowed(selff.0.get(0).unwrap().as_str()));
+        impl_writeable_for_each_subtag_str_no_test!($type, selff, selff.0.len() == 1 => #[allow(clippy::unwrap_used)] { Some(selff.0.get(0).unwrap().as_str()) } );
 
         #[test]
         fn test_writeable() {

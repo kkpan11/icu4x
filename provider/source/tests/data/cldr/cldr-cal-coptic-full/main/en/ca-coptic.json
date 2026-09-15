@@ -2,9 +2,6 @@
   "main": {
     "en": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "en"
       },
       "dates": {
@@ -103,6 +100,16 @@
                   "11": "Epep",
                   "12": "Mesra",
                   "13": "Nasie"
+                }
+              }
+            },
+            "dayOfMonths": {
+              "format": {
+                "abbreviated": {
+                  "one": "{0}st",
+                  "two": "{0}nd",
+                  "few": "{0}rd",
+                  "other": "{0}th"
                 }
               }
             },
@@ -306,23 +313,20 @@
             },
             "eras": {
               "eraNames": {
-                "0": "ERA0",
-                "1": "ERA1"
+                "1": "Anno Martyrum"
               },
               "eraAbbr": {
-                "0": "ERA0",
-                "1": "ERA1"
+                "1": "AM"
               },
               "eraNarrow": {
-                "0": "ERA0",
-                "1": "ERA1"
+                "1": "AM"
               }
             },
             "dateFormats": {
               "full": "EEEE, MMMM d, y G",
               "long": "MMMM d, y G",
               "medium": "MMM d, y G",
-              "short": "M/d/y GGGGG"
+              "short": "M/d/y G"
             },
             "dateSkeletons": {
               "full": "GyMMMMEEEEd",
@@ -347,6 +351,10 @@
               "short": "ahmm"
             },
             "dateTimeFormats": {
+              "numericSeparators": {
+                "numericDateSeparator": "/",
+                "numericTimeSeparator": ":"
+              },
               "full": "{1}, {0}",
               "long": "{1}, {0}",
               "medium": "{1}, {0}",
@@ -357,9 +365,12 @@
                 "Bhms": "h:mm:ss B",
                 "d": "d",
                 "E": "ccc",
+                "EBh": "E h B",
                 "EBhm": "E h:mm B",
                 "EBhms": "E h:mm:ss B",
                 "Ed": "d E",
+                "Eh": "E h a",
+                "Eh-alt-ascii": "E h a",
                 "Ehm": "E h:mm a",
                 "Ehm-alt-ascii": "E h:mm a",
                 "EHm": "E HH:mm",
@@ -367,10 +378,14 @@
                 "Ehms-alt-ascii": "E h:mm:ss a",
                 "EHms": "E HH:mm:ss",
                 "Gy": "y G",
-                "GyMd": "M/d/y GGGGG",
+                "GyM": "M/y G",
+                "GyMd": "M/d/y G",
+                "GyMEd": "E, M/d/y G",
                 "GyMMM": "MMM y G",
                 "GyMMMd": "MMM d, y G",
+                "GyMMMddd": "MMM ddd, y G",
                 "GyMMMEd": "E, MMM d, y G",
+                "GyMMMEddd": "E, MMM ddd, y G",
                 "h": "h a",
                 "h-alt-ascii": "h a",
                 "H": "HH",
@@ -380,40 +395,55 @@
                 "hms": "h:mm:ss a",
                 "hms-alt-ascii": "h:mm:ss a",
                 "Hms": "HH:mm:ss",
+                "hv": "h a v",
+                "hv-alt-ascii": "h a v",
+                "Hv": "HH v",
                 "M": "L",
                 "Md": "M/d",
                 "MEd": "E, M/d",
                 "MMM": "LLL",
                 "MMMd": "MMM d",
+                "MMMddd": "MMM ddd",
                 "MMMEd": "E, MMM d",
+                "MMMEddd": "E, MMM ddd",
                 "MMMMd": "MMMM d",
+                "MMMMddd": "MMMM ddd",
                 "ms": "mm:ss",
                 "y": "y G",
                 "yyyy": "y G",
-                "yyyyM": "M/y GGGGG",
-                "yyyyMd": "M/d/y GGGGG",
-                "yyyyMEd": "E, M/d/y GGGGG",
+                "yyyyM": "M/y G",
+                "yyyyMd": "M/d/y G",
+                "yyyyMEd": "E, M/d/y G",
                 "yyyyMMM": "MMM y G",
                 "yyyyMMMd": "MMM d, y G",
+                "yyyyMMMddd": "MMM ddd, y G",
                 "yyyyMMMEd": "E, MMM d, y G",
+                "yyyyMMMEddd": "E, MMM ddd, y G",
                 "yyyyMMMM": "MMMM y G",
                 "yyyyQQQ": "QQQ y G",
                 "yyyyQQQQ": "QQQQ y G"
               },
               "appendItems": {
+                "Date-Timezone": "{0} {1}",
                 "Day": "{0} ({2}: {1})",
-                "Day-Of-Week": "{0} {1}",
+                "Day-Of-Week": "{1}, {0}",
                 "Era": "{0} {1}",
                 "Hour": "{0} ({2}: {1})",
                 "Minute": "{0} ({2}: {1})",
                 "Month": "{0} ({2}: {1})",
                 "Quarter": "{0} ({2}: {1})",
                 "Second": "{0} ({2}: {1})",
+                "Time-Day-Of-Week": "{1}, {0}",
                 "Timezone": "{0} {1}",
                 "Week": "{0} ({2}: {1})",
                 "Year": "{0} {1}"
               },
               "intervalFormats": {
+                "intervalFormatRanges": {
+                  "mixed": "{0} – {1}",
+                  "non-numeric": "{0}–{1}",
+                  "numeric": "{0}–{1}"
+                },
                 "intervalFormatFallback": "{0} – {1}",
                 "Bh": {
                   "B": "h B – h B",
@@ -432,21 +462,21 @@
                   "y": "y – y G"
                 },
                 "GyM": {
-                  "G": "M/y GGGGG – M/y GGGGG",
-                  "M": "M/y – M/y GGGGG",
-                  "y": "M/y – M/y GGGGG"
+                  "G": "M/y G – M/y G",
+                  "M": "M/y – M/y G",
+                  "y": "M/y – M/y G"
                 },
                 "GyMd": {
-                  "d": "M/d/y – M/d/y GGGGG",
-                  "G": "M/d/y GGGGG – M/d/y GGGGG",
-                  "M": "M/d/y – M/d/y GGGGG",
-                  "y": "M/d/y – M/d/y GGGGG"
+                  "d": "M/d/y – M/d/y G",
+                  "G": "M/d/y G – M/d/y G",
+                  "M": "M/d/y – M/d/y G",
+                  "y": "M/d/y – M/d/y G"
                 },
                 "GyMEd": {
-                  "d": "E, M/d/y – E, M/d/y GGGGG",
-                  "G": "E, M/d/y GGGGG – E, M/d/y GGGGG",
-                  "M": "E, M/d/y – E, M/d/y GGGGG",
-                  "y": "E, M/d/y – E, M/d/y GGGGG"
+                  "d": "E, M/d/y – E, M/d/y G",
+                  "G": "E, M/d/y G – E, M/d/y G",
+                  "M": "E, M/d/y – E, M/d/y G",
+                  "y": "E, M/d/y – E, M/d/y G"
                 },
                 "GyMMM": {
                   "G": "MMM y G – MMM y G",
@@ -519,22 +549,26 @@
                   "d": "E, MMM d – E, MMM d",
                   "M": "E, MMM d – E, MMM d"
                 },
+                "MMMMd": {
+                  "d": "MMMM d – d",
+                  "M": "MMMM d – MMMM d"
+                },
                 "y": {
                   "y": "y – y G"
                 },
                 "yM": {
-                  "M": "M/y – M/y GGGGG",
-                  "y": "M/y – M/y GGGGG"
+                  "M": "M/y – M/y G",
+                  "y": "M/y – M/y G"
                 },
                 "yMd": {
-                  "d": "M/d/y – M/d/y GGGGG",
-                  "M": "M/d/y – M/d/y GGGGG",
-                  "y": "M/d/y – M/d/y GGGGG"
+                  "d": "M/d/y – M/d/y G",
+                  "M": "M/d/y – M/d/y G",
+                  "y": "M/d/y – M/d/y G"
                 },
                 "yMEd": {
-                  "d": "E, M/d/y – E, M/d/y GGGGG",
-                  "M": "E, M/d/y – E, M/d/y GGGGG",
-                  "y": "E, M/d/y – E, M/d/y GGGGG"
+                  "d": "E, M/d/y – E, M/d/y G",
+                  "M": "E, M/d/y – E, M/d/y G",
+                  "y": "E, M/d/y – E, M/d/y G"
                 },
                 "yMMM": {
                   "M": "MMM – MMM y G",
@@ -557,6 +591,14 @@
               }
             },
             "dateTimeFormats-atTime": {
+              "standard": {
+                "full": "{1} 'at' {0}",
+                "long": "{1} 'at' {0}",
+                "medium": "{1}, {0}",
+                "short": "{1}, {0}"
+              }
+            },
+            "dateTimeFormats-relative": {
               "standard": {
                 "full": "{1} 'at' {0}",
                 "long": "{1} 'at' {0}",

@@ -5,7 +5,7 @@ When working with internationalized dates and times, it is important to display 
 
 ## Background
 
-ICU4X implements date and time formatting in compliance with [UTS 35](http://unicode.org/reports/tr35/). Of particular interest is Part 4, Dates. UTS 35 Part 4 covers a broad range of operations, including:
+ICU4X implements date and time formatting in compliance with [UTS 35](https://unicode.org/reports/tr35/). Of particular interest is Part 4, Dates. UTS 35 Part 4 covers a broad range of operations, including:
 
 - Date/time formatting symbols
 - Calendar systems
@@ -65,7 +65,7 @@ pub struct NaiveDateTime {
 }
 ```
 
-The big advantage of this data structure is that it is calendar system agnostic: Gregorian, Hebrew, Japanese, and Islamic dates can all be expressed in this data structure.
+The big advantage of this data structure is that it is calendar system agnostic: Gregorian, Hebrew, Japanese, and Hijri dates can all be expressed in this data structure.
 
 However, it has obvious flaws:
 

@@ -1,12 +1,32 @@
 // @generated
-include!("locale_fallback_likely_subtags_v1_marker.rs.data");
-include!("locale_fallback_parents_v1_marker.rs.data");
-include!("collation_fallback_supplement_v1_marker.rs.data");
-include!("aliases_v2_marker.rs.data");
-include!("likely_subtags_extended_v1_marker.rs.data");
-include!("likely_subtags_for_language_v1_marker.rs.data");
-include!("likely_subtags_for_script_region_v1_marker.rs.data");
-include!("script_direction_v1_marker.rs.data");
+include!("locale_names_language_medium_tiny_v1.rs.data");
+include!("locale_names_essentials_v1.rs.data");
+include!("locale_names_script_medium_light_v1.rs.data");
+include!("locale_names_language_menu_medium_heavy_v1.rs.data");
+include!("locale_names_language_long_light_v1.rs.data");
+include!("locale_exemplar_characters_main_v1.rs.data");
+include!("locale_names_region_medium_tiny_v1.rs.data");
+include!("locale_exemplar_characters_numbers_v1.rs.data");
+include!("locale_aliases_v1.rs.data");
+include!("locale_exemplar_characters_index_v1.rs.data");
+include!("locale_names_script_short_heavy_v1.rs.data");
+include!("locale_names_script_medium_tiny_v1.rs.data");
+include!("locale_names_language_medium_light_v1.rs.data");
+include!("locale_names_script_medium_heavy_v1.rs.data");
+include!("locale_names_language_menu_medium_light_v1.rs.data");
+include!("locale_names_language_medium_heavy_v1.rs.data");
+include!("locale_names_variant_medium_heavy_v1.rs.data");
+include!("locale_names_language_short_heavy_v1.rs.data");
+include!("locale_exemplar_characters_auxiliary_v1.rs.data");
+include!("locale_likely_subtags_extended_v1.rs.data");
+include!("locale_names_region_medium_light_v1.rs.data");
+include!("locale_names_language_long_heavy_v1.rs.data");
+include!("locale_script_direction_v1.rs.data");
+include!("locale_names_region_short_light_v1.rs.data");
+include!("locale_names_language_short_light_v1.rs.data");
+include!("locale_likely_subtags_script_region_v1.rs.data");
+include!("locale_exemplar_characters_punctuation_v1.rs.data");
+include!("locale_names_region_short_tiny_v1.rs.data");
 /// Marks a type as a data provider. You can then use macros like
 /// `impl_core_helloworld_v1` to add implementations.
 ///
@@ -22,7 +42,7 @@ include!("script_direction_v1_marker.rs.data");
 #[macro_export]
 macro_rules! __make_provider {
     ($ name : ty) => {
-        #[clippy::msrv = "1.70"]
+        #[clippy::msrv = "1.88"]
         impl $name {
             #[allow(dead_code)]
             pub(crate) const MUST_USE_MAKE_PROVIDER_MACRO: () = ();
@@ -32,38 +52,41 @@ macro_rules! __make_provider {
 }
 #[doc(inline)]
 pub use __make_provider as make_provider;
+/// This macro requires the following crates:
+/// * `icu`
+/// * `icu_provider`
+/// * `zerovec`
 #[allow(unused_macros)]
 macro_rules! impl_data_provider {
     ($ provider : ty) => {
         make_provider!($provider);
-        impl_locale_fallback_likely_subtags_v1_marker!($provider);
-        impl_locale_fallback_parents_v1_marker!($provider);
-        impl_collation_fallback_supplement_v1_marker!($provider);
-        impl_aliases_v2_marker!($provider);
-        impl_likely_subtags_extended_v1_marker!($provider);
-        impl_likely_subtags_for_language_v1_marker!($provider);
-        impl_likely_subtags_for_script_region_v1_marker!($provider);
-        impl_script_direction_v1_marker!($provider);
-    };
-}
-#[allow(unused_macros)]
-macro_rules! impl_any_provider {
-    ($ provider : ty) => {
-        #[clippy::msrv = "1.70"]
-        impl icu_provider::any::AnyProvider for $provider {
-            fn load_any(&self, marker: icu_provider::DataMarkerInfo, req: icu_provider::DataRequest) -> Result<icu_provider::AnyResponse, icu_provider::DataError> {
-                match marker.path.hashed() {
-                    h if h == <icu::locale::provider::LocaleFallbackLikelySubtagsV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::LocaleFallbackLikelySubtagsV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::LocaleFallbackParentsV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::LocaleFallbackParentsV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::CollationFallbackSupplementV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::CollationFallbackSupplementV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::AliasesV2Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::AliasesV2Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::LikelySubtagsExtendedV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::LikelySubtagsExtendedV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::LikelySubtagsForLanguageV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::LikelySubtagsForLanguageV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::LikelySubtagsForScriptRegionV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::LikelySubtagsForScriptRegionV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    h if h == <icu::locale::provider::ScriptDirectionV1Marker as icu_provider::DataMarker>::INFO.path.hashed() => icu_provider::DataProvider::<icu::locale::provider::ScriptDirectionV1Marker>::load(self, req).map(icu_provider::DataResponse::wrap_into_any_response),
-                    _ => Err(icu_provider::DataErrorKind::MarkerNotFound.with_req(marker, req)),
-                }
-            }
-        }
+        impl_locale_names_language_medium_tiny_v1!($provider);
+        impl_locale_names_essentials_v1!($provider);
+        impl_locale_names_script_medium_light_v1!($provider);
+        impl_locale_names_language_menu_medium_heavy_v1!($provider);
+        impl_locale_names_language_long_light_v1!($provider);
+        impl_locale_exemplar_characters_main_v1!($provider);
+        impl_locale_names_region_medium_tiny_v1!($provider);
+        impl_locale_exemplar_characters_numbers_v1!($provider);
+        impl_locale_aliases_v1!($provider);
+        impl_locale_exemplar_characters_index_v1!($provider);
+        impl_locale_names_script_short_heavy_v1!($provider);
+        impl_locale_names_script_medium_tiny_v1!($provider);
+        impl_locale_names_language_medium_light_v1!($provider);
+        impl_locale_names_script_medium_heavy_v1!($provider);
+        impl_locale_names_language_menu_medium_light_v1!($provider);
+        impl_locale_names_language_medium_heavy_v1!($provider);
+        impl_locale_names_variant_medium_heavy_v1!($provider);
+        impl_locale_names_language_short_heavy_v1!($provider);
+        impl_locale_exemplar_characters_auxiliary_v1!($provider);
+        impl_locale_likely_subtags_extended_v1!($provider);
+        impl_locale_names_region_medium_light_v1!($provider);
+        impl_locale_names_language_long_heavy_v1!($provider);
+        impl_locale_script_direction_v1!($provider);
+        impl_locale_names_region_short_light_v1!($provider);
+        impl_locale_names_language_short_light_v1!($provider);
+        impl_locale_likely_subtags_script_region_v1!($provider);
+        impl_locale_exemplar_characters_punctuation_v1!($provider);
+        impl_locale_names_region_short_tiny_v1!($provider);
     };
 }

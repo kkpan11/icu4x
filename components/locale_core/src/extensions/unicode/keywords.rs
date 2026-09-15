@@ -4,14 +4,17 @@
 
 use core::borrow::Borrow;
 use core::cmp::Ordering;
+#[cfg(feature = "alloc")]
 use core::iter::FromIterator;
+#[cfg(feature = "alloc")]
 use core::str::FromStr;
 use litemap::LiteMap;
-use writeable::Writeable;
 
 use super::Key;
 use super::Value;
+#[cfg(feature = "alloc")]
 use crate::parser::ParseError;
+#[cfg(feature = "alloc")]
 use crate::parser::SubtagIterator;
 use crate::shortvec::ShortBoxSlice;
 
@@ -32,7 +35,7 @@ use crate::shortvec::ShortBoxSlice;
 /// Manually build up a [`Keywords`] object:
 ///
 /// ```
-/// use icu::locale::extensions::unicode::{key, value, Keywords};
+/// use icu::locale::extensions::unicode::{Keywords, key, value};
 ///
 /// let keywords = [(key!("hc"), value!("h23"))]
 ///     .into_iter()
@@ -45,8 +48,8 @@ use crate::shortvec::ShortBoxSlice;
 ///
 /// ```
 /// use icu::locale::{
-///     extensions::unicode::{key, value},
 ///     Locale,
+///     extensions::unicode::{key, value},
 /// };
 ///
 /// let loc: Locale = "und-u-hc-h23-kc-true".parse().expect("Valid BCP-47");
@@ -93,12 +96,18 @@ impl Keywords {
 
     /// A constructor which takes a str slice, parses it and
     /// produces a well-formed [`Keywords`].
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
     #[inline]
+    #[cfg(feature = "alloc")]
     pub fn try_from_str(s: &str) -> Result<Self, ParseError> {
         Self::try_from_utf8(s.as_bytes())
     }
 
     /// See [`Self::try_from_str`]
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    #[cfg(feature = "alloc")]
     pub fn try_from_utf8(code_units: &[u8]) -> Result<Self, ParseError> {
         let mut iter = SubtagIterator::new(code_units);
         Self::try_from_iter(&mut iter)
@@ -109,8 +118,8 @@ impl Keywords {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::locale;
     /// use icu::locale::Locale;
+    /// use icu::locale::locale;
     ///
     /// let loc1 = Locale::try_from_str("und-t-h0-hybrid").unwrap();
     /// let loc2 = locale!("und-u-ca-buddhist");
@@ -128,7 +137,7 @@ impl Keywords {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::unicode::{key, value, Keywords};
+    /// use icu::locale::extensions::unicode::{Keywords, key, value};
     ///
     /// let keywords = [(key!("ca"), value!("gregory"))]
     ///     .into_iter()
@@ -150,7 +159,7 @@ impl Keywords {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::unicode::{key, value, Keywords};
+    /// use icu::locale::extensions::unicode::{Keywords, key, value};
     ///
     /// let keywords = [(key!("ca"), value!("buddhist"))]
     ///     .into_iter()
@@ -170,10 +179,12 @@ impl Keywords {
     ///
     /// Returns `None` if the key doesn't exist or if the key has no value.
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::unicode::{key, value, Keywords};
+    /// use icu::locale::extensions::unicode::{Keywords, key, value};
     ///
     /// let mut keywords = [(key!("ca"), value!("buddhist"))]
     ///     .into_iter()
@@ -184,6 +195,7 @@ impl Keywords {
     /// }
     /// assert_eq!(keywords.get(&key!("ca")), Some(&value!("gregory")));
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut Value>
     where
         Key: Borrow<Q>,
@@ -194,11 +206,13 @@ impl Keywords {
 
     /// Sets the specified keyword, returning the old value if it already existed.
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::unicode::{key, value};
     /// use icu::locale::Locale;
+    /// use icu::locale::extensions::unicode::{key, value};
     ///
     /// let mut loc: Locale = "und-u-hello-ca-buddhist-hc-h12"
     ///     .parse()
@@ -212,17 +226,20 @@ impl Keywords {
     /// assert_eq!(old_value, Some(value!("buddhist")));
     /// assert_eq!(loc, "und-u-hello-ca-japanese-hc-h12".parse().unwrap());
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn set(&mut self, key: Key, value: Value) -> Option<Value> {
         self.0.insert(key, value)
     }
 
     /// Removes the specified keyword, returning the old value if it existed.
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::unicode::key;
     /// use icu::locale::Locale;
+    /// use icu::locale::extensions::unicode::key;
     ///
     /// let mut loc: Locale = "und-u-hello-ca-buddhist-hc-h12"
     ///     .parse()
@@ -230,6 +247,7 @@ impl Keywords {
     /// loc.extensions.unicode.keywords.remove(key!("ca"));
     /// assert_eq!(loc, "und-u-hello-hc-h12".parse().unwrap());
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn remove<Q: Borrow<Key>>(&mut self, key: Q) -> Option<Value> {
         self.0.remove(key.borrow())
     }
@@ -238,7 +256,7 @@ impl Keywords {
     ///
     /// Returns the old Unicode extension keywords.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use icu::locale::Locale;
@@ -253,11 +271,13 @@ impl Keywords {
 
     /// Retains a subset of keywords as specified by the predicate function.
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::unicode::key;
     /// use icu::locale::Locale;
+    /// use icu::locale::extensions::unicode::key;
     ///
     /// let mut loc: Locale = "und-u-ca-buddhist-hc-h12-ms-metric".parse().unwrap();
     ///
@@ -271,8 +291,9 @@ impl Keywords {
     ///     .unicode
     ///     .keywords
     ///     .retain_by_key(|&k| k == key!("ms"));
-    /// assert_eq!(loc, Locale::UND);
+    /// assert_eq!(loc, Locale::UNKNOWN);
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn retain_by_key<F>(&mut self, mut predicate: F)
     where
         F: FnMut(&Key) -> bool,
@@ -312,9 +333,10 @@ impl Keywords {
     /// }
     /// ```
     pub fn strict_cmp(&self, other: &[u8]) -> Ordering {
-        self.writeable_cmp_bytes(other)
+        writeable::cmp_utf8(self, other)
     }
 
+    #[cfg(feature = "alloc")]
     pub(crate) fn try_from_iter(iter: &mut SubtagIterator) -> Result<Self, ParseError> {
         let mut keywords = LiteMap::new();
 
@@ -330,7 +352,7 @@ impl Keywords {
                 }
                 current_keyword = Some(Key::try_from_utf8(subtag)?);
             } else if current_keyword.is_some() {
-                match Value::parse_subtag(subtag) {
+                match Value::parse_subtag_from_utf8(subtag) {
                     Ok(Some(t)) => current_value.push(t),
                     Ok(None) => {}
                     Err(_) => break,
@@ -364,6 +386,27 @@ impl Keywords {
         Ok(())
     }
 
+    /// Extends the `Keywords` with values from  another `Keywords`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use icu::locale::extensions::unicode::Keywords;
+    ///
+    /// let mut kw: Keywords = "ab-cd-ca-buddhist".parse().unwrap();
+    /// let kw2: Keywords = "ca-gregory-hc-h12".parse().unwrap();
+    ///
+    /// kw.extend_from_keywords(kw2);
+    ///
+    /// assert_eq!(kw, "ab-cd-ca-gregory-hc-h12".parse().unwrap());
+    /// ```
+    #[cfg(feature = "alloc")]
+    pub fn extend_from_keywords(&mut self, other: Keywords) {
+        for (key, value) in other.0 {
+            self.0.insert(key, value);
+        }
+    }
+
     /// This needs to be its own method to help with type inference in helpers.rs
     #[cfg(test)]
     pub(crate) fn from_tuple_vec(v: Vec<(Key, Value)>) -> Self {
@@ -377,12 +420,16 @@ impl From<LiteMap<Key, Value, ShortBoxSlice<(Key, Value)>>> for Keywords {
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl FromIterator<(Key, Value)> for Keywords {
     fn from_iter<I: IntoIterator<Item = (Key, Value)>>(iter: I) -> Self {
         LiteMap::from_iter(iter).into()
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl FromStr for Keywords {
     type Err = ParseError;
 

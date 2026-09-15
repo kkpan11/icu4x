@@ -11,13 +11,12 @@
 //!
 //! [`BufferProvider`]: crate::buf::BufferProvider
 
+use crate::DryDataProvider;
 use crate::buf::BufferFormat;
 use crate::buf::BufferProvider;
 use crate::data_provider::DynamicDryDataProvider;
 use crate::prelude::*;
-use crate::DryDataProvider;
 use serde::de::Deserialize;
-use yoke::trait_hack::YokeTraitHack;
 use yoke::Yokeable;
 
 /// A [`BufferProvider`] that deserializes its data using Serde.
@@ -25,6 +24,8 @@ use yoke::Yokeable;
 pub struct DeserializingBufferProvider<'a, P: ?Sized>(&'a P);
 
 /// Blanket-implemented trait adding the [`Self::as_deserializing()`] function.
+///
+/// ✨ *Enabled with the `serde` Cargo feature.*
 pub trait AsDeserializingBufferProvider {
     /// Wrap this [`BufferProvider`] in a [`DeserializingBufferProvider`].
     ///
@@ -34,7 +35,9 @@ pub trait AsDeserializingBufferProvider {
     /// - `deserialize_json`
     /// - `deserialize_postcard_1`
     /// - `deserialize_bincode_1`
-    fn as_deserializing(&self) -> DeserializingBufferProvider<Self>;
+    ///
+    /// ✨ *Enabled with the `serde` Cargo feature.*
+    fn as_deserializing(&self) -> DeserializingBufferProvider<'_, Self>;
 }
 
 impl<P> AsDeserializingBufferProvider for P
@@ -49,7 +52,9 @@ where
     /// - `deserialize_json`
     /// - `deserialize_postcard_1`
     /// - `deserialize_bincode_1`
-    fn as_deserializing(&self) -> DeserializingBufferProvider<Self> {
+    ///
+    /// ✨ *Enabled with the `serde` Cargo feature.*
+    fn as_deserializing(&self) -> DeserializingBufferProvider<'_, Self> {
         DeserializingBufferProvider(self)
     }
 }
@@ -58,20 +63,16 @@ fn deserialize_impl<'data, M>(
     // Allow `bytes` to be unused in case all buffer formats are disabled
     #[allow(unused_variables)] bytes: &'data [u8],
     buffer_format: BufferFormat,
-) -> Result<<M::Yokeable as Yokeable<'data>>::Output, DataError>
+) -> Result<<M::DataStruct as Yokeable<'data>>::Output, DataError>
 where
     M: DynamicDataMarker,
-    // Actual bound:
-    //     for<'de> <M::Yokeable as Yokeable<'de>>::Output: Deserialize<'de>,
-    // Necessary workaround bound (see `yoke::trait_hack` docs):
-    for<'de> YokeTraitHack<<M::Yokeable as Yokeable<'de>>::Output>: Deserialize<'de>,
+    for<'de> <M::DataStruct as Yokeable<'de>>::Output: Deserialize<'de>,
 {
     match buffer_format {
         #[cfg(feature = "deserialize_json")]
         BufferFormat::Json => {
             let mut d = serde_json::Deserializer::from_slice(bytes);
-            let data = YokeTraitHack::<<M::Yokeable as Yokeable>::Output>::deserialize(&mut d)?;
-            Ok(data.0)
+            Ok(Deserialize::deserialize(&mut d)?)
         }
 
         #[cfg(feature = "deserialize_bincode_1")]
@@ -81,15 +82,13 @@ where
                 .with_fixint_encoding()
                 .allow_trailing_bytes();
             let mut d = bincode::de::Deserializer::from_slice(bytes, options);
-            let data = YokeTraitHack::<<M::Yokeable as Yokeable>::Output>::deserialize(&mut d)?;
-            Ok(data.0)
+            Ok(Deserialize::deserialize(&mut d)?)
         }
 
         #[cfg(feature = "deserialize_postcard_1")]
         BufferFormat::Postcard1 => {
             let mut d = postcard::Deserializer::from_bytes(bytes);
-            let data = YokeTraitHack::<<M::Yokeable as Yokeable>::Output>::deserialize(&mut d)?;
-            Ok(data.0)
+            Ok(Deserialize::deserialize(&mut d)?)
         }
 
         // Allowed for cases in which all features are enabled
@@ -115,6 +114,8 @@ impl DataPayload<BufferMarker> {
     /// This function takes the buffer format as an argument. When a buffer payload is returned
     /// from a data provider, the buffer format is stored in the [`DataResponseMetadata`].
     ///
+    /// ✨ *Enabled with the `serde` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// Requires the `deserialize_json` Cargo feature:
@@ -127,7 +128,7 @@ impl DataPayload<BufferMarker> {
     /// let buffer: &[u8] = br#"{"message":"Hallo Welt"}"#;
     ///
     /// let buffer_payload = DataPayload::from_owned(buffer);
-    /// let payload: DataPayload<HelloWorldV1Marker> = buffer_payload
+    /// let payload: DataPayload<HelloWorldV1> = buffer_payload
     ///     .into_deserialized(BufferFormat::Json)
     ///     .expect("Deserialization successful");
     ///
@@ -139,10 +140,7 @@ impl DataPayload<BufferMarker> {
     ) -> Result<DataPayload<M>, DataError>
     where
         M: DynamicDataMarker,
-        // Actual bound:
-        //     for<'de> <M::Yokeable as Yokeable<'de>>::Output: Deserialize<'de>,
-        // Necessary workaround bound (see `yoke::trait_hack` docs):
-        for<'de> YokeTraitHack<<M::Yokeable as Yokeable<'de>>::Output>: Deserialize<'de>,
+        for<'de> <M::DataStruct as Yokeable<'de>>::Output: Deserialize<'de>,
     {
         self.try_map_project(|bytes, _| deserialize_impl::<M>(bytes, buffer_format))
     }
@@ -151,11 +149,8 @@ impl DataPayload<BufferMarker> {
 impl<P, M> DynamicDataProvider<M> for DeserializingBufferProvider<'_, P>
 where
     M: DynamicDataMarker,
-    P: DynamicDataProvider<BufferMarker> + ?Sized,
-    // Actual bound:
-    //     for<'de> <M::Yokeable as Yokeable<'de>>::Output: serde::de::Deserialize<'de>,
-    // Necessary workaround bound (see `yoke::trait_hack` docs):
-    for<'de> YokeTraitHack<<M::Yokeable as Yokeable<'de>>::Output>: Deserialize<'de>,
+    P: BufferProvider + ?Sized,
+    for<'de> <M::DataStruct as Yokeable<'de>>::Output: Deserialize<'de>,
 {
     /// Converts a buffer into a concrete type by deserializing from a supported buffer format.
     ///
@@ -165,6 +160,8 @@ where
     /// - `deserialize_json`
     /// - `deserialize_postcard_1`
     /// - `deserialize_bincode_1`
+    ///
+    /// ✨ *Enabled with the `serde` Cargo feature.*
     fn load_data(
         &self,
         marker: DataMarkerInfo,
@@ -190,10 +187,7 @@ impl<P, M> DynamicDryDataProvider<M> for DeserializingBufferProvider<'_, P>
 where
     M: DynamicDataMarker,
     P: DynamicDryDataProvider<BufferMarker> + ?Sized,
-    // Actual bound:
-    //     for<'de> <M::Yokeable as Yokeable<'de>>::Output: serde::de::Deserialize<'de>,
-    // Necessary workaround bound (see `yoke::trait_hack` docs):
-    for<'de> YokeTraitHack<<M::Yokeable as Yokeable<'de>>::Output>: Deserialize<'de>,
+    for<'de> <M::DataStruct as Yokeable<'de>>::Output: Deserialize<'de>,
 {
     fn dry_load_data(
         &self,
@@ -208,10 +202,7 @@ impl<P, M> DataProvider<M> for DeserializingBufferProvider<'_, P>
 where
     M: DataMarker,
     P: DynamicDataProvider<BufferMarker> + ?Sized,
-    // Actual bound:
-    //     for<'de> <M::Yokeable as Yokeable<'de>>::Output: Deserialize<'de>,
-    // Necessary workaround bound (see `yoke::trait_hack` docs):
-    for<'de> YokeTraitHack<<M::Yokeable as Yokeable<'de>>::Output>: Deserialize<'de>,
+    for<'de> <M::DataStruct as Yokeable<'de>>::Output: Deserialize<'de>,
 {
     /// Converts a buffer into a concrete type by deserializing from a supported buffer format.
     ///
@@ -221,6 +212,8 @@ where
     /// - `deserialize_json`
     /// - `deserialize_postcard_1`
     /// - `deserialize_bincode_1`
+    ///
+    /// ✨ *Enabled with the `serde` Cargo feature.*
     fn load(&self, req: DataRequest) -> Result<DataResponse<M>, DataError> {
         self.load_data(M::INFO, req)
     }
@@ -230,10 +223,7 @@ impl<P, M> DryDataProvider<M> for DeserializingBufferProvider<'_, P>
 where
     M: DataMarker,
     P: DynamicDryDataProvider<BufferMarker> + ?Sized,
-    // Actual bound:
-    //     for<'de> <M::Yokeable as Yokeable<'de>>::Output: Deserialize<'de>,
-    // Necessary workaround bound (see `yoke::trait_hack` docs):
-    for<'de> YokeTraitHack<<M::Yokeable as Yokeable<'de>>::Output>: Deserialize<'de>,
+    for<'de> <M::DataStruct as Yokeable<'de>>::Output: Deserialize<'de>,
 {
     fn dry_load(&self, req: DataRequest) -> Result<DataResponseMetadata, DataError> {
         self.0.dry_load_data(M::INFO, req)
@@ -241,7 +231,7 @@ where
 }
 
 #[cfg(feature = "deserialize_json")]
-impl From<serde_json::error::Error> for crate::DataError {
+impl From<serde_json::error::Error> for DataError {
     fn from(e: serde_json::error::Error) -> Self {
         DataErrorKind::Deserialize
             .with_str_context("serde_json")
@@ -250,7 +240,7 @@ impl From<serde_json::error::Error> for crate::DataError {
 }
 
 #[cfg(feature = "deserialize_bincode_1")]
-impl From<bincode::Error> for crate::DataError {
+impl From<bincode::Error> for DataError {
     fn from(e: bincode::Error) -> Self {
         DataErrorKind::Deserialize
             .with_str_context("bincode")
@@ -259,7 +249,7 @@ impl From<bincode::Error> for crate::DataError {
 }
 
 #[cfg(feature = "deserialize_postcard_1")]
-impl From<postcard::Error> for crate::DataError {
+impl From<postcard::Error> for DataError {
     fn from(e: postcard::Error) -> Self {
         DataErrorKind::Deserialize
             .with_str_context("postcard")

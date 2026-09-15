@@ -2,9 +2,6 @@
   "main": {
     "fr": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "fr"
       },
       "localeDisplayNames": {
@@ -79,6 +76,7 @@
           "bjn": "banjar",
           "bkm": "kom",
           "bla": "siksika",
+          "blo": "anii",
           "bm": "bambara",
           "bn": "bengali",
           "bo": "tibétain",
@@ -116,7 +114,6 @@
           "chy": "cheyenne",
           "ckb": "sorani",
           "ckb-alt-menu": "kurde sorani",
-          "ckb-alt-variant": "sorani",
           "clc": "chilcotin",
           "co": "corse",
           "cop": "copte",
@@ -170,9 +167,7 @@
           "en-AU": "anglais australien",
           "en-CA": "anglais canadien",
           "en-GB": "anglais britannique",
-          "en-GB-alt-short": "anglais britannique",
           "en-US": "anglais américain",
-          "en-US-alt-short": "anglais américain",
           "enm": "moyen anglais",
           "eo": "espéranto",
           "es": "espagnol",
@@ -221,7 +216,6 @@
           "gmh": "moyen haut-allemand",
           "gn": "guarani",
           "goh": "ancien haut allemand",
-          "gom": "konkani de Goa",
           "gon": "gondi",
           "gor": "gorontalo",
           "got": "gotique",
@@ -327,11 +321,14 @@
           "ksf": "bafia",
           "ksh": "kölsch",
           "ku": "kurde",
+          "ku-menu-core": "kurde",
+          "ku-menu-extension": "kurmandji",
           "kum": "koumyk",
           "kut": "kutenai",
           "kv": "komi",
           "kw": "cornique",
           "kwk": "kwak’wala",
+          "kxv": "kuvi",
           "ky": "kirghize",
           "la": "latin",
           "lad": "ladino",
@@ -361,7 +358,6 @@
           "lua": "luba-kasaï (ciluba)",
           "lui": "luiseño",
           "lun": "lunda",
-          "luo": "luo",
           "lus": "lushaï",
           "luy": "luyia",
           "lv": "letton",
@@ -630,6 +626,7 @@
           "vi": "vietnamien",
           "vls": "flamand occidental",
           "vmf": "franconien du Main",
+          "vmw": "macua",
           "vo": "volapük",
           "vot": "vote",
           "vro": "võro",
@@ -645,6 +642,7 @@
           "xal": "kalmouk",
           "xh": "xhosa",
           "xmf": "mingrélien",
+          "xnr": "kangri",
           "xog": "soga",
           "yao": "yao",
           "yap": "yapois",

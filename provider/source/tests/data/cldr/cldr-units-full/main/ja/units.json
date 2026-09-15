@@ -2,9 +2,6 @@
   "main": {
     "ja": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "ja"
       },
       "units": {
@@ -208,7 +205,11 @@
             "displayName": "項目",
             "unitPattern-count-other": "{0} 項目"
           },
-          "concentr-permillion": {
+          "concentr-part": {
+            "displayName": "パーツ",
+            "unitPattern-count-other": "{0} パーツ"
+          },
+          "concentr-part-per-1e6": {
             "displayName": "ppm",
             "unitPattern-count-other": "{0} ppm"
           },
@@ -227,6 +228,10 @@
           "concentr-mole": {
             "displayName": "モル",
             "unitPattern-count-other": "{0} モル"
+          },
+          "concentr-ofglucose": {
+            "displayName": "グルコース",
+            "unitPattern-count-other": "{0} グルコース"
           },
           "consumption-liter-per-kilometer": {
             "displayName": "リットル毎キロメートル",
@@ -404,9 +409,17 @@
             "displayName": "重量ポンド",
             "unitPattern-count-other": "{0} 重量ポンド"
           },
+          "force-poundal": {
+            "displayName": "pdl",
+            "unitPattern-count-other": "{0} pdl"
+          },
           "force-newton": {
             "displayName": "ニュートン",
             "unitPattern-count-other": "{0} ニュートン"
+          },
+          "force-dyne": {
+            "displayName": "dyn",
+            "unitPattern-count-other": "{0} dyn"
           },
           "force-kilowatt-hour-per-100-kilometer": {
             "displayName": "キロワット時毎100キロメートル",
@@ -516,6 +529,10 @@
             "displayName": "インチ",
             "unitPattern-count-other": "{0} インチ",
             "perUnitPattern": "{0}/インチ"
+          },
+          "length-milliinch": {
+            "displayName": "milli-inch",
+            "unitPattern-count-other": "{0} milli-inch"
           },
           "length-parsec": {
             "displayName": "パーセク",
@@ -661,6 +678,10 @@
             "displayName": "水銀柱ミリメートル",
             "unitPattern-count-other": "{0} 水銀柱ミリメートル"
           },
+          "pressure-ofhg": {
+            "displayName": "水銀柱",
+            "unitPattern-count-other": "{0}Hg"
+          },
           "pressure-pound-force-per-square-inch": {
             "displayName": "重量ポンド毎平方インチ",
             "unitPattern-count-other": "{0} 重量ポンド毎平方インチ"
@@ -804,6 +825,10 @@
             "displayName": "メトリックカップ",
             "unitPattern-count-other": "{0} メトリックカップ"
           },
+          "volume-fluid-ounce-metric": {
+            "displayName": "メトリック液量オンス",
+            "unitPattern-count-other": "{0} メトリック液量オンス"
+          },
           "volume-acre-foot": {
             "displayName": "エーカーフィート",
             "unitPattern-count-other": "{0} エーカーフィート"
@@ -830,9 +855,17 @@
             "displayName": "パイント",
             "unitPattern-count-other": "{0} パイント"
           },
+          "volume-pint-imperial": {
+            "displayName": "pint Imp.",
+            "unitPattern-count-other": "{0} pt Imp."
+          },
           "volume-cup": {
             "displayName": "カップ - 米国",
             "unitPattern-count-other": "{0} カップ - 米国"
+          },
+          "volume-cup-imperial": {
+            "displayName": "cup Imp.",
+            "unitPattern-count-other": "{0} cup Imp."
           },
           "volume-fluid-ounce": {
             "displayName": "液量オンス",
@@ -881,6 +914,86 @@
           "volume-quart-imperial": {
             "displayName": "英クォート",
             "unitPattern-count-other": "{0} 英クォート"
+          },
+          "angle-steradian": {
+            "displayName": "ステラジアン",
+            "unitPattern-count-other": "{0} ステラジアン"
+          },
+          "concentr-katal": {
+            "displayName": "カタール",
+            "unitPattern-count-other": "{0} カタール"
+          },
+          "electric-coulomb": {
+            "displayName": "クーロン",
+            "unitPattern-count-other": "{0} クーロン"
+          },
+          "electric-farad": {
+            "displayName": "ファラド",
+            "unitPattern-count-other": "{0} ファラド"
+          },
+          "electric-henry": {
+            "displayName": "ヘンリー",
+            "unitPattern-count-other": "{0} ヘンリー"
+          },
+          "electric-siemens": {
+            "displayName": "ジーメンス",
+            "unitPattern-count-other": "{0} ジーメンス"
+          },
+          "energy-calorie-it": {
+            "displayName": "国際蒸気表カロリー",
+            "unitPattern-count-other": "{0} 国際蒸気表カロリー"
+          },
+          "energy-british-thermal-unit-it": {
+            "displayName": "BTU-IT",
+            "unitPattern-count-other": "{0} BTU-IT"
+          },
+          "energy-becquerel": {
+            "displayName": "ベクレル",
+            "unitPattern-count-other": "{0} ベクレル"
+          },
+          "energy-sievert": {
+            "displayName": "シーベルト",
+            "unitPattern-count-other": "{0} シーベルト"
+          },
+          "energy-gray": {
+            "displayName": "グレイ",
+            "unitPattern-count-other": "{0} グレイ"
+          },
+          "force-kilogram-force": {
+            "displayName": "重量キログラム",
+            "unitPattern-count-other": "{0} 重量キログラム"
+          },
+          "length-rod": {
+            "displayName": "rod",
+            "unitPattern-count-other": "{0} rod"
+          },
+          "length-chain": {
+            "displayName": "chain",
+            "unitPattern-count-other": "{0} chain"
+          },
+          "magnetic-tesla": {
+            "displayName": "テスラ",
+            "unitPattern-count-other": "{0} テスラ"
+          },
+          "magnetic-weber": {
+            "displayName": "ウェーバ",
+            "unitPattern-count-other": "{0} ウェーバ"
+          },
+          "temperature-rankine": {
+            "displayName": "°R",
+            "unitPattern-count-other": "{0} °R"
+          },
+          "duration-fortnight": {
+            "displayName": "fortnight",
+            "unitPattern-count-other": "{0} fw"
+          },
+          "mass-slug": {
+            "displayName": "slug",
+            "unitPattern-count-other": "{0} slug"
+          },
+          "pressure-gasoline-energy-density": {
+            "displayName": "gas E",
+            "unitPattern-count-other": "{0} gas E"
           },
           "length-rin": {
             "displayName": "厘",
@@ -950,9 +1063,22 @@
             "displayName": "石",
             "unitPattern-count-other": "{0} 石"
           },
+          "speed-light-speed": {
+            "displayName": "光",
+            "unitPattern-count-other": "{0} 光"
+          },
           "mass-fun": {
             "displayName": "分 - 質量",
             "unitPattern-count-other": "{0} 分 - 質量"
+          },
+          "concentr-part-per-1e9": {
+            "displayName": "ppb",
+            "unitPattern-count-other": "{0} ppb"
+          },
+          "duration-night": {
+            "displayName": "泊",
+            "unitPattern-count-other": "{0} 泊",
+            "perUnitPattern": "{0}/泊"
           },
           "coordinateUnit": {
             "displayName": "方位",
@@ -1162,7 +1288,11 @@
             "displayName": "項目",
             "unitPattern-count-other": "{0} 項目"
           },
-          "concentr-permillion": {
+          "concentr-part": {
+            "displayName": "パーツ",
+            "unitPattern-count-other": "{0} パーツ"
+          },
+          "concentr-part-per-1e6": {
             "displayName": "ppm",
             "unitPattern-count-other": "{0} ppm"
           },
@@ -1181,6 +1311,10 @@
           "concentr-mole": {
             "displayName": "モル",
             "unitPattern-count-other": "{0} mol"
+          },
+          "concentr-ofglucose": {
+            "displayName": "グルコース",
+            "unitPattern-count-other": "{0} Glc"
           },
           "consumption-liter-per-kilometer": {
             "displayName": "L/km",
@@ -1358,9 +1492,17 @@
             "displayName": "重量ポンド",
             "unitPattern-count-other": "{0} lbf"
           },
+          "force-poundal": {
+            "displayName": "pdl",
+            "unitPattern-count-other": "{0} pdl"
+          },
           "force-newton": {
             "displayName": "ニュートン",
             "unitPattern-count-other": "{0} N"
+          },
+          "force-dyne": {
+            "displayName": "dyn",
+            "unitPattern-count-other": "{0} dyn"
           },
           "force-kilowatt-hour-per-100-kilometer": {
             "displayName": "kWh/100km",
@@ -1470,6 +1612,10 @@
             "displayName": "インチ",
             "unitPattern-count-other": "{0} in",
             "perUnitPattern": "{0}/in"
+          },
+          "length-milliinch": {
+            "displayName": "milli-inch",
+            "unitPattern-count-other": "{0} milli-inch"
           },
           "length-parsec": {
             "displayName": "パーセク",
@@ -1615,6 +1761,10 @@
             "displayName": "水銀柱ミリメートル",
             "unitPattern-count-other": "{0} mm Hg"
           },
+          "pressure-ofhg": {
+            "displayName": "水銀柱",
+            "unitPattern-count-other": "{0}Hg"
+          },
           "pressure-pound-force-per-square-inch": {
             "displayName": "重量ポンド毎平方インチ",
             "unitPattern-count-other": "{0} psi"
@@ -1758,6 +1908,10 @@
             "displayName": "メトリックカップ",
             "unitPattern-count-other": "{0} mc"
           },
+          "volume-fluid-ounce-metric": {
+            "displayName": "メトリック液量オンス",
+            "unitPattern-count-other": "{0} fl oz m."
+          },
           "volume-acre-foot": {
             "displayName": "エーカーフィート",
             "unitPattern-count-other": "{0} ac ft"
@@ -1784,9 +1938,17 @@
             "displayName": "パイント",
             "unitPattern-count-other": "{0} pt"
           },
+          "volume-pint-imperial": {
+            "displayName": "pint Imp.",
+            "unitPattern-count-other": "{0} pt Imp."
+          },
           "volume-cup": {
             "displayName": "カップ - 米国",
             "unitPattern-count-other": "{0} カップ - 米国"
+          },
+          "volume-cup-imperial": {
+            "displayName": "cup Imp.",
+            "unitPattern-count-other": "{0} cup Imp."
           },
           "volume-fluid-ounce": {
             "displayName": "液量オンス",
@@ -1835,6 +1997,86 @@
           "volume-quart-imperial": {
             "displayName": "英クォート",
             "unitPattern-count-other": "{0} qt Imp."
+          },
+          "angle-steradian": {
+            "displayName": "ステラジアン",
+            "unitPattern-count-other": "{0} sr"
+          },
+          "concentr-katal": {
+            "displayName": "カタール",
+            "unitPattern-count-other": "{0} kat"
+          },
+          "electric-coulomb": {
+            "displayName": "C",
+            "unitPattern-count-other": "{0} C"
+          },
+          "electric-farad": {
+            "displayName": "F",
+            "unitPattern-count-other": "{0} F"
+          },
+          "electric-henry": {
+            "displayName": "H",
+            "unitPattern-count-other": "{0} H"
+          },
+          "electric-siemens": {
+            "displayName": "S",
+            "unitPattern-count-other": "{0} S"
+          },
+          "energy-calorie-it": {
+            "displayName": "cal-IT",
+            "unitPattern-count-other": "{0} cal-IT"
+          },
+          "energy-british-thermal-unit-it": {
+            "displayName": "BTU-IT",
+            "unitPattern-count-other": "{0} BTU-IT"
+          },
+          "energy-becquerel": {
+            "displayName": "Bq",
+            "unitPattern-count-other": "{0} Bq"
+          },
+          "energy-sievert": {
+            "displayName": "Sv",
+            "unitPattern-count-other": "{0} Sv"
+          },
+          "energy-gray": {
+            "displayName": "Gy",
+            "unitPattern-count-other": "{0} Gy"
+          },
+          "force-kilogram-force": {
+            "displayName": "重量キログラム",
+            "unitPattern-count-other": "{0} kgf"
+          },
+          "length-rod": {
+            "displayName": "rod",
+            "unitPattern-count-other": "{0} rod"
+          },
+          "length-chain": {
+            "displayName": "chain",
+            "unitPattern-count-other": "{0} chain"
+          },
+          "magnetic-tesla": {
+            "displayName": "テスラ",
+            "unitPattern-count-other": "{0} T"
+          },
+          "magnetic-weber": {
+            "displayName": "ウェーバ",
+            "unitPattern-count-other": "{0} Wb"
+          },
+          "temperature-rankine": {
+            "displayName": "°R",
+            "unitPattern-count-other": "{0} °R"
+          },
+          "duration-fortnight": {
+            "displayName": "fortnight",
+            "unitPattern-count-other": "{0} fw"
+          },
+          "mass-slug": {
+            "displayName": "slug",
+            "unitPattern-count-other": "{0} slug"
+          },
+          "pressure-gasoline-energy-density": {
+            "displayName": "gas E",
+            "unitPattern-count-other": "{0} gas E"
           },
           "length-rin": {
             "displayName": "厘",
@@ -1904,9 +2146,22 @@
             "displayName": "石",
             "unitPattern-count-other": "{0} 石"
           },
+          "speed-light-speed": {
+            "displayName": "光",
+            "unitPattern-count-other": "{0} 光"
+          },
           "mass-fun": {
             "displayName": "分 - 質量",
             "unitPattern-count-other": "{0} 分 - 質量"
+          },
+          "concentr-part-per-1e9": {
+            "displayName": "ppb",
+            "unitPattern-count-other": "{0} ppb"
+          },
+          "duration-night": {
+            "displayName": "泊",
+            "unitPattern-count-other": "{0} 泊",
+            "perUnitPattern": "{0}/泊"
           },
           "coordinateUnit": {
             "displayName": "方位",
@@ -2116,7 +2371,11 @@
             "displayName": "項目",
             "unitPattern-count-other": "{0}項目"
           },
-          "concentr-permillion": {
+          "concentr-part": {
+            "displayName": "パーツ",
+            "unitPattern-count-other": "{0}パーツ"
+          },
+          "concentr-part-per-1e6": {
             "displayName": "ppm",
             "unitPattern-count-other": "{0}ppm"
           },
@@ -2135,6 +2394,10 @@
           "concentr-mole": {
             "displayName": "mol",
             "unitPattern-count-other": "{0}mol"
+          },
+          "concentr-ofglucose": {
+            "displayName": "グルコース",
+            "unitPattern-count-other": "{0}Glc"
           },
           "consumption-liter-per-kilometer": {
             "displayName": "L/km",
@@ -2312,9 +2575,17 @@
             "displayName": "lbf",
             "unitPattern-count-other": "{0}lbf"
           },
+          "force-poundal": {
+            "displayName": "pdl",
+            "unitPattern-count-other": "{0} pdl"
+          },
           "force-newton": {
             "displayName": "N",
             "unitPattern-count-other": "{0}N"
+          },
+          "force-dyne": {
+            "displayName": "dyn",
+            "unitPattern-count-other": "{0} dyn"
           },
           "force-kilowatt-hour-per-100-kilometer": {
             "displayName": "kWh/100km",
@@ -2424,6 +2695,10 @@
             "displayName": "インチ",
             "unitPattern-count-other": "{0}″",
             "perUnitPattern": "{0}/in"
+          },
+          "length-milliinch": {
+            "displayName": "milli-inch",
+            "unitPattern-count-other": "{0} milli-inch"
           },
           "length-parsec": {
             "displayName": "パーセク",
@@ -2569,6 +2844,10 @@
             "displayName": "水銀柱ミリメートル",
             "unitPattern-count-other": "{0}mmHg"
           },
+          "pressure-ofhg": {
+            "displayName": "水銀柱",
+            "unitPattern-count-other": "{0}Hg"
+          },
           "pressure-pound-force-per-square-inch": {
             "displayName": "重量ポンド毎平方インチ",
             "unitPattern-count-other": "{0}psi"
@@ -2712,6 +2991,10 @@
             "displayName": "メトリックカップ",
             "unitPattern-count-other": "{0}mc"
           },
+          "volume-fluid-ounce-metric": {
+            "displayName": "メトリック液量オンス",
+            "unitPattern-count-other": "{0} fl oz m."
+          },
           "volume-acre-foot": {
             "displayName": "ac ft",
             "unitPattern-count-other": "{0}ac ft"
@@ -2738,9 +3021,17 @@
             "displayName": "pt",
             "unitPattern-count-other": "{0}pt"
           },
+          "volume-pint-imperial": {
+            "displayName": "pint Imp.",
+            "unitPattern-count-other": "{0} pt Imp."
+          },
           "volume-cup": {
             "displayName": "カップ",
             "unitPattern-count-other": "{0}カップ"
+          },
+          "volume-cup-imperial": {
+            "displayName": "cup Imp.",
+            "unitPattern-count-other": "{0} cup Imp."
           },
           "volume-fluid-ounce": {
             "displayName": "fl oz",
@@ -2789,6 +3080,86 @@
           "volume-quart-imperial": {
             "displayName": "qt Imp",
             "unitPattern-count-other": "{0}qt-Imp."
+          },
+          "angle-steradian": {
+            "displayName": "ステラジアン",
+            "unitPattern-count-other": "{0}sr"
+          },
+          "concentr-katal": {
+            "displayName": "カタール",
+            "unitPattern-count-other": "{0}kat"
+          },
+          "electric-coulomb": {
+            "displayName": "C",
+            "unitPattern-count-other": "{0} C"
+          },
+          "electric-farad": {
+            "displayName": "F",
+            "unitPattern-count-other": "{0} F"
+          },
+          "electric-henry": {
+            "displayName": "H",
+            "unitPattern-count-other": "{0} H"
+          },
+          "electric-siemens": {
+            "displayName": "S",
+            "unitPattern-count-other": "{0} S"
+          },
+          "energy-calorie-it": {
+            "displayName": "cal-IT",
+            "unitPattern-count-other": "{0} cal-IT"
+          },
+          "energy-british-thermal-unit-it": {
+            "displayName": "BTU-IT",
+            "unitPattern-count-other": "{0} BTU-IT"
+          },
+          "energy-becquerel": {
+            "displayName": "Bq",
+            "unitPattern-count-other": "{0} Bq"
+          },
+          "energy-sievert": {
+            "displayName": "Sv",
+            "unitPattern-count-other": "{0} Sv"
+          },
+          "energy-gray": {
+            "displayName": "Gy",
+            "unitPattern-count-other": "{0} Gy"
+          },
+          "force-kilogram-force": {
+            "displayName": "重量キログラム",
+            "unitPattern-count-other": "{0}kgf"
+          },
+          "length-rod": {
+            "displayName": "rod",
+            "unitPattern-count-other": "{0} rod"
+          },
+          "length-chain": {
+            "displayName": "chain",
+            "unitPattern-count-other": "{0} chain"
+          },
+          "magnetic-tesla": {
+            "displayName": "テスラ",
+            "unitPattern-count-other": "{0}T"
+          },
+          "magnetic-weber": {
+            "displayName": "ウェーバ",
+            "unitPattern-count-other": "{0}Wb"
+          },
+          "temperature-rankine": {
+            "displayName": "°R",
+            "unitPattern-count-other": "{0} °R"
+          },
+          "duration-fortnight": {
+            "displayName": "fortnight",
+            "unitPattern-count-other": "{0} fw"
+          },
+          "mass-slug": {
+            "displayName": "slug",
+            "unitPattern-count-other": "{0} slug"
+          },
+          "pressure-gasoline-energy-density": {
+            "displayName": "gas E",
+            "unitPattern-count-other": "{0} gas E"
           },
           "length-rin": {
             "displayName": "厘",
@@ -2858,9 +3229,22 @@
             "displayName": "石",
             "unitPattern-count-other": "{0}石"
           },
+          "speed-light-speed": {
+            "displayName": "光",
+            "unitPattern-count-other": "{0}光"
+          },
           "mass-fun": {
             "displayName": "分",
             "unitPattern-count-other": "{0}分"
+          },
+          "concentr-part-per-1e9": {
+            "displayName": "ppb",
+            "unitPattern-count-other": "{0}ppb"
+          },
+          "duration-night": {
+            "displayName": "泊",
+            "unitPattern-count-other": "{0}泊",
+            "perUnitPattern": "{0}/泊"
           },
           "coordinateUnit": {
             "displayName": "方位",

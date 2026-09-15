@@ -2,9 +2,6 @@
   "main": {
     "ja": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "ja"
       },
       "localeDisplayNames": {
@@ -94,6 +91,7 @@
           "CN": "中国",
           "CO": "コロンビア",
           "CP": "クリッパートン島",
+          "CQ": "サーク島",
           "CR": "コスタリカ",
           "CU": "キューバ",
           "CV": "カーボベルデ",
@@ -160,7 +158,6 @@
           "IM": "マン島",
           "IN": "インド",
           "IO": "英領インド洋地域",
-          "IO-alt-biot": "英領インド洋地域",
           "IO-alt-chagos": "チャゴス諸島",
           "IQ": "イラク",
           "IR": "イラン",

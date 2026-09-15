@@ -6,6 +6,11 @@
             "options": {
                 "components": {
                     "year": "numeric"
+                },
+                "semantic": {
+                    "dateFields": "Y",
+                    "length": "short",
+                    "yearStyle": "full"
                 }
             }
         },
@@ -23,6 +28,11 @@
                 "components": {
                     "year": "numeric",
                     "month": "numeric"
+                },
+                "semantic": {
+                    "dateFields": "YM",
+                    "length": "short",
+                    "yearStyle": "full"
                 }
             }
         },
@@ -41,6 +51,11 @@
                     "year": "numeric",
                     "month": "numeric",
                     "day": "numeric-day-of-month"
+                },
+                "semantic": {
+                    "dateFields": "YMD",
+                    "length": "short",
+                    "yearStyle": "full"
                 }
             }
         },
@@ -60,6 +75,11 @@
                     "month": "numeric",
                     "day": "numeric-day-of-month",
                     "weekday": "short"
+                },
+                "semantic": {
+                    "dateFields": "YMDE",
+                    "length": "short",
+                    "yearStyle": "full"
                 }
             }
         },
@@ -77,6 +97,10 @@
                 "components": {
                     "year": "numeric",
                     "month": "short"
+                },
+                "semantic": {
+                    "dateFields": "YM",
+                    "length": "medium"
                 }
             }
         },
@@ -95,6 +119,10 @@
                     "year": "numeric",
                     "month": "short",
                     "day": "numeric-day-of-month"
+                },
+                "semantic": {
+                    "dateFields": "YMD",
+                    "length": "medium"
                 }
             }
         },
@@ -114,6 +142,10 @@
                     "month": "short",
                     "day": "numeric-day-of-month",
                     "weekday": "short"
+                },
+                "semantic": {
+                    "dateFields": "YMDE",
+                    "length": "medium"
                 }
             }
         },
@@ -131,6 +163,10 @@
                 "components": {
                     "year": "numeric",
                     "month": "long"
+                },
+                "semantic": {
+                    "dateFields": "YM",
+                    "length": "long"
                 }
             }
         },
@@ -147,6 +183,10 @@
             "options": {
                 "components": {
                     "month": "short"
+                },
+                "semantic": {
+                    "dateFields": "M",
+                    "length": "medium"
                 }
             }
         },
@@ -164,6 +204,10 @@
                 "components": {
                     "month": "numeric",
                     "day": "numeric-day-of-month"
+                },
+                "semantic": {
+                    "dateFields": "MD",
+                    "length": "short"
                 }
             }
         },
@@ -182,6 +226,10 @@
                     "month": "numeric",
                     "day": "numeric-day-of-month",
                     "weekday": "short"
+                },
+                "semantic": {
+                    "dateFields": "MDE",
+                    "length": "short"
                 }
             }
         },
@@ -198,6 +246,10 @@
             "options": {
                 "components": {
                     "month": "short"
+                },
+                "semantic": {
+                    "dateFields": "M",
+                    "length": "medium"
                 }
             }
         },
@@ -215,6 +267,10 @@
                 "components": {
                     "month": "short",
                     "day": "numeric-day-of-month"
+                },
+                "semantic": {
+                    "dateFields": "MD",
+                    "length": "medium"
                 }
             }
         },
@@ -233,6 +289,10 @@
                     "month": "short",
                     "day": "numeric-day-of-month",
                     "weekday": "short"
+                },
+                "semantic": {
+                    "dateFields": "MDE",
+                    "length": "medium"
                 }
             }
         },
@@ -250,6 +310,10 @@
                 "components": {
                     "month": "long",
                     "day": "numeric-day-of-month"
+                },
+                "semantic": {
+                    "dateFields": "MD",
+                    "length": "long"
                 }
             }
         },
@@ -266,6 +330,10 @@
             "options": {
                 "components": {
                     "day": "numeric-day-of-month"
+                },
+                "semantic": {
+                    "dateFields": "D",
+                    "length": "short"
                 }
             }
         },
@@ -283,6 +351,10 @@
                 "components": {
                     "day": "numeric-day-of-month",
                     "weekday": "short"
+                },
+                "semantic": {
+                    "dateFields": "DE",
+                    "length": "medium"
                 }
             }
         },
@@ -299,6 +371,10 @@
             "options": {
                 "components": {
                     "weekday": "short"
+                },
+                "semantic": {
+                    "dateFields": "E",
+                    "length": "medium"
                 }
             }
         },
@@ -316,8 +392,12 @@
                 "components": {
                     "weekday": "short",
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "dateFields": "E",
+                    "length": "medium",
+                    "timePrecision": "minute"
                 }
             }
         },
@@ -336,8 +416,12 @@
                     "weekday": "short",
                     "hour": "numeric",
                     "minute": "numeric",
-                    "second": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "second": "numeric"
+                },
+                "semantic": {
+                    "dateFields": "E",
+                    "length": "medium",
+                    "timePrecision": "second"
                 }
             }
         },
@@ -348,26 +432,30 @@
         }
     },
     {
-        "description": "Exact match for: EHm => E h:mm a",
+        "description": "Exact match for: EHm => E HH:mm (TODO #5387)",
         "input": {
             "value": "2020-01-07T08:25:07.000",
             "options": {
                 "components": {
                     "weekday": "short",
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "dateFields": "E",
+                    "length": "medium",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "Tue 08:25"
+                "en-u-hc-h23": "Tue, 08:25"
             }
         }
     },
     {
-        "description": "Exact match for: EHms => E h:mm:ss a",
+        "description": "Exact match for: EHms => E HH:mm:ss (TODO #5387)",
         "input": {
             "value": "2020-01-07T08:25:07.000",
             "options": {
@@ -375,14 +463,18 @@
                     "weekday": "short",
                     "hour": "numeric",
                     "minute": "numeric",
-                    "second": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "second": "numeric"
+                },
+                "semantic": {
+                    "dateFields": "E",
+                    "length": "medium",
+                    "timePrecision": "second"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "Tue 08:25:07"
+                "en-u-hc-h23": "Tue, 08:25:07"
             }
         }
     },
@@ -392,14 +484,17 @@
             "value": "2020-01-07T08:25:07.000",
             "options": {
                 "components": {
-                    "hour": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "hour": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "hour"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "8\u202fAM"
+                "en-u-hc-h12": "8\u202fAM"
             }
         }
     },
@@ -410,14 +505,17 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "8:25\u202fAM"
+                "en-u-hc-h12": "8:25\u202fAM"
             }
         }
     },
@@ -429,14 +527,17 @@
                 "components": {
                     "hour": "numeric",
                     "minute": "numeric",
-                    "second": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "second": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "second"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "8:25:07\u202fAM"
+                "en-u-hc-h12": "8:25:07\u202fAM"
             }
         }
     },
@@ -446,14 +547,17 @@
             "value": "2020-01-07T08:25:07.000",
             "options": {
                 "components": {
-                    "hour": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "hour": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "hour"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "08"
+                "en-u-hc-h23": "08"
             }
         }
     },
@@ -464,14 +568,17 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "08:25"
+                "en-u-hc-h23": "08:25"
             }
         }
     },
@@ -483,14 +590,17 @@
                 "components": {
                     "hour": "numeric",
                     "minute": "numeric",
-                    "second": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "second": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "second"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "08:25:07"
+                "en-u-hc-h23": "08:25:07"
             }
         }
     },

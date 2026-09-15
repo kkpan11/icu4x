@@ -4,7 +4,7 @@
 
 //! Data for the `icu_properties` crate
 //!
-//! This data was generated with CLDR version 45.0.0, ICU version icu4x/2024-05-16/75.x, and
+//! This data was generated with CLDR version 49.0.0-ALPHA2, Unicode version 18.0.0, and
 //! LSTM segmenter version v0.1.0.
 
 #![no_std]
@@ -16,6 +16,23 @@ include!(concat!(core::env!("ICU4X_DATA_DIR"), "/mod.rs"));
 #[cfg(not(icu4x_custom_data))]
 include!("../data/mod.rs");
 
-#[rustfmt::skip]
-pub use icu_provider_baked;
-pub use icu_locale;
+#[macro_export]
+macro_rules! cldr_tag {
+    () => {
+        "49.0.0-ALPHA2"
+    };
+}
+
+#[macro_export]
+macro_rules! unicode_tag {
+    () => {
+        "18.0.0"
+    };
+}
+
+#[macro_export]
+macro_rules! segmenter_lstm_tag {
+    () => {
+        "v0.1.0"
+    };
+}

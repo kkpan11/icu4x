@@ -11,7 +11,6 @@
 #include "DataProvider.d.h"
 #include "LocaleFallbackConfig.d.h"
 #include "LocaleFallbackerWithConfig.d.h"
-#include "LocaleParseError.d.h"
 
 #include "LocaleFallbacker.d.h"
 
@@ -20,14 +19,14 @@
 
 
 
-typedef struct icu4x_LocaleFallbacker_create_mv1_result {union {LocaleFallbacker* ok; DataError err;}; bool is_ok;} icu4x_LocaleFallbacker_create_mv1_result;
-icu4x_LocaleFallbacker_create_mv1_result icu4x_LocaleFallbacker_create_mv1(const DataProvider* provider);
+LocaleFallbacker* icu4x_LocaleFallbacker_create_mv1(void);
+
+typedef struct icu4x_LocaleFallbacker_create_with_provider_mv1_result {union {LocaleFallbacker* ok; DataError err;}; bool is_ok;} icu4x_LocaleFallbacker_create_with_provider_mv1_result;
+icu4x_LocaleFallbacker_create_with_provider_mv1_result icu4x_LocaleFallbacker_create_with_provider_mv1(const DataProvider* provider);
 
 LocaleFallbacker* icu4x_LocaleFallbacker_without_data_mv1(void);
 
-typedef struct icu4x_LocaleFallbacker_for_config_mv1_result {union {LocaleFallbackerWithConfig* ok; LocaleParseError err;}; bool is_ok;} icu4x_LocaleFallbacker_for_config_mv1_result;
-icu4x_LocaleFallbacker_for_config_mv1_result icu4x_LocaleFallbacker_for_config_mv1(const LocaleFallbacker* self, LocaleFallbackConfig config);
-
+LocaleFallbackerWithConfig* icu4x_LocaleFallbacker_for_config_mv1(const LocaleFallbacker* self, LocaleFallbackConfig config);
 
 void icu4x_LocaleFallbacker_destroy_mv1(LocaleFallbacker* self);
 

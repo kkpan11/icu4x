@@ -11,7 +11,7 @@
 //!  * [`Unicode Extensions`] - marked as `u`.
 //!  * [`Transform Extensions`] - marked as `t`.
 //!  * [`Private Use Extensions`] - marked as `x`.
-//!  * [`Other Extensions`] - marked as any `a-z` except of `u`, `t` and `x`.
+//!  * [`Other Extensions`] - marked as any `a-z` or `0-9` except `u`, `t`, and `x`.
 //!
 //! One can think of extensions as a bag of extra information on top of basic 4 [`subtags`].
 //!
@@ -20,8 +20,8 @@
 //! # Examples
 //!
 //! ```
-//! use icu::locale::extensions::unicode::{Key, Value};
 //! use icu::locale::Locale;
+//! use icu::locale::extensions::unicode::{Key, Value};
 //!
 //! let loc: Locale = "en-US-u-ca-buddhist-t-en-us-h0-hybrid-x-foo"
 //!     .parse()
@@ -36,6 +36,14 @@
 //! let value: Value = "buddhist".parse().expect("Parsing value failed.");
 //! assert_eq!(loc.extensions.unicode.keywords.get(&key), Some(&value));
 //! ```
+//!
+//! # Syntactic vs Semantic Extension Handling
+//!
+//! This module is useful when you need to work with Locale extensions at a syntactic level,
+//! perhaps for parsing or generating locale identifiers that include any syntactically valid
+//! extensions.
+//! For handling and validating known CLDR values with semantic meaning, see the
+//! [`crate::preferences::extensions`] module.
 //!
 //! [`LanguageIdentifier`]: super::LanguageIdentifier
 //! [`Locale`]: super::Locale
@@ -52,13 +60,15 @@ pub mod unicode;
 use core::cmp::Ordering;
 
 use other::Other;
-use private::{Private, PRIVATE_EXT_CHAR};
-use transform::{Transform, TRANSFORM_EXT_CHAR};
-use unicode::{Unicode, UNICODE_EXT_CHAR};
+use private::{PRIVATE_EXT_CHAR, Private};
+use transform::{TRANSFORM_EXT_CHAR, Transform};
+use unicode::{UNICODE_EXT_CHAR, Unicode};
 
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
 use crate::parser::ParseError;
+#[cfg(feature = "alloc")]
 use crate::parser::SubtagIterator;
 use crate::subtags;
 
@@ -77,6 +87,7 @@ pub enum ExtensionType {
 }
 
 impl ExtensionType {
+    #[allow(dead_code)]
     pub(crate) const fn try_from_byte_slice(key: &[u8]) -> Result<Self, ParseError> {
         if let [b] = key {
             Self::try_from_byte(*b)
@@ -91,21 +102,17 @@ impl ExtensionType {
             UNICODE_EXT_CHAR => Ok(Self::Unicode),
             TRANSFORM_EXT_CHAR => Ok(Self::Transform),
             PRIVATE_EXT_CHAR => Ok(Self::Private),
-            'a'..='z' => Ok(Self::Other(key)),
+            'a'..='z' | '0'..='9' => Ok(Self::Other(key)),
             _ => Err(ParseError::InvalidExtension),
         }
     }
 
-    pub(crate) const fn try_from_utf8_manual_slice(
-        code_units: &[u8],
-        start: usize,
-        end: usize,
-    ) -> Result<Self, ParseError> {
-        if end - start != 1 {
+    pub(crate) const fn try_from_utf8(code_units: &[u8]) -> Result<Self, ParseError> {
+        let &[first] = code_units else {
             return Err(ParseError::InvalidExtension);
-        }
-        #[allow(clippy::indexing_slicing)]
-        Self::try_from_byte(code_units[start])
+        };
+
+        Self::try_from_byte(first)
     }
 }
 
@@ -122,7 +129,13 @@ pub struct Extensions {
     /// A sequence of any other extensions that are present in the locale identifier but are not formally
     /// [defined](https://unicode.org/reports/tr35/) and represented explicitly as [`Unicode`], [`Transform`],
     /// and [`Private`] are.
+    #[cfg(feature = "alloc")]
     pub other: Vec<Other>,
+    /// A sequence of any other extensions that are present in the locale identifier but are not formally
+    /// [defined](https://unicode.org/reports/tr35/) and represented explicitly as [`Unicode`], [`Transform`],
+    /// and [`Private`] are.
+    #[cfg(not(feature = "alloc"))]
+    pub other: &'static [Other],
 }
 
 impl Extensions {
@@ -141,7 +154,10 @@ impl Extensions {
             unicode: Unicode::new(),
             transform: Transform::new(),
             private: Private::new(),
+            #[cfg(feature = "alloc")]
             other: Vec::new(),
+            #[cfg(not(feature = "alloc"))]
+            other: &[],
         }
     }
 
@@ -153,7 +169,10 @@ impl Extensions {
             unicode,
             transform: Transform::new(),
             private: Private::new(),
+            #[cfg(feature = "alloc")]
             other: Vec::new(),
+            #[cfg(not(feature = "alloc"))]
+            other: &[],
         }
     }
 
@@ -175,7 +194,8 @@ impl Extensions {
             && self.other.is_empty()
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
+    #[cfg_attr(not(feature = "alloc"), expect(clippy::needless_borrow))]
     pub(crate) fn as_tuple(
         &self,
     ) -> (
@@ -189,8 +209,8 @@ impl Extensions {
             )>,
             &transform::Fields,
         ),
-        &private::Private,
-        &[other::Other],
+        &Private,
+        &[Other],
     ) {
         (
             self.unicode.as_tuple(),
@@ -212,11 +232,13 @@ impl Extensions {
 
     /// Retains the specified extension types, clearing all others.
     ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    ///
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::extensions::ExtensionType;
     /// use icu::locale::Locale;
+    /// use icu::locale::extensions::ExtensionType;
     ///
     /// let loc: Locale =
     ///     "und-a-hello-t-mul-u-world-z-zzz-x-extra".parse().unwrap();
@@ -233,6 +255,7 @@ impl Extensions {
     /// });
     /// assert_eq!(only_t_z, "und-t-mul-z-zzz".parse().unwrap());
     /// ```
+    #[cfg(feature = "alloc")]
     pub fn retain_by_type<F>(&mut self, mut predicate: F)
     where
         F: FnMut(ExtensionType) -> bool,
@@ -246,10 +269,12 @@ impl Extensions {
         if !predicate(ExtensionType::Private) {
             self.private.clear();
         }
+        #[cfg(feature = "alloc")]
         self.other
             .retain(|o| predicate(ExtensionType::Other(o.get_ext_byte())));
     }
 
+    #[cfg(feature = "alloc")]
     pub(crate) fn try_from_iter(iter: &mut SubtagIterator) -> Result<Self, ParseError> {
         let mut unicode = None;
         let mut transform = None;
@@ -260,26 +285,31 @@ impl Extensions {
             if subtag.is_empty() {
                 return Err(ParseError::InvalidExtension);
             }
-            match subtag.first().map(|b| ExtensionType::try_from_byte(*b)) {
-                Some(Ok(ExtensionType::Unicode)) => {
+
+            let &[subtag] = subtag else {
+                return Err(ParseError::InvalidExtension);
+            };
+
+            match ExtensionType::try_from_byte(subtag) {
+                Ok(ExtensionType::Unicode) => {
                     if unicode.is_some() {
                         return Err(ParseError::DuplicatedExtension);
                     }
                     unicode = Some(Unicode::try_from_iter(iter)?);
                 }
-                Some(Ok(ExtensionType::Transform)) => {
+                Ok(ExtensionType::Transform) => {
                     if transform.is_some() {
                         return Err(ParseError::DuplicatedExtension);
                     }
                     transform = Some(Transform::try_from_iter(iter)?);
                 }
-                Some(Ok(ExtensionType::Private)) => {
+                Ok(ExtensionType::Private) => {
                     if private.is_some() {
                         return Err(ParseError::DuplicatedExtension);
                     }
                     private = Some(Private::try_from_iter(iter)?);
                 }
-                Some(Ok(ExtensionType::Other(ext))) => {
+                Ok(ExtensionType::Other(ext)) => {
                     if other.iter().any(|o: &Other| o.get_ext_byte() == ext) {
                         return Err(ParseError::DuplicatedExtension);
                     }
@@ -366,5 +396,13 @@ fn test_writeable() {
             .unwrap()
             .extensions,
         "a-foo-t-foo-u-foo-w-foo-z-foo-x-foo",
+    );
+    assert_writeable_eq!(
+        "en-1-ext-value".parse::<Locale>().unwrap().extensions,
+        "1-ext-value",
+    );
+    assert_writeable_eq!(
+        "und-a-foo-1-bar".parse::<Locale>().unwrap().extensions,
+        "1-bar-a-foo",
     );
 }

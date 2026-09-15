@@ -9,14 +9,16 @@ and as part of the [`icu`](https://docs.rs/icu/latest/icu/) crate. See the latte
 
 This module contains segmenter implementation for the following rules.
 
-- Line segmenter that is compatible with [Unicode Standard Annex #14][UAX14], _Unicode Line
-  Breaking Algorithm_, with options to tailor line-breaking behavior for CSS [`line-break`] and
-  [`word-break`] properties.
+- Line segmenter that is compatible with [Unicode Standard Annex #14][UAX14] (version 15.1.0, or
+  version 17.0.0 with the `*_17_*` constructors, or version
+with the `*_neo_*` constructors) _Unicode Line Breaking Algorithm_, with options
+  to tailor line-breaking behavior for CSS [`line-break`] and [`word-break`] properties.
 - Grapheme cluster segmenter, word segmenter, and sentence segmenter that are compatible with
-  [Unicode Standard Annex #29][UAX29], _Unicode Text Segmentation_.
+  [Unicode Standard Annex #29][UAX29]
+, _Unicode Text Segmentation_.
 
-[UAX14]: https://www.unicode.org/reports/tr14/
-[UAX29]: https://www.unicode.org/reports/tr29/
+[UAX14]: https://www.unicode.org/reports/tr14/tr14-51.html
+[UAX29]: https://www.unicode.org/reports/tr29/tr29-47.html
 [`line-break`]: https://drafts.csswg.org/css-text-3/#line-break-property
 [`word-break`]: https://drafts.csswg.org/css-text-3/#word-break-property
 
@@ -29,7 +31,7 @@ Find line break opportunities:
 ```rust
 use icu::segmenter::LineSegmenter;
 
-let segmenter = LineSegmenter::new_auto();
+let segmenter = LineSegmenter::new_auto(Default::default());
 
 let breakpoints: Vec<usize> = segmenter
     .segment_str("Hello World. Xin chào thế giới!")
@@ -67,9 +69,10 @@ See [`GraphemeClusterSegmenter`] for more examples.
 Find all word boundaries:
 
 ```rust
-use icu::segmenter::WordSegmenter;
+use icu::segmenter::{WordSegmenter, options::WordBreakInvariantOptions};
 
-let segmenter = WordSegmenter::new_auto();
+let segmenter =
+    WordSegmenter::new_auto(WordBreakInvariantOptions::default());
 
 let breakpoints: Vec<usize> = segmenter
     .segment_str("Hello World. Xin chào thế giới!")
@@ -87,9 +90,12 @@ See [`WordSegmenter`] for more examples.
 Segment the string into sentences:
 
 ```rust
-use icu::segmenter::SentenceSegmenter;
+use icu::segmenter::{
+    SentenceSegmenter, options::SentenceBreakInvariantOptions,
+};
 
-let segmenter = SentenceSegmenter::new();
+let segmenter =
+    SentenceSegmenter::new(SentenceBreakInvariantOptions::default());
 
 let breakpoints: Vec<usize> = segmenter
     .segment_str("Hello World. Xin chào thế giới!")

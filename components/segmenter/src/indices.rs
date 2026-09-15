@@ -2,6 +2,9 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+pub use core::str::CharIndices;
+pub use utf8_iter::Utf8CharIndices;
+
 /// Similar to [`core::str::CharIndices`] for Latin-1 strings, represented as `[u8]`.
 ///
 /// Contrary to [`core::str::CharIndices`], the second element of the
@@ -20,9 +23,17 @@ impl<'a> Latin1Indices<'a> {
             iter: input,
         }
     }
+
+    pub fn as_slice(&self) -> &'a [u8] {
+        self.iter.get(self.front_offset..).unwrap_or_default()
+    }
+
+    pub fn offset(&self) -> usize {
+        self.front_offset
+    }
 }
 
-impl<'a> Iterator for Latin1Indices<'a> {
+impl Iterator for Latin1Indices<'_> {
     type Item = (usize, u8);
 
     #[inline]
@@ -53,9 +64,17 @@ impl<'a> Utf16Indices<'a> {
             iter: input,
         }
     }
+
+    pub fn as_slice(&self) -> &'a [u16] {
+        self.iter.get(self.front_offset..).unwrap_or_default()
+    }
+
+    pub fn offset(&self) -> usize {
+        self.front_offset
+    }
 }
 
-impl<'a> Iterator for Utf16Indices<'a> {
+impl Iterator for Utf16Indices<'_> {
     type Item = (usize, u32);
 
     #[inline]

@@ -2,9 +2,6 @@
   "main": {
     "th": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "th"
       },
       "dates": {
@@ -109,13 +106,13 @@
             "days": {
               "format": {
                 "abbreviated": {
-                  "sun": "อา.",
-                  "mon": "จ.",
-                  "tue": "อ.",
-                  "wed": "พ.",
-                  "thu": "พฤ.",
-                  "fri": "ศ.",
-                  "sat": "ส."
+                  "sun": "อาทิตย์",
+                  "mon": "จันทร์",
+                  "tue": "อังคาร",
+                  "wed": "พุธ",
+                  "thu": "พฤหัส",
+                  "fri": "ศุกร์",
+                  "sat": "เสาร์"
                 },
                 "narrow": {
                   "sun": "อา",
@@ -147,13 +144,13 @@
               },
               "stand-alone": {
                 "abbreviated": {
-                  "sun": "อา.",
-                  "mon": "จ.",
-                  "tue": "อ.",
-                  "wed": "พ.",
-                  "thu": "พฤ.",
-                  "fri": "ศ.",
-                  "sat": "ส."
+                  "sun": "อาทิตย์",
+                  "mon": "จันทร์",
+                  "tue": "อังคาร",
+                  "wed": "พุธ",
+                  "thu": "พฤหัส",
+                  "fri": "ศุกร์",
+                  "sat": "เสาร์"
                 },
                 "narrow": {
                   "sun": "อา",
@@ -306,16 +303,16 @@
             },
             "eras": {
               "eraNames": {
-                "0": "ERA0",
-                "1": "ERA1"
+                "0": "AA",
+                "1": "AM"
               },
               "eraAbbr": {
-                "0": "ERA0",
-                "1": "ERA1"
+                "0": "AA",
+                "1": "AM"
               },
               "eraNarrow": {
-                "0": "ERA0",
-                "1": "ERA1"
+                "0": "AA",
+                "1": "AM"
               }
             },
             "dateFormats": {
@@ -334,7 +331,7 @@
               "full": "H นาฬิกา mm นาที ss วินาที zzzz",
               "long": "H นาฬิกา mm นาที ss วินาที z",
               "medium": "HH:mm:ss",
-              "short": "HH:mm"
+              "short": "HH:mm น."
             },
             "timeSkeletons": {
               "full": "Hmmsszzzz",
@@ -343,6 +340,10 @@
               "short": "HHmm"
             },
             "dateTimeFormats": {
+              "numericSeparators": {
+                "numericDateSeparator": "/",
+                "numericTimeSeparator": ":"
+              },
               "full": "{1} {0}",
               "long": "{1} {0}",
               "medium": "{1} {0}",
@@ -353,25 +354,31 @@
                 "Bhms": "h:mm:ss B",
                 "d": "d",
                 "E": "ccc",
+                "EBh": "E h B",
                 "EBhm": "E h:mm B",
                 "EBhms": "E h:mm:ss B",
                 "Ed": "E d",
+                "Eh": "E h a",
                 "Ehm": "E h:mm a",
                 "EHm": "E HH:mm",
                 "Ehms": "E h:mm:ss a",
                 "EHms": "E HH:mm:ss",
                 "Gy": "G y",
+                "GyM": "M/y G",
                 "GyMd": "d/M/y GGGGG",
+                "GyMEd": "E ที่ d/M/y G",
                 "GyMMM": "MMM G y",
                 "GyMMMd": "d MMM G y",
                 "GyMMMEd": "E d MMM G y",
                 "GyMMMEEEEd": "EEEEที่ d MMM G y",
-                "h": "h a",
+                "h": "h a",
                 "H": "HH",
                 "hm": "h:mm a",
                 "Hm": "HH:mm",
                 "hms": "h:mm:ss a",
                 "Hms": "HH:mm:ss",
+                "hv": "h a v",
+                "Hv": "HH v",
                 "M": "L",
                 "Md": "d/M",
                 "MEd": "E d/M",
@@ -395,26 +402,33 @@
                 "yyyyQQQQ": "QQQQ G y"
               },
               "appendItems": {
+                "Date-Timezone": "{0} {1}",
                 "Day": "{0} ({2}: {1})",
-                "Day-Of-Week": "{0} {1}",
-                "Era": "{1} {0}",
+                "Day-Of-Week": "{1}ที่ {0}",
+                "Era": "{0} {1}",
                 "Hour": "{0} ({2}: {1})",
                 "Minute": "{0} ({2}: {1})",
                 "Month": "{0} ({2}: {1})",
                 "Quarter": "{0} ({2}: {1})",
                 "Second": "{0} ({2}: {1})",
+                "Time-Day-Of-Week": "{1} {0}",
                 "Timezone": "{0} {1}",
                 "Week": "{0} ({2}: {1})",
                 "Year": "{1} {0}"
               },
               "intervalFormats": {
+                "intervalFormatRanges": {
+                  "mixed": "{0} – {1}",
+                  "non-numeric": "{0}–{1}",
+                  "numeric": "{0}–{1}"
+                },
                 "intervalFormatFallback": "{0} - {1}",
                 "Bh": {
-                  "B": "h B – h B",
+                  "B": "h B – h B",
                   "h": "h – h B"
                 },
                 "Bhm": {
-                  "B": "h:mm B – h:mm B",
+                  "B": "h:mm B – h:mm B",
                   "h": "h:mm – h:mm B",
                   "m": "h:mm – h:mm B"
                 },
@@ -422,7 +436,7 @@
                   "d": "d–d"
                 },
                 "Gy": {
-                  "G": "G y – G y",
+                  "G": "G y – G y",
                   "y": "G y–y"
                 },
                 "GyM": {
@@ -460,14 +474,14 @@
                   "y": "E d MMM G y – E d MMM y"
                 },
                 "h": {
-                  "a": "h a – h a",
-                  "h": "h–h a"
+                  "a": "h a – h a",
+                  "h": "h–h a"
                 },
                 "H": {
                   "H": "H–H"
                 },
                 "hm": {
-                  "a": "h:mm a – h:mm a",
+                  "a": "h:mm a – h:mm a",
                   "h": "h:mm–h:mm a",
                   "m": "h:mm–h:mm a"
                 },
@@ -476,7 +490,7 @@
                   "m": "HH:mm–HH:mm"
                 },
                 "hmv": {
-                  "a": "h:mm a – h:mm a v",
+                  "a": "h:mm a – h:mm a v",
                   "h": "h:mm–h:mm a v",
                   "m": "h:mm–h:mm a v"
                 },
@@ -485,8 +499,8 @@
                   "m": "H:mm–H:mm v"
                 },
                 "hv": {
-                  "a": "h a – h a v",
-                  "h": "h–h a v"
+                  "a": "h a – h a v",
+                  "h": "h–h a v"
                 },
                 "Hv": {
                   "H": "H–H v"
@@ -516,6 +530,10 @@
                 "MMMEEEEd": {
                   "d": "EEEEที่ d – EEEEที่ d MMM",
                   "M": "EEEEที่ d MMM – EEEEที่ d MMM"
+                },
+                "MMMMd": {
+                  "d": "d – d MMMM",
+                  "M": "d MMMM – d MMMM"
                 },
                 "y": {
                   "y": "G y–y"
@@ -560,6 +578,14 @@
               }
             },
             "dateTimeFormats-atTime": {
+              "standard": {
+                "full": "{1} เวลา {0}",
+                "long": "{1} เวลา {0}",
+                "medium": "{1} {0}",
+                "short": "{1} {0}"
+              }
+            },
+            "dateTimeFormats-relative": {
               "standard": {
                 "full": "{1} เวลา {0}",
                 "long": "{1} เวลา {0}",

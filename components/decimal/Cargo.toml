@@ -5,9 +5,10 @@
 [package]
 name = "icu_decimal"
 description = "API for formatting basic decimal numbers in a locale-sensitive way"
+categories.workspace = true
+keywords = ["unicode", "formatting", "numbers"]
 
 authors.workspace = true
-categories.workspace = true
 edition.workspace = true
 homepage.workspace = true
 include.workspace = true
@@ -19,46 +20,47 @@ version.workspace = true
 [package.metadata.docs.rs]
 all-features = true
 
-[dependencies]
-displaydoc = { workspace = true }
-fixed_decimal = { workspace = true }
-icu_provider = { workspace = true, features = ["macros"] }
-writeable = { workspace = true }
+[package.metadata.cargo-all-features]
+max_combination_size = 3
 
+[dependencies]
+fixed_decimal = { workspace = true }
+icu_provider = { workspace = true }
+icu_locale_core = { workspace = true }
+writeable = { workspace = true }
+zerovec = { workspace = true, features = ["alloc"] }
 databake = { workspace = true, features = ["derive"], optional = true}
-serde = { workspace = true, features = ["derive", "alloc"], optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+icu_plurals = { workspace = true, optional = true }
+icu_pattern = { workspace = true, features = ["zerovec"], optional = true }
+displaydoc = { workspace = true }
 
 icu_decimal_data = { workspace = true, optional = true }
+icu_locale_fallback = { workspace = true, optional = true }
 
 [dev-dependencies]
 icu = { path = "../../components/icu", default-features = false }
-icu_benchmark_macros = { path = "../../tools/benchmark/macros" }
-icu_locale_core = { path = "../../components/locale_core" }
 icu_provider_adapters = { path = "../../provider/adapters" }
 rand = { workspace = true }
 rand_pcg = { workspace = true }
 rand_distr = { workspace = true }
-getrandom = { workspace = true, features = ["js"] }
+getrandom = { workspace = true, features = ["wasm_js"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 criterion = { workspace = true }
 
 [features]
 default = ["compiled_data"]
-std = ["fixed_decimal/std", "icu_locale_core/std", "icu_provider/std"]
-serde = ["dep:serde", "icu_provider/serde"]
-datagen = ["serde", "dep:databake"]
-bench = ["serde"]
-compiled_data = ["dep:icu_decimal_data"]
-
-[package.metadata.cargo-all-features]
-# Bench feature gets tested separately and is only relevant for CI
-denylist = ["bench"]
+serde = ["alloc", "dep:serde", "icu_provider/serde", "zerovec/serde", "icu_pattern?/serde", "icu_plurals?/serde"]
+datagen = ["serde", "dep:databake", "zerovec/databake", "icu_provider/export", "alloc", "icu_plurals?/datagen"]
+compiled_data = ["dep:icu_decimal_data", "dep:icu_locale_fallback", "icu_locale_fallback?/compiled_data", "icu_provider/baked", "icu_plurals?/compiled_data"]
+ryu = ["fixed_decimal/ryu"]
+alloc = ["serde?/alloc", "zerovec/alloc"]
+unstable = ["dep:icu_pattern", "dep:icu_plurals"]
 
 [[bench]]
 name = "fixed_decimal_format"
 harness = false
 
-[[example]]
-name = "code_line_diff"
-required-features = ["serde"]
+[lints]
+workspace = true

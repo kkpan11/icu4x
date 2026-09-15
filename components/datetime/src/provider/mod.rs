@@ -15,23 +15,18 @@
 //!
 //! Read more about data providers: [`icu_provider`]
 
-pub mod calendar;
-pub(crate) mod date_time;
+#[cfg(feature = "serde")]
+pub(crate) mod compat;
+pub mod day_periods;
+pub mod fields;
+pub mod names;
+pub mod packed_pattern;
+pub mod pattern;
+pub mod range_patterns;
+pub mod semantic_skeletons;
+#[cfg(feature = "datagen")]
+pub mod skeleton;
 pub mod time_zones;
-
-/// Module for experimental new DateSymbols design
-/// <https://github.com/unicode-org/icu4x/issues/3865>
-///
-/// <div class="stab unstable">
-/// 🚧 This code is considered unstable; it may change at any time, in breaking or non-breaking ways,
-/// including in SemVer minor releases. While the serde representation of data structs is guaranteed
-/// to be stable, their Rust representation might not be. Use with caution.
-/// </div>
-//
-//
-// WHEN THIS GRADUATES; be sure to update the check for "neo" in baked_exporter!
-#[cfg(any(feature = "datagen", feature = "experimental"))]
-pub mod neo;
 
 #[cfg(feature = "compiled_data")]
 #[derive(Debug)]
@@ -44,271 +39,194 @@ pub mod neo;
 /// </div>
 pub struct Baked;
 
-#[cfg(feature = "experimental")]
-include!("../../tests/data/date_skeleton_patterns_v1_marker.rs.data");
-
 #[cfg(feature = "compiled_data")]
 #[allow(unused_imports)]
 const _: () = {
     use icu_datetime_data::*;
     pub mod icu {
         pub use crate as datetime;
-        pub use icu_datetime_data::icu_locale as locale;
     }
     make_provider!(Baked);
-    impl_buddhist_date_lengths_v1_marker!(Baked);
-    impl_buddhist_date_symbols_v1_marker!(Baked);
-    impl_chinese_date_lengths_v1_marker!(Baked);
-    impl_chinese_date_symbols_v1_marker!(Baked);
-    impl_coptic_date_lengths_v1_marker!(Baked);
-    impl_coptic_date_symbols_v1_marker!(Baked);
-    impl_dangi_date_lengths_v1_marker!(Baked);
-    impl_dangi_date_symbols_v1_marker!(Baked);
-    impl_ethiopian_date_lengths_v1_marker!(Baked);
-    impl_ethiopian_date_symbols_v1_marker!(Baked);
-    impl_gregorian_date_lengths_v1_marker!(Baked);
-    impl_gregorian_date_symbols_v1_marker!(Baked);
-    impl_hebrew_date_lengths_v1_marker!(Baked);
-    impl_hebrew_date_symbols_v1_marker!(Baked);
-    impl_indian_date_lengths_v1_marker!(Baked);
-    impl_indian_date_symbols_v1_marker!(Baked);
-    impl_islamic_date_lengths_v1_marker!(Baked);
-    impl_islamic_date_symbols_v1_marker!(Baked);
-    impl_japanese_date_lengths_v1_marker!(Baked);
-    impl_japanese_date_symbols_v1_marker!(Baked);
-    impl_japanese_extended_date_lengths_v1_marker!(Baked);
-    impl_japanese_extended_date_symbols_v1_marker!(Baked);
-    impl_persian_date_lengths_v1_marker!(Baked);
-    impl_persian_date_symbols_v1_marker!(Baked);
-    impl_roc_date_lengths_v1_marker!(Baked);
-    impl_roc_date_symbols_v1_marker!(Baked);
-    impl_time_lengths_v1_marker!(Baked);
-    impl_time_symbols_v1_marker!(Baked);
-    impl_exemplar_cities_v1_marker!(Baked);
-    impl_metazone_generic_names_long_v1_marker!(Baked);
-    impl_metazone_generic_names_short_v1_marker!(Baked);
-    impl_metazone_specific_names_long_v1_marker!(Baked);
-    impl_metazone_specific_names_short_v1_marker!(Baked);
-    impl_time_zone_formats_v1_marker!(Baked);
 
-    #[cfg(feature = "experimental")]
-    impl_date_skeleton_patterns_v1_marker!(Baked);
+    impl_timezone_names_cities_override_v1!(Baked);
+    impl_timezone_names_cities_root_v1!(Baked);
+    impl_timezone_names_essentials_v1!(Baked);
+    impl_timezone_names_generic_long_v1!(Baked);
+    impl_timezone_names_generic_short_v1!(Baked);
+    impl_timezone_names_locations_override_v1!(Baked);
+    impl_timezone_names_locations_root_v1!(Baked);
+    impl_timezone_names_specific_long_v1!(Baked);
+    impl_timezone_names_specific_short_v1!(Baked);
+    impl_timezone_names_standard_long_v1!(Baked);
 
-    #[cfg(feature = "experimental")]
-    impl_weekday_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_day_period_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_glue_pattern_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_time_neo_skeleton_patterns_v1_marker!(Baked);
+    impl_datetime_patterns_glue_v1!(Baked);
+    impl_datetime_patterns_time_v1!(Baked);
 
-    #[cfg(feature = "experimental")]
-    impl_buddhist_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_chinese_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_coptic_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_dangi_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_ethiopian_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_gregorian_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_hebrew_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_indian_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_islamic_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_japanese_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_japanese_extended_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_persian_year_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_roc_year_names_v1_marker!(Baked);
+    impl_datetime_names_weekday_v1!(Baked);
+    impl_datetime_names_dayperiod_v1!(Baked);
 
-    #[cfg(feature = "experimental")]
-    impl_buddhist_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_chinese_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_coptic_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_dangi_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_ethiopian_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_gregorian_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_hebrew_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_indian_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_islamic_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_japanese_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_japanese_extended_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_persian_month_names_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_roc_month_names_v1_marker!(Baked);
+    impl_datetime_names_year_buddhist_v1!(Baked);
+    impl_datetime_names_year_chinese_v1!(Baked);
+    impl_datetime_names_year_coptic_v1!(Baked);
+    impl_datetime_names_year_dangi_v1!(Baked);
+    impl_datetime_names_year_ethiopian_v1!(Baked);
+    impl_datetime_names_year_gregorian_v1!(Baked);
+    impl_datetime_names_year_hebrew_v1!(Baked);
+    impl_datetime_names_year_indian_v1!(Baked);
+    impl_datetime_names_year_hijri_v1!(Baked);
+    impl_datetime_names_year_japanese_v1!(Baked);
+    impl_datetime_names_year_persian_v1!(Baked);
+    impl_datetime_names_year_roc_v1!(Baked);
 
-    #[cfg(feature = "experimental")]
-    impl_buddhist_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_chinese_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_coptic_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_dangi_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_ethiopian_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_gregorian_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_hebrew_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_indian_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_islamic_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_japanese_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_japanese_extended_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_persian_date_neo_skeleton_patterns_v1_marker!(Baked);
-    #[cfg(feature = "experimental")]
-    impl_roc_date_neo_skeleton_patterns_v1_marker!(Baked);
+    impl_datetime_names_month_buddhist_v1!(Baked);
+    impl_datetime_names_month_chinese_v1!(Baked);
+    impl_datetime_names_month_coptic_v1!(Baked);
+    impl_datetime_names_month_dangi_v1!(Baked);
+    impl_datetime_names_month_ethiopian_v1!(Baked);
+    impl_datetime_names_month_gregorian_v1!(Baked);
+    impl_datetime_names_month_hebrew_v1!(Baked);
+    impl_datetime_names_month_indian_v1!(Baked);
+    impl_datetime_names_month_hijri_v1!(Baked);
+    impl_datetime_names_month_japanese_v1!(Baked);
+    impl_datetime_names_month_persian_v1!(Baked);
+    impl_datetime_names_month_roc_v1!(Baked);
+
+    impl_datetime_patterns_date_buddhist_v1!(Baked);
+    impl_datetime_patterns_date_chinese_v1!(Baked);
+    impl_datetime_patterns_date_coptic_v1!(Baked);
+    impl_datetime_patterns_date_dangi_v1!(Baked);
+    impl_datetime_patterns_date_ethiopian_v1!(Baked);
+    impl_datetime_patterns_date_gregorian_v1!(Baked);
+    impl_datetime_patterns_date_hebrew_v1!(Baked);
+    impl_datetime_patterns_date_indian_v1!(Baked);
+    impl_datetime_patterns_date_hijri_v1!(Baked);
+    impl_datetime_patterns_date_japanese_v1!(Baked);
+    impl_datetime_patterns_date_persian_v1!(Baked);
+    impl_datetime_patterns_date_roc_v1!(Baked);
+
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_glue_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_time_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_buddhist_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_chinese_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_coptic_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_dangi_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_ethiopian_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_gregorian_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_hebrew_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_indian_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_hijri_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_japanese_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_persian_v1!(Baked);
+    #[cfg(feature = "unstable")]
+    impl_datetime_patterns_range_date_roc_v1!(Baked);
 };
 
-#[cfg(feature = "datagen")]
+#[cfg(feature = "compiled_data")]
+impl DataProvider<icu_time::provider::TimezonePeriodsV1> for Baked {
+    #[inline]
+    fn load(
+        &self,
+        req: DataRequest,
+    ) -> Result<DataResponse<icu_time::provider::TimezonePeriodsV1>, DataError> {
+        icu_time::provider::Baked.load(req)
+    }
+}
+
+#[cfg(any(feature = "datagen", feature = "compiled_data"))]
 use icu_provider::prelude::*;
 
 #[cfg(feature = "datagen")]
 /// The latest minimum set of markers required by this component.
 pub const MARKERS: &[DataMarkerInfo] = &[
-    calendar::BuddhistDateLengthsV1Marker::INFO,
-    calendar::BuddhistDateSymbolsV1Marker::INFO,
-    calendar::ChineseDateLengthsV1Marker::INFO,
-    calendar::ChineseDateSymbolsV1Marker::INFO,
-    calendar::CopticDateLengthsV1Marker::INFO,
-    calendar::CopticDateSymbolsV1Marker::INFO,
-    calendar::DangiDateLengthsV1Marker::INFO,
-    calendar::DangiDateSymbolsV1Marker::INFO,
-    calendar::EthiopianDateLengthsV1Marker::INFO,
-    calendar::EthiopianDateSymbolsV1Marker::INFO,
-    calendar::GregorianDateLengthsV1Marker::INFO,
-    calendar::GregorianDateSymbolsV1Marker::INFO,
-    calendar::HebrewDateLengthsV1Marker::INFO,
-    calendar::HebrewDateSymbolsV1Marker::INFO,
-    calendar::IndianDateLengthsV1Marker::INFO,
-    calendar::IndianDateSymbolsV1Marker::INFO,
-    calendar::IslamicDateLengthsV1Marker::INFO,
-    calendar::IslamicDateSymbolsV1Marker::INFO,
-    calendar::JapaneseDateLengthsV1Marker::INFO,
-    calendar::JapaneseDateSymbolsV1Marker::INFO,
-    calendar::JapaneseExtendedDateLengthsV1Marker::INFO,
-    calendar::JapaneseExtendedDateSymbolsV1Marker::INFO,
-    calendar::PersianDateLengthsV1Marker::INFO,
-    calendar::PersianDateSymbolsV1Marker::INFO,
-    calendar::RocDateLengthsV1Marker::INFO,
-    calendar::RocDateSymbolsV1Marker::INFO,
-    calendar::TimeLengthsV1Marker::INFO,
-    calendar::TimeSymbolsV1Marker::INFO,
-    time_zones::ExemplarCitiesV1Marker::INFO,
-    time_zones::MetazoneGenericNamesLongV1Marker::INFO,
-    time_zones::MetazoneGenericNamesShortV1Marker::INFO,
-    time_zones::MetazoneSpecificNamesLongV1Marker::INFO,
-    time_zones::MetazoneSpecificNamesShortV1Marker::INFO,
-    time_zones::TimeZoneFormatsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::WeekdayNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::DayPeriodNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::GluePatternV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::TimeNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::BuddhistYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::ChineseYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::CopticYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::DangiYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::EthiopianYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::GregorianYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::HebrewYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::IndianYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::IslamicYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::JapaneseYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::JapaneseExtendedYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::PersianYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::RocYearNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::BuddhistMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::ChineseMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::CopticMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::DangiMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::EthiopianMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::GregorianMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::HebrewMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::IndianMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::IslamicMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::JapaneseMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::JapaneseExtendedMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::PersianMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::RocMonthNamesV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::BuddhistDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::ChineseDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::CopticDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::DangiDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::EthiopianDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::GregorianDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::HebrewDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::IndianDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::IslamicDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::JapaneseDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::JapaneseExtendedDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::PersianDateNeoSkeletonPatternsV1Marker::INFO,
-    #[cfg(feature = "experimental")]
-    neo::RocDateNeoSkeletonPatternsV1Marker::INFO,
+    time_zones::TimezoneNamesLocationsOverrideV1::INFO,
+    time_zones::TimezoneNamesLocationsRootV1::INFO,
+    time_zones::TimezoneNamesCitiesOverrideV1::INFO,
+    time_zones::TimezoneNamesCitiesRootV1::INFO,
+    time_zones::TimezoneNamesGenericLongV1::INFO,
+    time_zones::TimezoneNamesStandardLongV1::INFO,
+    time_zones::TimezoneNamesGenericShortV1::INFO,
+    time_zones::TimezoneNamesSpecificLongV1::INFO,
+    time_zones::TimezoneNamesSpecificShortV1::INFO,
+    time_zones::TimezoneNamesEssentialsV1::INFO,
+    names::DatetimeNamesWeekdayV1::INFO,
+    names::DatetimeNamesDayperiodV1::INFO,
+    names::DatetimeNamesYearBuddhistV1::INFO,
+    names::DatetimeNamesYearChineseV1::INFO,
+    names::DatetimeNamesYearCopticV1::INFO,
+    names::DatetimeNamesYearDangiV1::INFO,
+    names::DatetimeNamesYearEthiopianV1::INFO,
+    names::DatetimeNamesYearGregorianV1::INFO,
+    names::DatetimeNamesYearHebrewV1::INFO,
+    names::DatetimeNamesYearIndianV1::INFO,
+    names::DatetimeNamesYearHijriV1::INFO,
+    names::DatetimeNamesYearJapaneseV1::INFO,
+    names::DatetimeNamesYearPersianV1::INFO,
+    names::DatetimeNamesYearRocV1::INFO,
+    names::DatetimeNamesMonthBuddhistV1::INFO,
+    names::DatetimeNamesMonthChineseV1::INFO,
+    names::DatetimeNamesMonthCopticV1::INFO,
+    names::DatetimeNamesMonthDangiV1::INFO,
+    names::DatetimeNamesMonthEthiopianV1::INFO,
+    names::DatetimeNamesMonthGregorianV1::INFO,
+    names::DatetimeNamesMonthHebrewV1::INFO,
+    names::DatetimeNamesMonthIndianV1::INFO,
+    names::DatetimeNamesMonthHijriV1::INFO,
+    names::DatetimeNamesMonthJapaneseV1::INFO,
+    names::DatetimeNamesMonthPersianV1::INFO,
+    names::DatetimeNamesMonthRocV1::INFO,
+    semantic_skeletons::DatetimePatternsGlueV1::INFO,
+    semantic_skeletons::DatetimePatternsTimeV1::INFO,
+    semantic_skeletons::DatetimePatternsDateBuddhistV1::INFO,
+    semantic_skeletons::DatetimePatternsDateChineseV1::INFO,
+    semantic_skeletons::DatetimePatternsDateCopticV1::INFO,
+    semantic_skeletons::DatetimePatternsDateDangiV1::INFO,
+    semantic_skeletons::DatetimePatternsDateEthiopianV1::INFO,
+    semantic_skeletons::DatetimePatternsDateGregorianV1::INFO,
+    semantic_skeletons::DatetimePatternsDateHebrewV1::INFO,
+    semantic_skeletons::DatetimePatternsDateIndianV1::INFO,
+    semantic_skeletons::DatetimePatternsDateHijriV1::INFO,
+    semantic_skeletons::DatetimePatternsDateJapaneseV1::INFO,
+    semantic_skeletons::DatetimePatternsDatePersianV1::INFO,
+    semantic_skeletons::DatetimePatternsDateRocV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeGlueV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeTimeV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateBuddhistV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateChineseV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateCopticV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateDangiV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateEthiopianV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateGregorianV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateHebrewV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateIndianV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateHijriV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateJapaneseV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDatePersianV1::INFO,
+    #[cfg(feature = "unstable")]
+    range_patterns::DatetimePatternsRangeDateRocV1::INFO,
 ];

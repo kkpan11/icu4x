@@ -2,109 +2,124 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::cldr_serde;
 use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
+use crate::cldr_serde;
+use crate::decimal::decimal_pattern::DecimalSubPattern;
 use icu::decimal::provider::*;
-use icu::locale::{extensions::unicode::key, subtags::Subtag};
 use icu_provider::prelude::*;
-use std::borrow::Cow;
 use std::collections::HashSet;
-use std::convert::TryFrom;
+use zerovec::VarZeroCow;
 
-impl DataProvider<DecimalSymbolsV1Marker> for SourceDataProvider {
-    fn load(&self, req: DataRequest) -> Result<DataResponse<DecimalSymbolsV1Marker>, DataError> {
-        self.check_req::<DecimalSymbolsV1Marker>(req)?;
-        let langid = req.id.locale.get_langid();
+impl DataProvider<DecimalSymbolsV1> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<DecimalSymbolsV1>, DataError> {
+        self.check_req::<DecimalSymbolsV1>(req)?;
 
         let resource: &cldr_serde::numbers::Resource = self
             .cldr()?
             .numbers()
-            .read_and_parse(&langid, "numbers.json")?;
+            .read_and_parse(req.id.locale, "numbers.json")?;
 
         let numbers = &resource.main.value.numbers;
 
-        let nsname = match req.id.locale.get_unicode_ext(&key!("nu")) {
-            Some(v) => *v.get_subtag(0).expect("expecting subtag if key is present"),
-            None => Subtag::from_tinystr_unvalidated(numbers.default_numbering_system),
+        let nsname = if !req.id.marker_attributes.is_empty() {
+            req.id.marker_attributes.as_str()
+        } else {
+            &numbers.default_numbering_system
         };
 
-        let mut result =
-            DecimalSymbolsV1::try_from(NumbersWithNumsys(numbers, nsname)).map_err(|s| {
-                DataError::custom("Could not create decimal symbols")
-                    .with_display_context(&s)
-                    .with_display_context(&nsname)
-            })?;
+        let Some(symbols) = &numbers.numsys_data.symbols.get(nsname) else {
+            return Err(DataErrorKind::IdentifierNotFound.with_req(DecimalSymbolsV1::INFO, req));
+        };
+        let Some(formats) = &numbers.numsys_data.formats.get(nsname) else {
+            return Err(DataErrorKind::IdentifierNotFound.with_req(DecimalSymbolsV1::INFO, req));
+        };
 
-        result.digits = self.get_digits_for_numbering_system(nsname)?;
+        let positive = DecimalSubPattern::try_from_items(&formats.standard.positive)?;
+        let negative = formats
+            .standard
+            .negative
+            .as_ref()
+            .map(|s| DecimalSubPattern::try_from_items(s))
+            .transpose()?;
+
+        let affixes = negative
+            .as_ref()
+            .map(|n| (n.prefix.as_str(), n.suffix.as_str()))
+            .unwrap_or_else(|| ("-", ""));
+
+        let strings = DecimalSymbolStrsBuilder {
+            minus_sign_prefix: VarZeroCow::new_owned(
+                affixes.0.replace('-', &symbols.minus_sign).into_boxed_str(),
+            ),
+            minus_sign_suffix: VarZeroCow::new_owned(
+                affixes.1.replace('-', &symbols.minus_sign).into_boxed_str(),
+            ),
+            plus_sign_prefix: VarZeroCow::new_owned(
+                affixes.0.replace('-', &symbols.plus_sign).into_boxed_str(),
+            ),
+            plus_sign_suffix: VarZeroCow::new_owned(
+                affixes.1.replace('-', &symbols.plus_sign).into_boxed_str(),
+            ),
+            decimal_separator: VarZeroCow::new_owned(symbols.decimal.clone().into_boxed_str()),
+            grouping_separator: VarZeroCow::new_owned(symbols.group.clone().into_boxed_str()),
+            numsys: VarZeroCow::new_owned(nsname.to_owned().into_boxed_str()),
+        }
+        .build();
+
+        if let Some(n) = negative.as_ref()
+            && (
+                positive.max_fraction_digits,
+                positive.min_fraction_digits,
+                positive.primary_grouping,
+                positive.secondary_grouping,
+            ) != (
+                n.max_fraction_digits,
+                n.min_fraction_digits,
+                n.primary_grouping,
+                n.secondary_grouping,
+            )
+        {
+            return Err(DataError::custom("positive/negative groupings don't match")
+                .with_req(DecimalSymbolsV1::INFO, req));
+        }
+
+        let grouping_sizes = GroupingSizes {
+            primary: positive.primary_grouping,
+            secondary: positive.secondary_grouping,
+            min_grouping: numbers.minimum_grouping_digits,
+        };
+
+        // TODO: do something with `numbers.(min/max)_fraction_digits`
 
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(result),
+            payload: DataPayload::from_owned(DecimalSymbols {
+                strings,
+                grouping_sizes,
+            }),
         })
     }
 }
 
-impl IterableDataProviderCached<DecimalSymbolsV1Marker> for SourceDataProvider {
+impl IterableDataProviderCached<DecimalSymbolsV1> for SourceDataProvider {
     fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        self.iter_ids_for_numbers()
-    }
-}
-
-#[derive(Debug)]
-struct NumbersWithNumsys<'a>(
-    pub(crate) &'a cldr_serde::numbers::Numbers,
-    pub(crate) Subtag,
-);
-
-impl TryFrom<NumbersWithNumsys<'_>> for DecimalSymbolsV1<'static> {
-    type Error = Cow<'static, str>;
-
-    fn try_from(other: NumbersWithNumsys<'_>) -> Result<Self, Self::Error> {
-        let NumbersWithNumsys(numbers, nsname) = other;
-        let symbols = numbers
-            .numsys_data
-            .symbols
-            .get(&nsname.as_tinystr())
-            .ok_or("Could not find symbols for numbering system")?;
-        let formats = numbers
-            .numsys_data
-            .formats
-            .get(&nsname.as_tinystr())
-            .ok_or("Could not find formats for numbering system")?;
-        let parsed_pattern: super::decimal_pattern::DecimalPattern = formats
-            .standard
-            .parse()
-            .map_err(|s: super::decimal_pattern::Error| s.to_string())?;
-
-        Ok(Self {
-            minus_sign_affixes: parsed_pattern.localize_sign(&symbols.minus_sign),
-            plus_sign_affixes: parsed_pattern.localize_sign(&symbols.plus_sign),
-            decimal_separator: Cow::Owned(symbols.decimal.clone()),
-            grouping_separator: Cow::Owned(symbols.group.clone()),
-            grouping_sizes: GroupingSizesV1 {
-                primary: parsed_pattern.positive.primary_grouping,
-                secondary: parsed_pattern.positive.secondary_grouping,
-                min_grouping: numbers.minimum_grouping_digits,
-            },
-            digits: Default::default(), // to be filled in
-        })
+        self.iter_ids_for_numbers_with_locales()
     }
 }
 
 #[test]
 fn test_basic() {
-    use icu::locale::langid;
+    use icu::locale::data_locale;
 
     let provider = SourceDataProvider::new_testing();
 
-    let ar_decimal: DataResponse<DecimalSymbolsV1Marker> = provider
+    let ar_decimal: DataResponse<DecimalSymbolsV1> = provider
         .load(DataRequest {
-            id: DataIdentifierCow::from_locale(langid!("ar-EG").into()).as_borrowed(),
+            id: DataIdentifierCow::from_locale(data_locale!("ar-EG")).as_borrowed(),
             ..Default::default()
         })
         .unwrap();
-
-    assert_eq!(ar_decimal.payload.get().decimal_separator, "٫");
-    assert_eq!(ar_decimal.payload.get().digits[0], '٠');
+    assert_eq!(ar_decimal.payload.get().decimal_separator(), "٫");
+    assert_eq!(ar_decimal.payload.get().numsys(), "arab");
 }

@@ -2,9 +2,6 @@
   "main": {
     "sr": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "sr"
       },
       "units": {
@@ -114,7 +111,7 @@
             "compoundUnitPattern1-count-one-case-accusative": "квадратни {0}",
             "compoundUnitPattern1-count-one-case-genitive": "квадратни {0}",
             "compoundUnitPattern1-count-one-case-instrumental": "квадратни {0}",
-            "compoundUnitPattern1-gender-feminine-count-one": "квадратни {0}",
+            "compoundUnitPattern1-gender-feminine-count-one": "квадратна {0}",
             "compoundUnitPattern1-gender-feminine-count-one-case-accusative": "квадратни {0}",
             "compoundUnitPattern1-gender-feminine-count-one-case-genitive": "квадратни {0}",
             "compoundUnitPattern1-gender-feminine-count-one-case-instrumental": "квадратни {0}",
@@ -423,10 +420,20 @@
             "instrumental-count-other": "{0} карата"
           },
           "concentr-milligram-ofglucose-per-deciliter": {
+            "gender": "inanimate",
             "displayName": "милиграми по децилитру",
             "unitPattern-count-one": "{0} милиграм по децилитру",
+            "accusative-count-one": "{0} милиграм по децилитру",
+            "genitive-count-one": "{0} милиграма по децилитру",
+            "instrumental-count-one": "{0} милиграмом по децилитру",
             "unitPattern-count-few": "{0} милиграма по децилитру",
-            "unitPattern-count-other": "{0} милиграма по децилитру"
+            "accusative-count-few": "{0} милиграма по децилитру",
+            "genitive-count-few": "{0} милиграма по децилитру",
+            "instrumental-count-few": "{0} милиграма по децилитру",
+            "unitPattern-count-other": "{0} милиграма по децилитру",
+            "accusative-count-other": "{0} милиграма по децилитру",
+            "genitive-count-other": "{0} милиграма по децилитру",
+            "instrumental-count-other": "{0} милиграма по децилитру"
           },
           "concentr-millimole-per-liter": {
             "gender": "inanimate",
@@ -460,7 +467,13 @@
             "genitive-count-other": "{0} ставки",
             "instrumental-count-other": "{0} ставки"
           },
-          "concentr-permillion": {
+          "concentr-part": {
+            "displayName": "делови",
+            "unitPattern-count-one": "{0} део",
+            "unitPattern-count-few": "{0} дела",
+            "unitPattern-count-other": "{0} делова"
+          },
+          "concentr-part-per-1e6": {
             "gender": "feminine",
             "displayName": "честица на милион",
             "unitPattern-count-one": "{0} честица на милион",
@@ -528,6 +541,12 @@
             "accusative-count-other": "{0} мола",
             "genitive-count-other": "{0} мола",
             "instrumental-count-other": "{0} мола"
+          },
+          "concentr-ofglucose": {
+            "displayName": "глукозе",
+            "unitPattern-count-one": "{0} глукозе",
+            "unitPattern-count-few": "{0} глукозе",
+            "unitPattern-count-other": "{0} глукозе"
           },
           "consumption-liter-per-kilometer": {
             "gender": "inanimate",
@@ -775,7 +794,7 @@
             "unitPattern-count-few": "{0} деценије",
             "accusative-count-few": "{0} деценије",
             "genitive-count-few": "{0} деценије",
-            "instrumental-count-few": "{0} деценије",
+            "instrumental-count-few": "{0} деценијом",
             "unitPattern-count-other": "{0} деценија",
             "accusative-count-other": "{0} деценија",
             "genitive-count-other": "{0} деценија",
@@ -1030,10 +1049,20 @@
             "instrumental-count-other": "{0} волти"
           },
           "energy-kilocalorie": {
+            "gender": "feminine",
             "displayName": "килокалорије",
             "unitPattern-count-one": "{0} килокалорија",
+            "accusative-count-one": "{0} килокалорију",
+            "genitive-count-one": "{0} килокалорије",
+            "instrumental-count-one": "{0} килокалоријом",
             "unitPattern-count-few": "{0} килокалорије",
-            "unitPattern-count-other": "{0} килокалорија"
+            "accusative-count-few": "{0} килокалорије",
+            "genitive-count-few": "{0} килокалорије",
+            "instrumental-count-few": "{0} килокалорије",
+            "unitPattern-count-other": "{0} килокалорија",
+            "accusative-count-other": "{0} килокалорија",
+            "genitive-count-other": "{0} килокалорија",
+            "instrumental-count-other": "{0} килокалорија"
           },
           "energy-calorie": {
             "gender": "feminine",
@@ -1127,6 +1156,10 @@
             "unitPattern-count-few": "{0} фунте силе",
             "unitPattern-count-other": "{0} фунти силе"
           },
+          "force-poundal": {
+            "displayName": "pdl",
+            "unitPattern-count-other": "{0} pdl"
+          },
           "force-newton": {
             "gender": "inanimate",
             "displayName": "њутни",
@@ -1143,10 +1176,25 @@
             "genitive-count-other": "{0} њутна",
             "instrumental-count-other": "{0} њутна"
           },
+          "force-dyne": {
+            "displayName": "dyn",
+            "unitPattern-count-other": "{0} dyn"
+          },
           "force-kilowatt-hour-per-100-kilometer": {
             "gender": "inanimate",
-            "displayName": "kWh/100km",
-            "unitPattern-count-other": "{0} kWh/100km"
+            "displayName": "киловат-сати на 100 километара",
+            "unitPattern-count-one": "{0} киловат-сат на 100 километара",
+            "accusative-count-one": "{0} киловат-сат на 100 километара",
+            "genitive-count-one": "{0} киловат-сата на 100 километара",
+            "instrumental-count-one": "{0} киловат-сатом на 100 километара",
+            "unitPattern-count-few": "{0} киловат-сата на 100 километара",
+            "accusative-count-few": "{0} киловат-сата на 100 километара",
+            "genitive-count-few": "{0} киловат-сата на 100 километара",
+            "instrumental-count-few": "{0} киловат-сата на 100 километара",
+            "unitPattern-count-other": "{0} киловат-сати на 100 километара",
+            "accusative-count-other": "{0} киловат-сати на 100 километара",
+            "genitive-count-other": "{0} киловат-сати на 100 километара",
+            "instrumental-count-other": "{0} киловат-сати на 100 километара"
           },
           "frequency-gigahertz": {
             "gender": "inanimate",
@@ -1452,6 +1500,10 @@
             "unitPattern-count-other": "{0} инча",
             "perUnitPattern": "{0}/in"
           },
+          "length-milliinch": {
+            "displayName": "milli-inch",
+            "unitPattern-count-other": "{0} milli-inch"
+          },
           "length-parsec": {
             "displayName": "парсеци",
             "unitPattern-count-one": "{0} парсек",
@@ -1505,8 +1557,20 @@
             "instrumental-count-other": "{0} скандинавских миља"
           },
           "length-point": {
-            "displayName": "pt",
-            "unitPattern-count-other": "{0} pt"
+            "gender": "feminine",
+            "displayName": "типографске тачке",
+            "unitPattern-count-one": "{0} типографска тачка",
+            "accusative-count-one": "{0} типографску тачку",
+            "genitive-count-one": "{0} типографске тачке",
+            "instrumental-count-one": "{0} типографском тачком",
+            "unitPattern-count-few": "{0} типографске тачке",
+            "accusative-count-few": "{0} типографске тачке",
+            "genitive-count-few": "{0} типографских тачака",
+            "instrumental-count-few": "{0} типографске тачке",
+            "unitPattern-count-other": "{0} типографских тачака",
+            "accusative-count-other": "{0} типографских тачака",
+            "genitive-count-other": "{0} типографских тачака",
+            "instrumental-count-other": "{0} типографских тачака"
           },
           "length-solar-radius": {
             "displayName": "сунчеви полупречници",
@@ -1807,10 +1871,26 @@
             "unitPattern-count-other": "{0} коњских снага"
           },
           "pressure-millimeter-ofhg": {
+            "gender": "inanimate",
             "displayName": "милиметри живиног стуба",
             "unitPattern-count-one": "{0} милиметар живиног стуба",
+            "accusative-count-one": "{0} милиметар живиног стуба",
+            "genitive-count-one": "{0} милиметра живиног стуба",
+            "instrumental-count-one": "{0} милиметром живиног стуба",
             "unitPattern-count-few": "{0} милиметра живиног стуба",
-            "unitPattern-count-other": "{0} милиметара живиног стуба"
+            "accusative-count-few": "{0} милиметра живиног стуба",
+            "genitive-count-few": "{0} милиметра живиног стуба",
+            "instrumental-count-few": "{0} милиметра живиног стуба",
+            "unitPattern-count-other": "{0} милиметара живиног стуба",
+            "accusative-count-other": "{0} милиметара живиног стуба",
+            "genitive-count-other": "{0} милиметара живиног стуба",
+            "instrumental-count-other": "{0} милиметара живиног стуба"
+          },
+          "pressure-ofhg": {
+            "displayName": "живе",
+            "unitPattern-count-one": "{0} живе",
+            "unitPattern-count-few": "{0} живе",
+            "unitPattern-count-other": "{0} живе"
           },
           "pressure-pound-force-per-square-inch": {
             "displayName": "фунте по квадратном инчу",
@@ -1983,7 +2063,7 @@
           "speed-beaufort": {
             "displayName": "Бофор",
             "unitPattern-count-one": "Бофор {0}",
-            "unitPattern-count-few": "Б {0}",
+            "unitPattern-count-few": "B {0}",
             "unitPattern-count-other": "Бофор {0}"
           },
           "temperature-generic": {
@@ -2254,6 +2334,12 @@
             "genitive-count-other": "{0} метричких шоља",
             "instrumental-count-other": "{0} метричких шоља"
           },
+          "volume-fluid-ounce-metric": {
+            "displayName": "течне унце",
+            "unitPattern-count-one": "{0} течна унца",
+            "unitPattern-count-few": "{0} течне унце",
+            "unitPattern-count-other": "{0} течних унци"
+          },
           "volume-acre-foot": {
             "displayName": "акер стопе",
             "unitPattern-count-one": "{0} акер стопа",
@@ -2292,11 +2378,19 @@
             "unitPattern-count-few": "{0} пинте",
             "unitPattern-count-other": "{0} пинти"
           },
+          "volume-pint-imperial": {
+            "displayName": "pint Imp.",
+            "unitPattern-count-other": "{0} pt Imp."
+          },
           "volume-cup": {
             "displayName": "шоље",
             "unitPattern-count-one": "{0} шоља",
             "unitPattern-count-few": "{0} шоље",
             "unitPattern-count-other": "{0} шоља"
+          },
+          "volume-cup-imperial": {
+            "displayName": "cup Imp.",
+            "unitPattern-count-other": "{0} cup Imp."
           },
           "volume-fluid-ounce": {
             "displayName": "унце течности",
@@ -2370,12 +2464,237 @@
             "unitPattern-count-few": "{0} империјске четвртине",
             "unitPattern-count-other": "{0} империјских четвртина"
           },
+          "angle-steradian": {
+            "displayName": "стерадианси",
+            "unitPattern-count-other": "{0} sr"
+          },
+          "concentr-katal": {
+            "displayName": "катали",
+            "unitPattern-count-one": "{0} катал",
+            "unitPattern-count-few": "{0} катала",
+            "unitPattern-count-other": "{0} катала"
+          },
+          "electric-coulomb": {
+            "displayName": "кулони",
+            "unitPattern-count-one": "{0} кулон",
+            "unitPattern-count-few": "{0} кулона",
+            "unitPattern-count-other": "{0} кулона"
+          },
+          "electric-farad": {
+            "displayName": "фаради",
+            "unitPattern-count-one": "{0} фарад",
+            "unitPattern-count-few": "{0} фарада",
+            "unitPattern-count-other": "{0} фарада"
+          },
+          "electric-henry": {
+            "displayName": "хенрији",
+            "unitPattern-count-one": "{0} хенри",
+            "unitPattern-count-few": "{0} хенрија",
+            "unitPattern-count-other": "{0} хенрија"
+          },
+          "electric-siemens": {
+            "displayName": "сименси",
+            "unitPattern-count-one": "{0} сименс",
+            "unitPattern-count-few": "{0} сименса",
+            "unitPattern-count-other": "{0} сименса"
+          },
+          "energy-calorie-it": {
+            "displayName": "калорије [IT]",
+            "unitPattern-count-one": "{0} калорија [IT]",
+            "unitPattern-count-few": "{0} калорије [IT]",
+            "unitPattern-count-other": "{0} калорија [IT]"
+          },
+          "energy-british-thermal-unit-it": {
+            "displayName": "BTU-IT",
+            "unitPattern-count-other": "{0} BTU-IT"
+          },
+          "energy-becquerel": {
+            "displayName": "бекерели",
+            "unitPattern-count-one": "{0} бекерел",
+            "unitPattern-count-few": "{0} бекерела",
+            "unitPattern-count-other": "{0} бекерела"
+          },
+          "energy-sievert": {
+            "displayName": "сиверти",
+            "unitPattern-count-one": "{0} сиверт",
+            "unitPattern-count-few": "{0} сиверта",
+            "unitPattern-count-other": "{0} сиверта"
+          },
+          "energy-gray": {
+            "displayName": "греји",
+            "unitPattern-count-one": "{0} греј",
+            "unitPattern-count-few": "{0} греја",
+            "unitPattern-count-other": "{0} грејева"
+          },
+          "force-kilogram-force": {
+            "displayName": "килопонд",
+            "unitPattern-count-one": "{0} килопонд",
+            "unitPattern-count-few": "{0} килопонда",
+            "unitPattern-count-other": "{0} килопонда"
+          },
+          "length-rod": {
+            "displayName": "rod",
+            "unitPattern-count-other": "{0} rod"
+          },
+          "length-chain": {
+            "displayName": "chain",
+            "unitPattern-count-other": "{0} chain"
+          },
+          "magnetic-tesla": {
+            "displayName": "тесле",
+            "unitPattern-count-one": "{0} тесла",
+            "unitPattern-count-few": "{0} тесле",
+            "unitPattern-count-other": "{0} тесла"
+          },
+          "magnetic-weber": {
+            "displayName": "вебери",
+            "unitPattern-count-one": "{0} вебер",
+            "unitPattern-count-few": "{0} вебера",
+            "unitPattern-count-other": "{0} вебера"
+          },
+          "temperature-rankine": {
+            "displayName": "°R",
+            "unitPattern-count-other": "{0} °R"
+          },
+          "duration-fortnight": {
+            "displayName": "fortnight",
+            "unitPattern-count-other": "{0} fw"
+          },
+          "mass-slug": {
+            "displayName": "slug",
+            "unitPattern-count-other": "{0} slug"
+          },
+          "pressure-gasoline-energy-density": {
+            "displayName": "gas E",
+            "unitPattern-count-other": "{0} gas E"
+          },
+          "length-rin": {
+            "displayName": "rin [JP]",
+            "unitPattern-count-other": "{0} rin [JP]"
+          },
+          "length-sun": {
+            "displayName": "sun [JP]",
+            "unitPattern-count-other": "{0} sun [JP]"
+          },
+          "length-shaku-length": {
+            "displayName": "shaku [JP]",
+            "unitPattern-count-other": "{0} shaku [JP]"
+          },
+          "length-shaku-cloth": {
+            "displayName": "shaku [cloth, JP]",
+            "unitPattern-count-other": "{0} shaku [cloth, JP]"
+          },
+          "length-ken": {
+            "displayName": "ken [JP]",
+            "unitPattern-count-other": "{0} ken [JP]"
+          },
+          "length-jo-jp": {
+            "displayName": "jo [JP]",
+            "unitPattern-count-other": "{0} jo [JP]"
+          },
+          "length-ri-jp": {
+            "displayName": "ri [JP]",
+            "unitPattern-count-other": "{0} ri [JP]"
+          },
+          "area-bu-jp": {
+            "displayName": "bu [JP]",
+            "unitPattern-count-other": "{0} bu [JP]"
+          },
+          "area-se-jp": {
+            "displayName": "se [JP]",
+            "unitPattern-count-other": "{0} se [JP]"
+          },
+          "area-cho": {
+            "displayName": "cho [JP]",
+            "unitPattern-count-other": "{0} cho [JP]"
+          },
+          "volume-kosaji": {
+            "displayName": "kosaji [JP]",
+            "unitPattern-count-other": "{0} kosaji [JP]"
+          },
+          "volume-osaji": {
+            "displayName": "osaji [JP]",
+            "unitPattern-count-other": "{0} osaji [JP]"
+          },
+          "volume-cup-jp": {
+            "displayName": "cup [JP]",
+            "unitPattern-count-other": "{0} cup [JP]"
+          },
+          "volume-shaku": {
+            "displayName": "shaku [vol, JP]",
+            "unitPattern-count-other": "{0} shaku [vol, JP]"
+          },
+          "volume-sai": {
+            "displayName": "sai [JP]",
+            "unitPattern-count-other": "{0} sai [JP]"
+          },
+          "volume-to-jp": {
+            "displayName": "to [JP]",
+            "unitPattern-count-other": "{0} to [JP]"
+          },
+          "volume-koku": {
+            "displayName": "koku [JP]",
+            "unitPattern-count-other": "{0} koku [JP]"
+          },
+          "speed-light-speed": {
+            "gender": "neuter",
+            "displayName": "светло",
+            "unitPattern-count-one": "{0} светло",
+            "accusative-count-one": "{0} светло",
+            "genitive-count-one": "{0} светла",
+            "instrumental-count-one": "{0} светлом",
+            "unitPattern-count-few": "{0} светла",
+            "accusative-count-few": "{0} светла",
+            "genitive-count-few": "{0} светла",
+            "instrumental-count-few": "{0} светла",
+            "unitPattern-count-other": "{0} светала",
+            "accusative-count-other": "{0} светала",
+            "genitive-count-other": "{0} светала",
+            "instrumental-count-other": "{0} светала"
+          },
+          "mass-fun": {
+            "displayName": "fun [JP]",
+            "unitPattern-count-other": "{0} fun [JP]"
+          },
+          "concentr-part-per-1e9": {
+            "gender": "inanimate",
+            "displayName": "делови на милијарду",
+            "unitPattern-count-one": "{0} део на милијарду",
+            "accusative-count-one": "{0} део на милијарду",
+            "genitive-count-one": "{0} дела на милијарду",
+            "instrumental-count-one": "{0} делом на милијарду",
+            "unitPattern-count-few": "{0} дела на милијарду",
+            "accusative-count-few": "{0} дела на милијарду",
+            "genitive-count-few": "{0} дела на милијарду",
+            "instrumental-count-few": "{0} дела на милијарду",
+            "unitPattern-count-other": "{0} делова на милијарду",
+            "accusative-count-other": "{0} делова на милијарду",
+            "genitive-count-other": "{0} делова на милијарду",
+            "instrumental-count-other": "{0} делова на милијарду"
+          },
+          "duration-night": {
+            "gender": "feminine",
+            "displayName": "ноћ",
+            "unitPattern-count-one": "{0} ноћ",
+            "accusative-count-one": "{0} ноћ",
+            "genitive-count-one": "{0} ноћи",
+            "instrumental-count-one": "{0} ноћи",
+            "unitPattern-count-few": "{0} ноћи",
+            "accusative-count-few": "{0} ноћи",
+            "genitive-count-few": "{0} ноћи",
+            "instrumental-count-few": "{0} ноћи",
+            "unitPattern-count-other": "{0} ноћи",
+            "accusative-count-other": "{0} ноћи",
+            "genitive-count-other": "{0} ноћи",
+            "instrumental-count-other": "{0} ноћи",
+            "perUnitPattern": "{0}/ноћ"
+          },
           "coordinateUnit": {
-            "displayName": "главни правац",
-            "east": "{0}И",
-            "north": "{0}С",
-            "south": "{0}Ј",
-            "west": "{0}З"
+            "displayName": "страна света",
+            "east": "{0} E",
+            "north": "{0} N",
+            "south": "{0} S",
+            "west": "{0} W"
           }
         },
         "short": {
@@ -2582,7 +2901,13 @@
             "unitPattern-count-few": "{0} ставке",
             "unitPattern-count-other": "{0} ставки"
           },
-          "concentr-permillion": {
+          "concentr-part": {
+            "displayName": "део",
+            "unitPattern-count-one": "{0} део",
+            "unitPattern-count-few": "{0} дела",
+            "unitPattern-count-other": "{0} делова"
+          },
+          "concentr-part-per-1e6": {
             "displayName": "ppm",
             "unitPattern-count-other": "{0} ppm"
           },
@@ -2601,6 +2926,10 @@
           "concentr-mole": {
             "displayName": "mol",
             "unitPattern-count-other": "{0} mol"
+          },
+          "concentr-ofglucose": {
+            "displayName": "Glc",
+            "unitPattern-count-other": "{0} Glc"
           },
           "consumption-liter-per-kilometer": {
             "displayName": "L/km",
@@ -2810,9 +3139,17 @@
             "displayName": "lbf",
             "unitPattern-count-other": "{0} lbf"
           },
+          "force-poundal": {
+            "displayName": "pdl",
+            "unitPattern-count-other": "{0} pdl"
+          },
           "force-newton": {
             "displayName": "њутн",
             "unitPattern-count-other": "{0} N"
+          },
+          "force-dyne": {
+            "displayName": "dyn",
+            "unitPattern-count-other": "{0} dyn"
           },
           "force-kilowatt-hour-per-100-kilometer": {
             "displayName": "kWh/100km",
@@ -2933,6 +3270,10 @@
             "unitPattern-count-other": "{0} инча",
             "perUnitPattern": "{0}/in"
           },
+          "length-milliinch": {
+            "displayName": "milli-inch",
+            "unitPattern-count-other": "{0} milli-inch"
+          },
           "length-parsec": {
             "displayName": "парсеци",
             "unitPattern-count-other": "{0} pc"
@@ -2966,7 +3307,7 @@
             "unitPattern-count-other": "{0} smi"
           },
           "length-point": {
-            "displayName": "pt",
+            "displayName": "типографске тачке",
             "unitPattern-count-other": "{0} pt"
           },
           "length-solar-radius": {
@@ -3081,6 +3422,10 @@
             "displayName": "mm Hg",
             "unitPattern-count-other": "{0} mm Hg"
           },
+          "pressure-ofhg": {
+            "displayName": "Hg",
+            "unitPattern-count-other": "{0} Hg"
+          },
           "pressure-pound-force-per-square-inch": {
             "displayName": "psi",
             "unitPattern-count-other": "{0} psi"
@@ -3135,9 +3480,7 @@
           },
           "speed-beaufort": {
             "displayName": "Bf",
-            "unitPattern-count-one": "Б {0}",
-            "unitPattern-count-few": "Б {0}",
-            "unitPattern-count-other": "Б {0}"
+            "unitPattern-count-other": "B {0}"
           },
           "temperature-generic": {
             "displayName": "°",
@@ -3226,6 +3569,10 @@
             "displayName": "mcup",
             "unitPattern-count-other": "{0} mc"
           },
+          "volume-fluid-ounce-metric": {
+            "displayName": "fl oz m.",
+            "unitPattern-count-other": "{0} fl oz m."
+          },
           "volume-acre-foot": {
             "displayName": "ac ft",
             "unitPattern-count-other": "{0} ac ft"
@@ -3254,11 +3601,19 @@
             "displayName": "pt",
             "unitPattern-count-other": "{0} pt"
           },
+          "volume-pint-imperial": {
+            "displayName": "pint Imp.",
+            "unitPattern-count-other": "{0} pt Imp."
+          },
           "volume-cup": {
             "displayName": "шоље",
             "unitPattern-count-one": "{0} ш.",
             "unitPattern-count-few": "{0} ш.",
             "unitPattern-count-other": "{0} ш."
+          },
+          "volume-cup-imperial": {
+            "displayName": "cup Imp.",
+            "unitPattern-count-other": "{0} cup Imp."
           },
           "volume-fluid-ounce": {
             "displayName": "fl oz",
@@ -3324,12 +3679,181 @@
             "displayName": "qt Imp",
             "unitPattern-count-other": "{0} qt Imp."
           },
+          "angle-steradian": {
+            "displayName": "sr",
+            "unitPattern-count-other": "{0} sr"
+          },
+          "concentr-katal": {
+            "displayName": "kat",
+            "unitPattern-count-other": "{0} kat"
+          },
+          "electric-coulomb": {
+            "displayName": "C",
+            "unitPattern-count-other": "{0} C"
+          },
+          "electric-farad": {
+            "displayName": "F",
+            "unitPattern-count-other": "{0} F"
+          },
+          "electric-henry": {
+            "displayName": "H",
+            "unitPattern-count-other": "{0} H"
+          },
+          "electric-siemens": {
+            "displayName": "S",
+            "unitPattern-count-other": "{0} S"
+          },
+          "energy-calorie-it": {
+            "displayName": "cal [IT]",
+            "unitPattern-count-other": "{0} cal-IT"
+          },
+          "energy-british-thermal-unit-it": {
+            "displayName": "BTU-IT",
+            "unitPattern-count-other": "{0} BTU-IT"
+          },
+          "energy-becquerel": {
+            "displayName": "Bq",
+            "unitPattern-count-other": "{0} Bq"
+          },
+          "energy-sievert": {
+            "displayName": "Sv",
+            "unitPattern-count-other": "{0} Sv"
+          },
+          "energy-gray": {
+            "displayName": "Gy",
+            "unitPattern-count-other": "{0} Gy"
+          },
+          "force-kilogram-force": {
+            "displayName": "kgf",
+            "unitPattern-count-other": "{0} kgf"
+          },
+          "length-rod": {
+            "displayName": "rod",
+            "unitPattern-count-other": "{0} rod"
+          },
+          "length-chain": {
+            "displayName": "chain",
+            "unitPattern-count-other": "{0} chain"
+          },
+          "magnetic-tesla": {
+            "displayName": "T",
+            "unitPattern-count-other": "{0} T"
+          },
+          "magnetic-weber": {
+            "displayName": "Wb",
+            "unitPattern-count-other": "{0} Wb"
+          },
+          "temperature-rankine": {
+            "displayName": "°R",
+            "unitPattern-count-other": "{0} °R"
+          },
+          "duration-fortnight": {
+            "displayName": "fortnight",
+            "unitPattern-count-other": "{0} fw"
+          },
+          "mass-slug": {
+            "displayName": "slug",
+            "unitPattern-count-other": "{0} slug"
+          },
+          "pressure-gasoline-energy-density": {
+            "displayName": "gas E",
+            "unitPattern-count-other": "{0} gas E"
+          },
+          "length-rin": {
+            "displayName": "rin [JP]",
+            "unitPattern-count-other": "{0} rin [JP]"
+          },
+          "length-sun": {
+            "displayName": "sun [JP]",
+            "unitPattern-count-other": "{0} sun [JP]"
+          },
+          "length-shaku-length": {
+            "displayName": "shaku [JP]",
+            "unitPattern-count-other": "{0} shaku [JP]"
+          },
+          "length-shaku-cloth": {
+            "displayName": "shaku [cloth, JP]",
+            "unitPattern-count-other": "{0} shaku [cloth, JP]"
+          },
+          "length-ken": {
+            "displayName": "ken [JP]",
+            "unitPattern-count-other": "{0} ken [JP]"
+          },
+          "length-jo-jp": {
+            "displayName": "jo [JP]",
+            "unitPattern-count-other": "{0} jo [JP]"
+          },
+          "length-ri-jp": {
+            "displayName": "ri [JP]",
+            "unitPattern-count-other": "{0} ri [JP]"
+          },
+          "area-bu-jp": {
+            "displayName": "bu [JP]",
+            "unitPattern-count-other": "{0} bu [JP]"
+          },
+          "area-se-jp": {
+            "displayName": "se [JP]",
+            "unitPattern-count-other": "{0} se [JP]"
+          },
+          "area-cho": {
+            "displayName": "cho [JP]",
+            "unitPattern-count-other": "{0} cho [JP]"
+          },
+          "volume-kosaji": {
+            "displayName": "kosaji [JP]",
+            "unitPattern-count-other": "{0} kosaji [JP]"
+          },
+          "volume-osaji": {
+            "displayName": "osaji [JP]",
+            "unitPattern-count-other": "{0} osaji [JP]"
+          },
+          "volume-cup-jp": {
+            "displayName": "cup [JP]",
+            "unitPattern-count-other": "{0} cup [JP]"
+          },
+          "volume-shaku": {
+            "displayName": "shaku [vol, JP]",
+            "unitPattern-count-other": "{0} shaku [vol, JP]"
+          },
+          "volume-sai": {
+            "displayName": "sai [JP]",
+            "unitPattern-count-other": "{0} sai [JP]"
+          },
+          "volume-to-jp": {
+            "displayName": "to [JP]",
+            "unitPattern-count-other": "{0} to [JP]"
+          },
+          "volume-koku": {
+            "displayName": "koku [JP]",
+            "unitPattern-count-other": "{0} koku [JP]"
+          },
+          "speed-light-speed": {
+            "displayName": "светло",
+            "unitPattern-count-one": "{0} светло",
+            "unitPattern-count-few": "{0} светла",
+            "unitPattern-count-other": "{0} светала"
+          },
+          "mass-fun": {
+            "displayName": "fun [JP]",
+            "unitPattern-count-other": "{0} fun [JP]"
+          },
+          "concentr-part-per-1e9": {
+            "displayName": "делови/милијарда",
+            "unitPattern-count-other": "{0} ppb"
+          },
+          "duration-night": {
+            "displayName": "ноћ",
+            "unitPattern-count-one": "{0} ноћ",
+            "unitPattern-count-few": "{0} ноћи",
+            "unitPattern-count-other": "{0} ноћи",
+            "perUnitPattern": "{0}/ноћ"
+          },
           "coordinateUnit": {
             "displayName": "правац",
-            "east": "{0}И",
-            "north": "{0}С",
-            "south": "{0}Ј",
-            "west": "{0}З"
+            "east": "{0} E",
+            "north": "{0} N",
+            "south": "{0} S",
+            "west": "{0} W"
           }
         },
         "narrow": {
@@ -3536,7 +4060,13 @@
             "unitPattern-count-few": "{0} ставке",
             "unitPattern-count-other": "{0} ставки"
           },
-          "concentr-permillion": {
+          "concentr-part": {
+            "displayName": "део",
+            "unitPattern-count-one": "{0} део",
+            "unitPattern-count-few": "{0} дела",
+            "unitPattern-count-other": "{0} делова"
+          },
+          "concentr-part-per-1e6": {
             "displayName": "ppm",
             "unitPattern-count-other": "{0} ppm"
           },
@@ -3555,6 +4085,10 @@
           "concentr-mole": {
             "displayName": "mol",
             "unitPattern-count-other": "{0} mol"
+          },
+          "concentr-ofglucose": {
+            "displayName": "Glc",
+            "unitPattern-count-other": "{0} Glc"
           },
           "consumption-liter-per-kilometer": {
             "displayName": "L/km",
@@ -3766,9 +4300,17 @@
             "displayName": "lbf",
             "unitPattern-count-other": "{0} lbf"
           },
+          "force-poundal": {
+            "displayName": "pdl",
+            "unitPattern-count-other": "{0} pdl"
+          },
           "force-newton": {
             "displayName": "њутн",
             "unitPattern-count-other": "{0} N"
+          },
+          "force-dyne": {
+            "displayName": "dyn",
+            "unitPattern-count-other": "{0} dyn"
           },
           "force-kilowatt-hour-per-100-kilometer": {
             "displayName": "kWh/100km",
@@ -3891,6 +4433,10 @@
             "unitPattern-count-other": "{0} in",
             "perUnitPattern": "{0}/in"
           },
+          "length-milliinch": {
+            "displayName": "milli-inch",
+            "unitPattern-count-other": "{0} milli-inch"
+          },
           "length-parsec": {
             "displayName": "парсеци",
             "unitPattern-count-other": "{0} pc"
@@ -3924,7 +4470,7 @@
             "unitPattern-count-other": "{0} smi"
           },
           "length-point": {
-            "displayName": "pt",
+            "displayName": "типографске тачке",
             "unitPattern-count-other": "{0} pt"
           },
           "length-solar-radius": {
@@ -4043,6 +4589,10 @@
             "displayName": "mm Hg",
             "unitPattern-count-other": "{0} mm Hg"
           },
+          "pressure-ofhg": {
+            "displayName": "Hg",
+            "unitPattern-count-other": "{0} Hg"
+          },
           "pressure-pound-force-per-square-inch": {
             "displayName": "psi",
             "unitPattern-count-other": "{0} psi"
@@ -4097,9 +4647,7 @@
           },
           "speed-beaufort": {
             "displayName": "Bf",
-            "unitPattern-count-one": "Б {0}",
-            "unitPattern-count-few": "Б {0}",
-            "unitPattern-count-other": "Б {0}"
+            "unitPattern-count-other": "B {0}"
           },
           "temperature-generic": {
             "displayName": "°",
@@ -4188,6 +4736,10 @@
             "displayName": "mcup",
             "unitPattern-count-other": "{0} mc"
           },
+          "volume-fluid-ounce-metric": {
+            "displayName": "fl oz m.",
+            "unitPattern-count-other": "{0} fl oz m."
+          },
           "volume-acre-foot": {
             "displayName": "ac ft",
             "unitPattern-count-other": "{0} ac ft"
@@ -4218,11 +4770,19 @@
             "displayName": "pt",
             "unitPattern-count-other": "{0} pt"
           },
+          "volume-pint-imperial": {
+            "displayName": "pint Imp.",
+            "unitPattern-count-other": "{0} pt Imp."
+          },
           "volume-cup": {
             "displayName": "шоље",
             "unitPattern-count-one": "{0} ш.",
             "unitPattern-count-few": "{0} ш.",
             "unitPattern-count-other": "{0} ш."
+          },
+          "volume-cup-imperial": {
+            "displayName": "cup Imp.",
+            "unitPattern-count-other": "{0} cup Imp."
           },
           "volume-fluid-ounce": {
             "displayName": "fl oz",
@@ -4292,12 +4852,181 @@
             "unitPattern-count-few": "{0} qt Imp",
             "unitPattern-count-other": "{0} qt Imp"
           },
+          "angle-steradian": {
+            "displayName": "sr",
+            "unitPattern-count-other": "{0} sr"
+          },
+          "concentr-katal": {
+            "displayName": "kat",
+            "unitPattern-count-other": "{0} kat"
+          },
+          "electric-coulomb": {
+            "displayName": "C",
+            "unitPattern-count-other": "{0} C"
+          },
+          "electric-farad": {
+            "displayName": "F",
+            "unitPattern-count-other": "{0} F"
+          },
+          "electric-henry": {
+            "displayName": "H",
+            "unitPattern-count-other": "{0} H"
+          },
+          "electric-siemens": {
+            "displayName": "S",
+            "unitPattern-count-other": "{0} S"
+          },
+          "energy-calorie-it": {
+            "displayName": "cal [IT]",
+            "unitPattern-count-other": "{0} cal-IT"
+          },
+          "energy-british-thermal-unit-it": {
+            "displayName": "BTU-IT",
+            "unitPattern-count-other": "{0} BTU-IT"
+          },
+          "energy-becquerel": {
+            "displayName": "Bq",
+            "unitPattern-count-other": "{0} Bq"
+          },
+          "energy-sievert": {
+            "displayName": "Sv",
+            "unitPattern-count-other": "{0} Sv"
+          },
+          "energy-gray": {
+            "displayName": "Gy",
+            "unitPattern-count-other": "{0} Gy"
+          },
+          "force-kilogram-force": {
+            "displayName": "kgf",
+            "unitPattern-count-other": "{0} kgf"
+          },
+          "length-rod": {
+            "displayName": "rod",
+            "unitPattern-count-other": "{0} rod"
+          },
+          "length-chain": {
+            "displayName": "chain",
+            "unitPattern-count-other": "{0} chain"
+          },
+          "magnetic-tesla": {
+            "displayName": "T",
+            "unitPattern-count-other": "{0} T"
+          },
+          "magnetic-weber": {
+            "displayName": "Wb",
+            "unitPattern-count-other": "{0} Wb"
+          },
+          "temperature-rankine": {
+            "displayName": "°R",
+            "unitPattern-count-other": "{0} °R"
+          },
+          "duration-fortnight": {
+            "displayName": "fortnight",
+            "unitPattern-count-other": "{0} fw"
+          },
+          "mass-slug": {
+            "displayName": "slug",
+            "unitPattern-count-other": "{0} slug"
+          },
+          "pressure-gasoline-energy-density": {
+            "displayName": "gas E",
+            "unitPattern-count-other": "{0} gas E"
+          },
+          "length-rin": {
+            "displayName": "rin [JP]",
+            "unitPattern-count-other": "{0} rin [JP]"
+          },
+          "length-sun": {
+            "displayName": "sun [JP]",
+            "unitPattern-count-other": "{0} sun [JP]"
+          },
+          "length-shaku-length": {
+            "displayName": "shaku [JP]",
+            "unitPattern-count-other": "{0} shaku [JP]"
+          },
+          "length-shaku-cloth": {
+            "displayName": "shaku [cloth, JP]",
+            "unitPattern-count-other": "{0} shaku [cloth, JP]"
+          },
+          "length-ken": {
+            "displayName": "ken [JP]",
+            "unitPattern-count-other": "{0} ken [JP]"
+          },
+          "length-jo-jp": {
+            "displayName": "jo [JP]",
+            "unitPattern-count-other": "{0} jo [JP]"
+          },
+          "length-ri-jp": {
+            "displayName": "ri [JP]",
+            "unitPattern-count-other": "{0} ri [JP]"
+          },
+          "area-bu-jp": {
+            "displayName": "bu [JP]",
+            "unitPattern-count-other": "{0} bu [JP]"
+          },
+          "area-se-jp": {
+            "displayName": "se [JP]",
+            "unitPattern-count-other": "{0} se [JP]"
+          },
+          "area-cho": {
+            "displayName": "cho [JP]",
+            "unitPattern-count-other": "{0} cho [JP]"
+          },
+          "volume-kosaji": {
+            "displayName": "kosaji [JP]",
+            "unitPattern-count-other": "{0} kosaji [JP]"
+          },
+          "volume-osaji": {
+            "displayName": "osaji [JP]",
+            "unitPattern-count-other": "{0} osaji [JP]"
+          },
+          "volume-cup-jp": {
+            "displayName": "cup [JP]",
+            "unitPattern-count-other": "{0} cup [JP]"
+          },
+          "volume-shaku": {
+            "displayName": "shaku [vol, JP]",
+            "unitPattern-count-other": "{0} shaku [vol, JP]"
+          },
+          "volume-sai": {
+            "displayName": "sai [JP]",
+            "unitPattern-count-other": "{0} sai [JP]"
+          },
+          "volume-to-jp": {
+            "displayName": "to [JP]",
+            "unitPattern-count-other": "{0} to [JP]"
+          },
+          "volume-koku": {
+            "displayName": "koku [JP]",
+            "unitPattern-count-other": "{0} koku [JP]"
+          },
+          "speed-light-speed": {
+            "displayName": "светло",
+            "unitPattern-count-one": "{0} светло",
+            "unitPattern-count-few": "{0} светла",
+            "unitPattern-count-other": "{0} светала"
+          },
+          "mass-fun": {
+            "displayName": "fun [JP]",
+            "unitPattern-count-other": "{0} fun [JP]"
+          },
+          "concentr-part-per-1e9": {
+            "displayName": "делови/милијарда",
+            "unitPattern-count-other": "{0} ppb"
+          },
+          "duration-night": {
+            "displayName": "ноћ",
+            "unitPattern-count-one": "{0} ноћ",
+            "unitPattern-count-few": "{0} ноћи",
+            "unitPattern-count-other": "{0} ноћи",
+            "perUnitPattern": "{0}/ноћ"
+          },
           "coordinateUnit": {
             "displayName": "правац",
-            "east": "{0}И",
-            "north": "{0}С",
-            "south": "{0}Ј",
-            "west": "{0}З"
+            "east": "{0}E",
+            "north": "{0}N",
+            "south": "{0}S",
+            "west": "{0}W"
           }
         },
         "durationUnit-type-hm": {

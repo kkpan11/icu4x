@@ -2,10 +2,10 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use fixed_decimal::FixedDecimal;
-#[cfg(feature = "experimental")]
+use fixed_decimal::Decimal;
+#[cfg(feature = "unstable")]
 use icu_plurals::PluralOperands;
-use icu_plurals::{PluralCategory, PluralRuleType};
+use icu_plurals::{PluralCategory, PluralRuleType, PluralRulesOptions};
 use serde::Deserialize;
 
 /// Defines the data-driven test sets for the operands.
@@ -18,40 +18,41 @@ pub struct OperandsTestSet {
     pub from_test: Vec<FromTestCase>,
 }
 
-/// A single test case verifying the conversion from [FixedDecimal] into
-/// [PluralOperands].
+/// A single test case verifying the conversion from [`FixedDecimal`] into
+/// [`PluralOperands`].
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct FromTestCase {
-    /// The [FixedDecimal] input
+    /// The [`FixedDecimal`] input
     pub input: FixedDecimalInput,
     /// The expected value after conversion.
     pub expected: PluralOperandsInput,
 }
 
-/// A serialized representation of [FixedDecimal] in the data driven tests.
+/// A serialized representation of [`FixedDecimal`] in the data driven tests.
 ///
-/// Use the `From` trait to convert into [FixedDecimal] in tests.
+/// Use the `From` trait to convert into [`FixedDecimal`] in tests.
 #[derive(Debug, Deserialize)]
 pub struct FixedDecimalInput {
-    /// Value supplied to [FixedDecimal::from] when constructing.
+    /// Value supplied to [`FixedDecimal::from`] when constructing.
     from: i64,
-    /// Value supplied to [FixedDecimal::multiplied_pow10] when constructing.
+    /// Value supplied to [`FixedDecimal::multiplied_pow10`] when constructing.
     pow10: i16,
 }
 
-impl From<&FixedDecimalInput> for FixedDecimal {
+impl From<&FixedDecimalInput> for Decimal {
     fn from(f: &FixedDecimalInput) -> Self {
-        FixedDecimal::from(f.from).multiplied_pow10(f.pow10)
+        let mut dec = Decimal::from(f.from);
+        dec.multiply_pow10(f.pow10);
+        dec
     }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PluralOperandsInput {
-    List((f64, u64, usize, usize, u64, u64, usize)),
+    List((u64, usize, usize, u64, u64, usize)),
     Struct {
-        n: Option<f64>,
         i: Option<u64>,
         v: Option<usize>,
         w: Option<usize>,
@@ -63,35 +64,24 @@ pub enum PluralOperandsInput {
     Number(isize),
 }
 
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 impl From<PluralOperandsInput> for PluralOperands {
     fn from(input: PluralOperandsInput) -> Self {
-        use icu_plurals::rules::RawPluralOperands;
+        use icu_plurals::RawPluralOperands;
         match input {
-            PluralOperandsInput::List(operands) => PluralOperands::from(RawPluralOperands {
-                i: operands.1,
-                v: operands.2,
-                w: operands.3,
-                f: operands.4,
-                t: operands.5,
-                c: operands.6,
-            }),
-            PluralOperandsInput::Struct {
-                n,
-                i,
-                v,
-                w,
-                f,
-                t,
-                c,
-            } => PluralOperands::from(RawPluralOperands {
-                i: i.unwrap_or_else(|| n.unwrap_or(0_f64) as u64),
-                v: v.unwrap_or(0),
-                w: w.unwrap_or(0),
-                f: f.unwrap_or(0),
-                t: t.unwrap_or(0),
-                c: c.unwrap_or(0),
-            }),
+            PluralOperandsInput::List((i, v, w, f, t, c)) => {
+                PluralOperands::from(RawPluralOperands { i, v, w, f, t, c })
+            }
+            PluralOperandsInput::Struct { i, v, w, f, t, c } => {
+                PluralOperands::from(RawPluralOperands {
+                    i: i.unwrap_or(0),
+                    v: v.unwrap_or(0),
+                    w: w.unwrap_or(0),
+                    f: f.unwrap_or(0),
+                    t: t.unwrap_or(0),
+                    c: c.unwrap_or(0),
+                })
+            }
             PluralOperandsInput::String(num) => num
                 .parse()
                 .expect("Failed to parse a number into operands."),
@@ -133,11 +123,11 @@ pub enum PluralRuleTypeInput {
     Ordinal,
 }
 
-impl From<PluralRuleTypeInput> for PluralRuleType {
+impl From<PluralRuleTypeInput> for PluralRulesOptions {
     fn from(other: PluralRuleTypeInput) -> Self {
         match other {
-            PluralRuleTypeInput::Cardinal => PluralRuleType::Cardinal,
-            PluralRuleTypeInput::Ordinal => PluralRuleType::Ordinal,
+            PluralRuleTypeInput::Cardinal => PluralRuleType::Cardinal.into(),
+            PluralRuleTypeInput::Ordinal => PluralRuleType::Ordinal.into(),
         }
     }
 }

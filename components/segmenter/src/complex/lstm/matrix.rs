@@ -7,8 +7,8 @@ use alloc::vec::Vec;
 use core::ops::Range;
 #[allow(unused_imports)]
 use core_maths::*;
-use zerovec::ule::AsULE;
 use zerovec::ZeroSlice;
+use zerovec::ule::AsULE;
 
 /// A `D`-dimensional, heap-allocated matrix.
 ///
@@ -22,7 +22,7 @@ pub(super) struct MatrixOwned<const D: usize> {
 }
 
 impl<const D: usize> MatrixOwned<D> {
-    pub(super) fn as_borrowed(&self) -> MatrixBorrowed<D> {
+    pub(super) fn as_borrowed(&self) -> MatrixBorrowed<'_, D> {
         MatrixBorrowed {
             data: &self.data,
             dims: self.dims,
@@ -44,7 +44,7 @@ impl<const D: usize> MatrixOwned<D> {
     ///
     /// The type parameter `M` should be `D - 1`.
     #[inline]
-    pub(super) fn submatrix<const M: usize>(&self, index: usize) -> Option<MatrixBorrowed<M>> {
+    pub(super) fn submatrix<const M: usize>(&self, index: usize) -> Option<MatrixBorrowed<'_, M>> {
         // This assertion is based on const generics; it should always succeed and be elided.
         assert_eq!(M, D - 1);
         let (range, dims) = self.as_borrowed().submatrix_range(index);
@@ -52,7 +52,7 @@ impl<const D: usize> MatrixOwned<D> {
         Some(MatrixBorrowed { data, dims })
     }
 
-    pub(super) fn as_mut(&mut self) -> MatrixBorrowedMut<D> {
+    pub(super) fn as_mut(&mut self) -> MatrixBorrowedMut<'_, D> {
         MatrixBorrowedMut {
             data: &mut self.data,
             dims: self.dims,
@@ -64,7 +64,7 @@ impl<const D: usize> MatrixOwned<D> {
     pub(super) fn submatrix_mut<const M: usize>(
         &mut self,
         index: usize,
-    ) -> Option<MatrixBorrowedMut<M>> {
+    ) -> Option<MatrixBorrowedMut<'_, M>> {
         // This assertion is based on const generics; it should always succeed and be elided.
         assert_eq!(M, D - 1);
         let (range, dims) = self.as_borrowed().submatrix_range(index);
@@ -107,7 +107,7 @@ impl<'a, const D: usize> MatrixBorrowed<'a, D> {
         // This assertion is based on const generics; it should always succeed and be elided.
         assert_eq!(M, D - 1);
         // The above assertion guarantees that the following line will succeed
-        #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+        #[expect(clippy::unwrap_used)]
         let sub_dims: [usize; M] = self.dims[1..].try_into().unwrap();
         let n = sub_dims.iter().product::<usize>();
         (n * index..n * (index + 1), sub_dims)
@@ -116,21 +116,21 @@ impl<'a, const D: usize> MatrixBorrowed<'a, D> {
 
 macro_rules! impl_basic_dim {
     ($t1:path, $t2:path, $t3:path) => {
-        impl<'a> $t1 {
+        impl $t1 {
             #[allow(dead_code)]
             pub(super) fn dim(&self) -> usize {
                 let [dim] = self.dims;
                 dim
             }
         }
-        impl<'a> $t2 {
+        impl $t2 {
             #[allow(dead_code)]
             pub(super) fn dim(&self) -> (usize, usize) {
                 let [d0, d1] = self.dims;
                 (d0, d1)
             }
         }
-        impl<'a> $t3 {
+        impl $t3 {
             #[allow(dead_code)]
             pub(super) fn dim(&self) -> (usize, usize, usize) {
                 let [d0, d1, d2] = self.dims;
@@ -142,16 +142,16 @@ macro_rules! impl_basic_dim {
 
 impl_basic_dim!(MatrixOwned<1>, MatrixOwned<2>, MatrixOwned<3>);
 impl_basic_dim!(
-    MatrixBorrowed<'a, 1>,
-    MatrixBorrowed<'a, 2>,
-    MatrixBorrowed<'a, 3>
+    MatrixBorrowed<'_, 1>,
+    MatrixBorrowed<'_, 2>,
+    MatrixBorrowed<'_, 3>
 );
 impl_basic_dim!(
-    MatrixBorrowedMut<'a, 1>,
-    MatrixBorrowedMut<'a, 2>,
-    MatrixBorrowedMut<'a, 3>
+    MatrixBorrowedMut<'_, 1>,
+    MatrixBorrowedMut<'_, 2>,
+    MatrixBorrowedMut<'_, 3>
 );
-impl_basic_dim!(MatrixZero<'a, 1>, MatrixZero<'a, 2>, MatrixZero<'a, 3>);
+impl_basic_dim!(MatrixZero<'_, 1>, MatrixZero<'_, 2>, MatrixZero<'_, 3>);
 
 /// A `D`-dimensional, mutably borrowed matrix.
 pub(super) struct MatrixBorrowedMut<'a, const D: usize> {
@@ -159,8 +159,8 @@ pub(super) struct MatrixBorrowedMut<'a, const D: usize> {
     pub(super) dims: [usize; D],
 }
 
-impl<'a, const D: usize> MatrixBorrowedMut<'a, D> {
-    pub(super) fn as_borrowed(&self) -> MatrixBorrowed<D> {
+impl<const D: usize> MatrixBorrowedMut<'_, D> {
+    pub(super) fn as_borrowed(&self) -> MatrixBorrowed<'_, D> {
         MatrixBorrowed {
             data: self.data,
             dims: self.dims,
@@ -258,7 +258,7 @@ impl<'a, const D: usize> MatrixBorrowedMut<'a, D> {
     }
 }
 
-impl<'a> MatrixBorrowed<'a, 1> {
+impl MatrixBorrowed<'_, 1> {
     #[allow(dead_code)] // could be useful
     pub(super) fn dot_1d(&self, other: MatrixZero<1>) -> f32 {
         debug_assert_eq!(self.dims, other.dims);
@@ -266,10 +266,10 @@ impl<'a> MatrixBorrowed<'a, 1> {
     }
 }
 
-impl<'a> MatrixBorrowedMut<'a, 1> {
+impl MatrixBorrowedMut<'_, 1> {
     /// Calculate the dot product of a and b, adding the result to self.
     ///
-    /// Note: For better dot product efficiency, if `b` is MxN, then `a` should be N;
+    /// Note: For better dot product efficiency, if `b` is `MxN`, then `a` should be N;
     /// this is the opposite of standard practice.
     pub(super) fn add_dot_2d(&mut self, a: MatrixBorrowed<1>, b: MatrixZero<2>) {
         let m = a.dim();
@@ -301,10 +301,10 @@ impl<'a> MatrixBorrowedMut<'a, 1> {
     }
 }
 
-impl<'a> MatrixBorrowedMut<'a, 2> {
+impl MatrixBorrowedMut<'_, 2> {
     /// Calculate the dot product of a and b, adding the result to self.
     ///
-    /// Self should be _MxN_; `a`, _O_; and `b`, _MxNxO_.
+    /// Self should be `MxN`; `a`, _O_; and `b`, `MxNxO`.
     pub(super) fn add_dot_3d_1(&mut self, a: MatrixBorrowed<1>, b: MatrixZero<3>) {
         let m = a.dim();
         let n = self.as_borrowed().dim().0 * self.as_borrowed().dim().1;
@@ -344,7 +344,7 @@ impl<'a> MatrixBorrowedMut<'a, 2> {
 
     /// Calculate the dot product of a and b, adding the result to self.
     ///
-    /// Self should be _MxN_; `a`, _O_; and `b`, _MxNxO_.
+    /// Self should be `MxN`; `a`, `O`; and `b`, `MxNxO`.
     pub(super) fn add_dot_3d_2(&mut self, a: MatrixZero<1>, b: MatrixZero<3>) {
         let m = a.dim();
         let n = self.as_borrowed().dim().0 * self.as_borrowed().dim().1;
@@ -418,7 +418,7 @@ impl<'a> From<&'a crate::provider::LstmMatrix3<'a>> for MatrixZero<'a, 3> {
 }
 
 impl<'a, const D: usize> MatrixZero<'a, D> {
-    #[allow(clippy::wrong_self_convention)] // same convention as slice::to_vec
+    #[expect(clippy::wrong_self_convention)] // same convention as slice::to_vec
     pub(super) fn to_owned(&self) -> MatrixOwned<D> {
         MatrixOwned {
             data: self.data.iter().collect(),
@@ -452,7 +452,7 @@ impl<'a, const D: usize> MatrixZero<'a, D> {
         // This assertion is based on const generics; it should always succeed and be elided.
         assert_eq!(M, D - 1);
         // The above assertion guarantees that the following line will succeed
-        #[allow(clippy::indexing_slicing, clippy::unwrap_used)]
+        #[expect(clippy::unwrap_used)]
         let sub_dims: [usize; M] = self.dims[1..].try_into().unwrap();
         let n = sub_dims.iter().product::<usize>();
         (n * index..n * (index + 1), sub_dims)
@@ -475,21 +475,11 @@ fn unrolled_dot_1(xs: &[f32], ys: &ZeroSlice<f32>) -> f32 {
     // eightfold unrolled so that floating point can be vectorized
     // (even with strict floating point accuracy semantics)
     let mut p = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    let xit = xs.chunks_exact(8);
-    let yit = ys.as_ule_slice().chunks_exact(8);
-    let sum = xit
-        .remainder()
-        .iter()
-        .zip(yit.remainder().iter())
-        .map(|(x, y)| x * f32c!(*y))
-        .sum::<f32>();
-    for (xx, yy) in xit.zip(yit) {
-        // TODO: Use array_chunks once stable to avoid the unwrap.
-        // <https://github.com/rust-lang/rust/issues/74985>
-        #[allow(clippy::unwrap_used)]
-        let [x0, x1, x2, x3, x4, x5, x6, x7] = *<&[f32; 8]>::try_from(xx).unwrap();
-        #[allow(clippy::unwrap_used)]
-        let [y0, y1, y2, y3, y4, y5, y6, y7] = *<&[<f32 as AsULE>::ULE; 8]>::try_from(yy).unwrap();
+    let (xx, xr) = xs.as_chunks::<8>();
+    let (yy, yr) = ys.as_ule_slice().as_chunks::<8>();
+    let sum = xr.iter().zip(yr).map(|(x, y)| x * f32c!(*y)).sum::<f32>();
+    for (&[x0, x1, x2, x3, x4, x5, x6, x7], &[y0, y1, y2, y3, y4, y5, y6, y7]) in xx.iter().zip(yy)
+    {
         p.0 += x0 * f32c!(y0);
         p.1 += x1 * f32c!(y1);
         p.2 += x2 * f32c!(y2);
@@ -512,21 +502,15 @@ fn unrolled_dot_2(xs: &ZeroSlice<f32>, ys: &ZeroSlice<f32>) -> f32 {
     // eightfold unrolled so that floating point can be vectorized
     // (even with strict floating point accuracy semantics)
     let mut p = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    let xit = xs.as_ule_slice().chunks_exact(8);
-    let yit = ys.as_ule_slice().chunks_exact(8);
-    let sum = xit
-        .remainder()
+    let (xx, xr) = xs.as_ule_slice().as_chunks::<8>();
+    let (yy, yr) = ys.as_ule_slice().as_chunks::<8>();
+    let sum = xr
         .iter()
-        .zip(yit.remainder().iter())
+        .zip(yr)
         .map(|(x, y)| f32c!(*x) * f32c!(*y))
         .sum::<f32>();
-    for (xx, yy) in xit.zip(yit) {
-        // TODO: Use array_chunks once stable to avoid the unwrap.
-        // <https://github.com/rust-lang/rust/issues/74985>
-        #[allow(clippy::unwrap_used)]
-        let [x0, x1, x2, x3, x4, x5, x6, x7] = *<&[<f32 as AsULE>::ULE; 8]>::try_from(xx).unwrap();
-        #[allow(clippy::unwrap_used)]
-        let [y0, y1, y2, y3, y4, y5, y6, y7] = *<&[<f32 as AsULE>::ULE; 8]>::try_from(yy).unwrap();
+    for (&[x0, x1, x2, x3, x4, x5, x6, x7], &[y0, y1, y2, y3, y4, y5, y6, y7]) in xx.iter().zip(yy)
+    {
         p.0 += f32c!(x0) * f32c!(y0);
         p.1 += f32c!(x1) * f32c!(y1);
         p.2 += f32c!(x2) * f32c!(y2);

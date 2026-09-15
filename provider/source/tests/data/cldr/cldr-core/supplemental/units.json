@@ -1,8 +1,8 @@
 {
   "supplemental": {
     "version": {
-      "_unicodeVersion": "15.1.0",
-      "_cldrVersion": "45"
+      "_unicodeVersion": "16.0.0",
+      "_cldrVersion": "49"
     },
     "unitPrefixes": {
       "atto": {
@@ -311,6 +311,14 @@
       "meter-per-square-second": {
         "_quantity": "acceleration"
       },
+      "night": {
+        "_quantity": "night-duration",
+        "_status": "simple"
+      },
+      "part": {
+        "_quantity": "portion",
+        "_status": "simple"
+      },
       "per-second": {
         "_quantity": "radioactivity"
       },
@@ -320,10 +328,6 @@
       },
       "pixel-per-meter": {
         "_quantity": "resolution"
-      },
-      "portion": {
-        "_quantity": "portion",
-        "_status": "simple"
       },
       "pow4-second-square-ampere-per-kilogram-square-meter": {
         "_quantity": "electric-capacitance"
@@ -360,14 +364,6 @@
       }
     },
     "convertUnits": {
-      "100-kilometer": {
-        "_baseUnit": "meter",
-        "_systems": [
-          "si",
-          "metric"
-        ],
-        "_factor": "100000"
-      },
       "acre": {
         "_baseUnit": "square-meter",
         "_systems": [
@@ -583,6 +579,13 @@
         ],
         "_factor": "gal_to_m3/16"
       },
+      "cup-imperial": {
+        "_baseUnit": "cubic-meter",
+        "_systems": [
+          "uksystem"
+        ],
+        "_factor": "gal_imp_to_m3/16"
+      },
       "cup-jp": {
         "_baseUnit": "cubic-meter",
         "_systems": [
@@ -689,6 +692,13 @@
         ],
         "_factor": "1000"
       },
+      "dyne": {
+        "_baseUnit": "kilogram-meter-per-square-second",
+        "_systems": [
+          "metric_adjacent"
+        ],
+        "_factor": "1/1000*100"
+      },
       "earth-mass": {
         "_baseUnit": "kilogram",
         "_systems": [
@@ -759,6 +769,13 @@
         ],
         "_factor": "gal_imp_to_m3/160"
       },
+      "fluid-ounce-metric": {
+        "_baseUnit": "cubic-meter",
+        "_systems": [
+          "metric_adjacent"
+        ],
+        "_factor": "0.03*0.001"
+      },
       "foodcalorie": {
         "_baseUnit": "kilogram-square-meter-per-square-second",
         "_systems": [
@@ -824,7 +841,6 @@
       "gasoline-energy-density": {
         "_baseUnit": "kilogram-per-meter-square-second",
         "_systems": [
-          "metric_adjacent",
           "ussystem",
           "uksystem"
         ],
@@ -939,7 +955,7 @@
         ]
       },
       "karat": {
-        "_baseUnit": "portion",
+        "_baseUnit": "part",
         "_systems": [
           "metric_adjacent",
           "ussystem",
@@ -1006,6 +1022,15 @@
           "jpsystem"
         ],
         "_factor": "1*5*0.000001"
+      },
+      "light-speed": {
+        "_baseUnit": "meter-per-second",
+        "_systems": [
+          "ussystem",
+          "uksystem",
+          "si_acceptable"
+        ],
+        "_factor": "speed_of_light_meters_per_second"
       },
       "light-year": {
         "_baseUnit": "meter",
@@ -1117,6 +1142,14 @@
           "prefixable"
         ]
       },
+      "night": {
+        "_baseUnit": "night",
+        "_systems": [
+          "metric_adjacent",
+          "uksystem",
+          "ussystem"
+        ]
+      },
       "ofglucose": {
         "_baseUnit": "item-per-kilogram",
         "_systems": [
@@ -1172,6 +1205,14 @@
         ],
         "_factor": "meters_per_AU*60*60*180/PI"
       },
+      "part": {
+        "_baseUnit": "part",
+        "_systems": [
+          "metric_adjacent",
+          "ussystem",
+          "uksystem"
+        ]
+      },
       "pascal": {
         "_baseUnit": "kilogram-per-meter-square-second",
         "_systems": [
@@ -1181,7 +1222,7 @@
         ]
       },
       "percent": {
-        "_baseUnit": "portion",
+        "_baseUnit": "part",
         "_systems": [
           "metric_adjacent",
           "ussystem",
@@ -1190,7 +1231,7 @@
         "_factor": "1/100"
       },
       "permille": {
-        "_baseUnit": "portion",
+        "_baseUnit": "part",
         "_systems": [
           "metric_adjacent",
           "ussystem",
@@ -1198,17 +1239,8 @@
         ],
         "_factor": "1/1000"
       },
-      "permillion": {
-        "_baseUnit": "portion",
-        "_systems": [
-          "metric_adjacent",
-          "ussystem",
-          "uksystem"
-        ],
-        "_factor": "1/1000000"
-      },
       "permyriad": {
-        "_baseUnit": "portion",
+        "_baseUnit": "part",
         "_systems": [
           "metric_adjacent",
           "ussystem",
@@ -1262,14 +1294,6 @@
         ],
         "_factor": "ft_to_m/864"
       },
-      "portion": {
-        "_baseUnit": "portion",
-        "_systems": [
-          "metric_adjacent",
-          "ussystem",
-          "uksystem"
-        ]
-      },
       "pound": {
         "_baseUnit": "kilogram",
         "_systems": [
@@ -1285,6 +1309,14 @@
           "uksystem"
         ],
         "_factor": "lb_to_kg * gravity"
+      },
+      "poundal": {
+        "_baseUnit": "kilogram-meter-per-square-second",
+        "_systems": [
+          "ussystem",
+          "uksystem"
+        ],
+        "_factor": "lb_to_kg*ft_to_m"
       },
       "quart": {
         "_baseUnit": "cubic-meter",

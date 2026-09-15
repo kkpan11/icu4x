@@ -37,7 +37,8 @@
         },
         "ancur": {
           "_description": "Curaçao",
-          "_alias": "America/Curacao"
+          "_alias": "America/Curacao",
+          "_region": "CW"
         },
         "aolad": {
           "_description": "Luanda, Angola",
@@ -46,7 +47,7 @@
         "aqams": {
           "_deprecated": true,
           "_description": "Amundsen-Scott Station, South Pole",
-          "_preferred": "nzakl"
+          "_preferred": "aqmcm"
         },
         "aqcas": {
           "_description": "Casey Station, Bailey Peninsula",
@@ -66,7 +67,7 @@
         },
         "aqmcm": {
           "_description": "McMurdo Station, Ross Island",
-          "_alias": "Antarctica/McMurdo"
+          "_alias": "Antarctica/McMurdo Antarctica/South_Pole"
         },
         "aqplm": {
           "_description": "Palmer Station, Anvers Island",
@@ -226,7 +227,7 @@
         },
         "bebru": {
           "_description": "Brussels, Belgium",
-          "_alias": "Europe/Brussels"
+          "_alias": "Europe/Brussels CET MET"
         },
         "bfoua": {
           "_description": "Ouagadougou, Burkina Faso",
@@ -506,6 +507,11 @@
           "_description": "Rarotonga, Cook Islands",
           "_alias": "Pacific/Rarotonga"
         },
+        "clcxq": {
+          "_description": "Aysén Region, Chile",
+          "_alias": "America/Coyhaique",
+          "_since": "48"
+        },
         "clipc": {
           "_description": "Easter Island, Chile",
           "_alias": "Pacific/Easter Chile/EasterIsland"
@@ -555,9 +561,9 @@
           "_alias": "America/Costa_Rica"
         },
         "cst6cdt": {
+          "_deprecated": true,
           "_description": "POSIX style time zone for US Central Time",
-          "_alias": "CST6CDT",
-          "_since": "1.8"
+          "_preferred": "uschi"
         },
         "cuhav": {
           "_description": "Havana, Cuba",
@@ -651,9 +657,9 @@
           "_alias": "Europe/Madrid"
         },
         "est5edt": {
+          "_deprecated": true,
           "_description": "POSIX style time zone for US Eastern Time",
-          "_alias": "EST5EDT",
-          "_since": "1.8"
+          "_preferred": "usnyc"
         },
         "etadd": {
           "_description": "Addis Ababa, Ethiopia",
@@ -665,7 +671,8 @@
         },
         "fimhq": {
           "_description": "Mariehamn, Åland, Finland",
-          "_alias": "Europe/Mariehamn"
+          "_alias": "Europe/Mariehamn",
+          "_region": "AX"
         },
         "fjsuv": {
           "_description": "Fiji",
@@ -710,6 +717,7 @@
         "gazastrp": {
           "_description": "Gaza Strip, Palestinian Territories",
           "_alias": "Asia/Gaza",
+          "_region": "PS",
           "_since": "40"
         },
         "gblon": {
@@ -776,11 +784,13 @@
         },
         "gpmsb": {
           "_description": "Marigot, Saint Martin",
-          "_alias": "America/Marigot"
+          "_alias": "America/Marigot",
+          "_region": "MF"
         },
         "gpsbh": {
           "_description": "Saint Barthélemy",
-          "_alias": "America/St_Barthelemy"
+          "_alias": "America/St_Barthelemy",
+          "_region": "BL"
         },
         "gqssg": {
           "_description": "Malabo, Equatorial Guinea",
@@ -788,7 +798,7 @@
         },
         "grath": {
           "_description": "Athens, Greece",
-          "_alias": "Europe/Athens"
+          "_alias": "Europe/Athens EET"
         },
         "gsgrv": {
           "_description": "South Georgia and the South Sandwich Islands",
@@ -813,6 +823,7 @@
         "hebron": {
           "_description": "West Bank, Palestinian Territories",
           "_alias": "Asia/Hebron",
+          "_region": "PS",
           "_since": "21"
         },
         "hkhkg": {
@@ -886,7 +897,8 @@
         },
         "jeruslm": {
           "_description": "Jerusalem",
-          "_alias": "Asia/Jerusalem Asia/Tel_Aviv Israel"
+          "_alias": "Asia/Jerusalem Asia/Tel_Aviv Israel",
+          "_region": "IL"
         },
         "jesth": {
           "_description": "Jersey",
@@ -1069,8 +1081,9 @@
           "_iana": "Asia/Yangon"
         },
         "mncoq": {
+          "_deprecated": true,
           "_description": "Choibalsan, Mongolia",
-          "_alias": "Asia/Choibalsan"
+          "_preferred": "mnuln"
         },
         "mnhvd": {
           "_description": "Khovd (Hovd), Mongolia",
@@ -1078,7 +1091,7 @@
         },
         "mnuln": {
           "_description": "Ulaanbaatar (Ulan Bator), Mongolia",
-          "_alias": "Asia/Ulaanbaatar Asia/Ulan_Bator"
+          "_alias": "Asia/Ulaanbaatar Asia/Ulan_Bator Asia/Choibalsan"
         },
         "momfm": {
           "_description": "Macau SAR China",
@@ -1101,9 +1114,9 @@
           "_alias": "America/Montserrat"
         },
         "mst7mdt": {
+          "_deprecated": true,
           "_description": "POSIX style time zone for US Mountain Time",
-          "_alias": "MST7MDT",
-          "_since": "1.8"
+          "_preferred": "usden"
         },
         "mtmla": {
           "_description": "Malta",
@@ -1235,7 +1248,7 @@
         },
         "nzakl": {
           "_description": "Auckland, New Zealand",
-          "_alias": "Pacific/Auckland Antarctica/South_Pole NZ"
+          "_alias": "Pacific/Auckland NZ"
         },
         "nzcht": {
           "_description": "Chatham Islands, New Zealand",
@@ -1247,7 +1260,7 @@
         },
         "papty": {
           "_description": "Panama",
-          "_alias": "America/Panama"
+          "_alias": "America/Panama EST"
         },
         "pelim": {
           "_description": "Lima, Peru",
@@ -1299,9 +1312,9 @@
           "_alias": "America/Puerto_Rico"
         },
         "pst8pdt": {
+          "_deprecated": true,
           "_description": "POSIX style time zone for US Pacific Time",
-          "_alias": "PST8PDT",
-          "_since": "1.8"
+          "_preferred": "uslax"
         },
         "ptfnc": {
           "_description": "Madeira, Portugal",
@@ -1309,7 +1322,7 @@
         },
         "ptlis": {
           "_description": "Lisbon, Portugal",
-          "_alias": "Europe/Lisbon Portugal"
+          "_alias": "Europe/Lisbon Portugal WET"
         },
         "ptpdl": {
           "_description": "Azores, Portugal",
@@ -1645,7 +1658,7 @@
         },
         "unk": {
           "_description": "Unknown time zone",
-          "_alias": "Etc/Unknown"
+          "_alias": "Etc/Unknown Factory"
         },
         "usadk": {
           "_description": "Adak (Alaska), United States",
@@ -1665,11 +1678,11 @@
         },
         "uschi": {
           "_description": "Chicago, United States",
-          "_alias": "America/Chicago US/Central"
+          "_alias": "America/Chicago US/Central CST6CDT"
         },
         "usden": {
           "_description": "Denver, United States",
-          "_alias": "America/Denver America/Shiprock Navajo US/Mountain"
+          "_alias": "America/Denver America/Shiprock Navajo US/Mountain MST7MDT"
         },
         "usdet": {
           "_description": "Detroit, United States",
@@ -1677,7 +1690,7 @@
         },
         "ushnl": {
           "_description": "Honolulu, United States",
-          "_alias": "Pacific/Honolulu US/Hawaii Pacific/Johnston"
+          "_alias": "Pacific/Honolulu US/Hawaii Pacific/Johnston HST"
         },
         "usind": {
           "_description": "Indianapolis, United States",
@@ -1698,7 +1711,7 @@
         },
         "uslax": {
           "_description": "Los Angeles, United States",
-          "_alias": "America/Los_Angeles US/Pacific US/Pacific-New"
+          "_alias": "America/Los_Angeles US/Pacific US/Pacific-New PST8PDT"
         },
         "uslui": {
           "_description": "Louisville (Kentucky), United States",
@@ -1733,7 +1746,7 @@
         },
         "usnyc": {
           "_description": "New York, United States",
-          "_alias": "America/New_York US/Eastern"
+          "_alias": "America/New_York US/Eastern EST5EDT"
         },
         "usoea": {
           "_description": "Vincennes (Indiana), United States",
@@ -1745,7 +1758,7 @@
         },
         "usphx": {
           "_description": "Phoenix, United States",
-          "_alias": "America/Phoenix US/Arizona"
+          "_alias": "America/Phoenix US/Arizona MST"
         },
         "ussit": {
           "_description": "Sitka (Alaska), United States",
@@ -1851,7 +1864,7 @@
         },
         "utcw05": {
           "_description": "5 hours behind UTC",
-          "_alias": "Etc/GMT+5 EST"
+          "_alias": "Etc/GMT+5"
         },
         "utcw06": {
           "_description": "6 hours behind UTC",
@@ -1859,7 +1872,7 @@
         },
         "utcw07": {
           "_description": "7 hours behind UTC",
-          "_alias": "Etc/GMT+7 MST"
+          "_alias": "Etc/GMT+7"
         },
         "utcw08": {
           "_description": "8 hours behind UTC",
@@ -1871,7 +1884,7 @@
         },
         "utcw10": {
           "_description": "10 hours behind UTC",
-          "_alias": "Etc/GMT+10 HST"
+          "_alias": "Etc/GMT+10"
         },
         "utcw11": {
           "_description": "11 hours behind UTC",

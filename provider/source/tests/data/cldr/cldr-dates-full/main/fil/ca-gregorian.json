@@ -2,9 +2,6 @@
   "main": {
     "fil": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "fil"
       },
       "dates": {
@@ -121,13 +118,13 @@
                   "sat": "Sab"
                 },
                 "short": {
-                  "sun": "Li",
-                  "mon": "Lu",
-                  "tue": "Ma",
-                  "wed": "Mi",
-                  "thu": "Hu",
-                  "fri": "Bi",
-                  "sat": "Sa"
+                  "sun": "Lin",
+                  "mon": "Lun",
+                  "tue": "Mar",
+                  "wed": "Miy",
+                  "thu": "Huw",
+                  "fri": "Biy",
+                  "sat": "Sab"
                 },
                 "wide": {
                   "sun": "Linggo",
@@ -159,13 +156,13 @@
                   "sat": "Sab"
                 },
                 "short": {
-                  "sun": "Li",
-                  "mon": "Lu",
-                  "tue": "Ma",
-                  "wed": "Mi",
-                  "thu": "Hu",
-                  "fri": "Bi",
-                  "sat": "Sa"
+                  "sun": "Lin",
+                  "mon": "Lun",
+                  "tue": "Mar",
+                  "wed": "Miy",
+                  "thu": "Huw",
+                  "fri": "Biy",
+                  "sat": "Sab"
                 },
                 "wide": {
                   "sun": "Linggo",
@@ -227,9 +224,9 @@
                   "am": "AM",
                   "noon": "tanghaling-tapat",
                   "pm": "PM",
-                  "morning1": "nang umaga",
+                  "morning1": "ng umaga",
                   "morning2": "madaling-araw",
-                  "afternoon1": "tanghali",
+                  "afternoon1": "ng hapon",
                   "evening1": "ng gabi",
                   "night1": "ng gabi"
                 },
@@ -238,10 +235,10 @@
                   "am": "am",
                   "noon": "tanghaling-tapat",
                   "pm": "pm",
-                  "morning1": "umaga",
+                  "morning1": "ng umaga",
                   "morning2": "madaling-araw",
-                  "afternoon1": "sa hapon",
-                  "evening1": "sa gabi",
+                  "afternoon1": "ng hapon",
+                  "evening1": "ng gabi",
                   "night1": "ng gabi"
                 },
                 "wide": {
@@ -249,9 +246,9 @@
                   "am": "AM",
                   "noon": "tanghaling-tapat",
                   "pm": "PM",
-                  "morning1": "nang umaga",
+                  "morning1": "ng umaga",
                   "morning2": "madaling-araw",
-                  "afternoon1": "tanghali",
+                  "afternoon1": "ng hapon",
                   "evening1": "ng gabi",
                   "night1": "ng gabi"
                 }
@@ -337,6 +334,10 @@
               "short": "ahmm"
             },
             "dateTimeFormats": {
+              "numericSeparators": {
+                "numericDateSeparator": "/",
+                "numericTimeSeparator": ":"
+              },
               "full": "{1}, {0}",
               "long": "{1}, {0}",
               "medium": "{1}, {0}",
@@ -347,18 +348,25 @@
                 "Bhms": "h:mm:ss B",
                 "d": "d",
                 "E": "ccc",
+                "EBh": "E h B",
                 "EBhm": "E h:mm B",
                 "EBhms": "E h:mm:ss B",
                 "Ed": "d E",
+                "Eh": "E h a",
                 "Ehm": "E h:mm a",
                 "EHm": "E HH:mm",
                 "Ehms": "E h:mm:ss a",
                 "EHms": "E HH:mm:ss",
                 "Gy": "y G",
+                "GyM": "M/y G",
                 "GyMd": "M/d/y G",
+                "GyMEd": "E, M/d/y G",
                 "GyMMM": "MMM y G",
                 "GyMMMd": "MMM d, y G",
                 "GyMMMEd": "E, MMM d, y G",
+                "GyMMMM": "MMMM y G",
+                "GyMMMMd": "MMMM d, y G",
+                "GyMMMMEd": "E, MMMM d, y G",
                 "h": "h a",
                 "H": "HH",
                 "hm": "h:mm a",
@@ -369,6 +377,8 @@
                 "Hmsv": "HH:mm:ss v",
                 "hmv": "h:mm a v",
                 "Hmv": "HH:mm v",
+                "hv": "h a v",
+                "Hv": "HH v",
                 "M": "L",
                 "Md": "M/d",
                 "MEd": "E, M/d",
@@ -377,7 +387,7 @@
                 "MMMEd": "E, MMM d",
                 "MMMMd": "MMMM d",
                 "MMMMEd": "E, MMMM d",
-                "MMMMW-count-one": "'ika'-W 'linggo' 'ng' MMMM",
+                "MMMMW-count-one": "'linggo' W 'ng' MMMM",
                 "MMMMW-count-other": "'linggo' W 'ng' MMMM",
                 "ms": "mm:ss",
                 "y": "y",
@@ -389,32 +399,41 @@
                 "yMMMd": "MMM d, y",
                 "yMMMEd": "E, MMM d, y",
                 "yMMMM": "MMMM y",
+                "yMMMMd": "MMMM d, y",
+                "yMMMMEd": "E, MMMM d, y",
                 "yQQQ": "QQQ y",
                 "yQQQQ": "QQQQ y",
                 "yw-count-one": "'ika'-w 'linggo' 'ng' Y",
                 "yw-count-other": "'linggo' w 'ng' Y"
               },
               "appendItems": {
+                "Date-Timezone": "{0} {1}",
                 "Day": "{0} ({2}: {1})",
-                "Day-Of-Week": "{0} {1}",
-                "Era": "{1} {0}",
+                "Day-Of-Week": "{1}, {0}",
+                "Era": "{0} {1}",
                 "Hour": "{0} ({2}: {1})",
                 "Minute": "{0} ({2}: {1})",
                 "Month": "{0} ({2}: {1})",
                 "Quarter": "{0} ({2}: {1})",
                 "Second": "{0} ({2}: {1})",
+                "Time-Day-Of-Week": "{1}, {0}",
                 "Timezone": "{0} {1}",
                 "Week": "{0} ({2}: {1})",
                 "Year": "{1} {0}"
               },
               "intervalFormats": {
+                "intervalFormatRanges": {
+                  "mixed": "{0} – {1}",
+                  "non-numeric": "{0}–{1}",
+                  "numeric": "{0}–{1}"
+                },
                 "intervalFormatFallback": "{0} – {1}",
                 "Bh": {
-                  "B": "h B – h B",
+                  "B": "h B – h B",
                   "h": "h – h B"
                 },
                 "Bhm": {
-                  "B": "h:mm B – h:mm B",
+                  "B": "h:mm B – h:mm B",
                   "h": "h:mm – h:mm B",
                   "m": "h:mm – h:mm B"
                 },
@@ -513,6 +532,10 @@
                   "d": "E, MMM d – E, MMM d",
                   "M": "E, MMM d – E, MMM d"
                 },
+                "MMMMd": {
+                  "d": "MMMM d – d",
+                  "M": "MMMM d – MMMM d"
+                },
                 "y": {
                   "y": "y–y"
                 },
@@ -554,6 +577,14 @@
               "standard": {
                 "full": "{1} 'nang' {0}",
                 "long": "{1} 'nang' {0}",
+                "medium": "{1}, {0}",
+                "short": "{1}, {0}"
+              }
+            },
+            "dateTimeFormats-relative": {
+              "standard": {
+                "full": "{1}, {0}",
+                "long": "{1}, {0}",
                 "medium": "{1}, {0}",
                 "short": "{1}, {0}"
               }

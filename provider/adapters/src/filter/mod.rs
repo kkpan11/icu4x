@@ -17,12 +17,14 @@
 //!
 //! // Only return German data from a HelloWorldProvider:
 //! FilterDataProvider::new(HelloWorldProvider, "Demo German-only filter")
-//!     .with_filter(|id| id.locale.language() == language!("de"));
+//!     .with_filter(|id| id.locale.language == language!("de"));
 //! ```
 
 mod impls;
 
 use alloc::collections::BTreeSet;
+#[cfg(feature = "export")]
+use icu_provider::export::ExportableProvider;
 use icu_provider::prelude::*;
 
 /// A data provider that selectively filters out data requests.
@@ -120,17 +122,6 @@ where
     }
 }
 
-impl<D, F> AnyProvider for FilterDataProvider<D, F>
-where
-    F: Fn(DataIdentifierBorrowed) -> bool,
-    D: AnyProvider,
-{
-    fn load_any(&self, marker: DataMarkerInfo, req: DataRequest) -> Result<AnyResponse, DataError> {
-        self.check(marker, req)?;
-        self.inner.load_any(marker, req)
-    }
-}
-
 impl<M, D, F> IterableDynamicDataProvider<M> for FilterDataProvider<D, F>
 where
     M: DynamicDataMarker,
@@ -140,7 +131,7 @@ where
     fn iter_ids_for_marker(
         &self,
         marker: DataMarkerInfo,
-    ) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    ) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         self.inner.iter_ids_for_marker(marker).map(|set| {
             // Use filter_map instead of filter to avoid cloning the locale
             set.into_iter()
@@ -156,12 +147,24 @@ where
     F: Fn(DataIdentifierBorrowed) -> bool,
     D: IterableDataProvider<M>,
 {
-    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         self.inner.iter_ids().map(|vec| {
             // Use filter_map instead of filter to avoid cloning the locale
             vec.into_iter()
                 .filter(|id| (self.predicate)(id.as_borrowed()))
                 .collect()
         })
+    }
+}
+
+#[cfg(feature = "export")]
+impl<P0, F> ExportableProvider for FilterDataProvider<P0, F>
+where
+    P0: ExportableProvider,
+    F: Fn(DataIdentifierBorrowed) -> bool + Sync,
+{
+    fn supported_markers(&self) -> BTreeSet<DataMarkerInfo> {
+        // The predicate only takes DataIdentifier, not DataMarker, so we are not impacted
+        self.inner.supported_markers()
     }
 }

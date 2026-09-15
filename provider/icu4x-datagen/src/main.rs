@@ -2,6 +2,19 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+// https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
+// #![cfg_attr(not(any(test, doc)), no_std)]
+// #![cfg_attr(
+//     not(test),
+//     deny(
+//         clippy::indexing_slicing,
+//         clippy::unwrap_used,
+//         clippy::expect_used,
+//         clippy::panic,
+//     )
+// )]
+#![warn(missing_docs)]
+
 //! The command line interface for ICU4X datagen.
 //!
 //! ```bash
@@ -14,9 +27,9 @@
 // If no exporter feature is enabled this all doesn't make sense
 #![cfg_attr(
     not(any(
+        feature = "baked_exporter",
         feature = "blob_exporter",
         feature = "fs_exporter",
-        feature = "baked_exporter"
     )),
     allow(unused_assignments, unreachable_code, unused_variables)
 )]
@@ -25,17 +38,75 @@
     not(any(feature = "provider", feature = "blob_input",)),
     allow(unused_assignments, unreachable_code, unused_variables)
 )]
+#![cfg_attr(icu4x_nightly_tests, feature(non_exhaustive_omitted_patterns_lint))]
 
 use clap::{Parser, ValueEnum};
+use displaydoc::Display;
 use eyre::WrapErr;
+use icu_provider::DataError;
 use icu_provider::export::ExportableProvider;
-use icu_provider::hello_world::HelloWorldV1Marker;
+use icu_provider::hello_world::HelloWorldV1;
+use icu_provider_export::ExportMetadata;
 use icu_provider_export::prelude::*;
 #[cfg(feature = "provider")]
 use icu_provider_source::SourceDataProvider;
+use regex::Regex;
 use simple_logger::SimpleLogger;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
+
+#[derive(Clone)]
+struct Filter {
+    domain: String,
+    regex: Regex,
+    inverted: bool,
+}
+
+#[derive(Debug, Display)]
+enum FilterError {
+    #[displaydoc("no filter found. specify one after an =")]
+    NoFilter,
+    #[displaydoc("opening / delimiter for regex not found")]
+    NoOpeningSlash,
+    #[displaydoc("closing / delimiter for regex not found")]
+    NoClosingSlash,
+    #[displaydoc("{0}")]
+    Regex(regex::Error),
+}
+
+impl From<regex::Error> for FilterError {
+    fn from(value: regex::Error) -> Self {
+        FilterError::Regex(value)
+    }
+}
+
+impl std::error::Error for FilterError {}
+
+impl FromStr for Filter {
+    type Err = FilterError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (domain, regex) = s.split_once('=').ok_or(FilterError::NoFilter)?;
+
+        let (regex, inverted) = regex
+            .strip_prefix('-')
+            .map(|regex| (regex, true))
+            .unwrap_or((regex, false));
+
+        let regex = regex.strip_prefix('/').ok_or(FilterError::NoOpeningSlash)?;
+        let regex = regex.strip_suffix('/').ok_or(FilterError::NoClosingSlash)?;
+
+        // add an implicit `^(?:)$` around the regex
+        let regex = format!("^(?:{})$", regex);
+        let regex = Regex::new(&regex)?;
+
+        Ok(Filter {
+            domain: domain.to_owned(),
+            regex,
+            inverted,
+        })
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "icu4x-datagen")]
@@ -48,7 +119,7 @@ struct Cli {
 
     #[arg(long, value_enum)]
     #[arg(
-        help = "Select the output format: a directory tree of files, a single blob, or a Rust module."
+        help = "Select the output format: a directory tree of files (fs), a single blob (blob), or a Rust module (baked)."
     )]
     format: Format,
 
@@ -57,11 +128,11 @@ struct Cli {
     overwrite: bool,
 
     #[arg(short, long, value_enum, default_value_t = Syntax::Json)]
-    #[arg(help = "--format=dir only: serde serialization format.")]
+    #[arg(help = "--format=fs only: serde serialization format.")]
     syntax: Syntax,
 
     #[arg(short, long)]
-    #[arg(help = "--format=mod, --format=dir only: pretty-print the Rust or JSON output files.")]
+    #[arg(help = "--format=baked, --format=fs only: pretty-print the Rust or JSON output files.")]
     pretty: bool,
 
     #[arg(short = 't', long, value_name = "TAG", default_value = "latest")]
@@ -102,6 +173,30 @@ struct Cli {
     #[cfg(feature = "provider")]
     icuexport_root: Option<PathBuf>,
 
+    #[arg(long, value_name = "TAG", default_value = "latest", alias = "ucd-tag")]
+    #[arg(
+        help = "Download versioned RSCD from unicode.org (`https://www.unicode.org/Public/{tag}/`). \
+                  Use 'latest' for the latest version verified to work with this version of the binary, \
+                  and 'latest-tag' for the literal tag 'latest' on unicode.org. \
+                  Ignored if '--unicode-rscd-root' is present. Requires binary to be built with `networking` Cargo feature (enabled by default)."
+    )]
+    #[cfg_attr(not(feature = "networking"), arg(hide = true))]
+    #[cfg(feature = "provider")]
+    unicode_tag: String,
+
+    #[arg(long, value_name = "PATH")]
+    #[arg(help = "[DEPRECATED] Ignored")]
+    #[deprecated]
+    #[cfg(feature = "provider")]
+    unihan_root: Option<PathBuf>,
+
+    #[arg(long, value_name = "PATH", alias = "ucd-root")]
+    #[arg(
+        help = "Path to a local Unicode RSCD root directory (see https://www.unicode.org/reports/tr44/tr44-37.html#Directory_Structure)."
+    )]
+    #[cfg(feature = "provider")]
+    unicode_rscd_root: Option<PathBuf>,
+
     #[arg(long, value_name = "TAG", default_value = "latest")]
     #[arg(
         help = "Download segmentation LSTM models from this GitHub tag (https://github.com/unicode-org/lstm_word_segmentation/tags)\n\
@@ -119,19 +214,42 @@ struct Cli {
     #[cfg(feature = "provider")]
     segmenter_lstm_root: Option<PathBuf>,
 
+    #[arg(long, value_name = "TAG", default_value = "latest")]
+    #[arg(
+        help = "Download tzdb from this IANA tag (https://data.iana.org/time-zones/releases/)\n\
+                  Use 'latest' for the latest version verified to work with this version of the binary.\n\
+                  Ignored if '--tzdb-root' is present. Requires binary to be built with `networking` Cargo feature (enabled by default)."
+    )]
+    #[cfg_attr(not(feature = "networking"), arg(hide = true))]
+    #[cfg(feature = "provider")]
+    tzdb_tag: String,
+
+    #[arg(long, value_name = "PATH")]
+    #[arg(help = "Path to a local tzdb directory \
+                (see any zip file from https://data.iana.org/time-zones/releases/, \
+                directory structure matching https://data.iana.org/time-zones/tzdb-2025a/).")]
+    #[cfg(feature = "provider")]
+    tzdb_root: Option<PathBuf>,
+
     #[arg(long, value_enum, default_value_t = TrieType::Small)]
     #[arg(
         help = "Whether to optimize CodePointTrie data structures for size (\"small\") or speed (\"fast\").\n\
                   Using \"fast\" mode increases performance of CJK text processing and segmentation. For more\n\
-                  information, see the TrieType enum."
+                  information, see the TrieType enum. The tries for the core (UAX #15 but not UAX #46)\n\
+                  normalization forms use the fast trie type regardless of this setting."
     )]
     #[cfg(feature = "provider")]
     trie_type: TrieType,
 
-    #[arg(long, value_enum, default_value_t = CollationHanDatabase::Implicit)]
+    #[arg(long, value_enum, default_value_t = CollationRootHan::Implicit)]
     #[arg(help = "Which collation han database to use.")]
     #[cfg(feature = "provider")]
-    collation_han_database: CollationHanDatabase,
+    collation_root_han: CollationRootHan,
+
+    #[arg(long = "alt-variant", value_enum, num_args = 1..)]
+    #[arg(help = "Which alt variants to enable.")]
+    #[cfg(feature = "provider")]
+    alt_variants: Vec<AltVariantKind>,
 
     #[arg(long, value_enum, num_args = 1..)]
     #[arg(
@@ -150,6 +268,10 @@ struct Cli {
     #[arg(help = "Analyzes the binary and only includes markers that are used by the binary.")]
     markers_for_bin: Option<PathBuf>,
 
+    #[arg(long, value_name = "FILTER")]
+    #[arg(help = "Filter attributes on markers for a domain. Accepts form `domain=/regex/`.")]
+    attribute_filter: Vec<Filter>,
+
     #[arg(long, short, num_args = 0..)]
     #[cfg_attr(feature = "provider", arg(default_value = "recommended"))]
     #[arg(
@@ -163,26 +285,26 @@ struct Cli {
     #[arg(
         help = "Path to output directory or file. Must be empty or non-existent, unless \
                   --overwrite is present, in which case the directory is deleted first. \
-                  For --format={blob,blob2}, omit this option to dump to stdout. \
+                  For --format=blob, omit this option to dump to stdout. \
                   For --format={dir,mod} defaults to 'icu4x_data'."
     )]
     output: Option<PathBuf>,
 
     #[arg(long)]
     #[arg(
-        help = "--format=mod only: use types from individual `icu_*` crates instead of the `icu` meta-crate."
+        help = "--format=baked only: use types from individual `icu_*` crates instead of the `icu` meta-crate."
     )]
     use_separate_crates: bool,
 
     #[arg(long)]
-    #[arg(help = "--format=mod only: don't include fallback code inside the baked provider")]
+    #[arg(help = "--format=baked only: don't include fallback code inside the baked provider")]
     no_internal_fallback: bool,
 
     #[arg(long, value_enum)]
     #[arg(
         help = "configures the deduplication of locales for exported data payloads. \
                 If not set, determined by the export format: \
-                if --format=mod, a more aggressive deduplication strategy is used."
+                if --format=baked, a more aggressive deduplication strategy is used."
     )]
     deduplication: Option<Deduplication>,
 
@@ -201,10 +323,9 @@ struct Cli {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum Format {
-    Dir,
+    Fs,
     Blob,
-    Blob2,
-    Mod,
+    Baked,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -221,16 +342,20 @@ enum TrieType {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
-// Mirrors crate::CollationHanDatabase
-enum CollationHanDatabase {
+// Mirrors icu_provider_source::CollationRootHan
+enum CollationRootHan {
     Unihan,
     Implicit,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+// Mirrors icu_provider_source::AltVariantKind
+enum AltVariantKind {
+    DatetimeAscii,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum CollationTable {
-    Gb2312,
-    Big5han,
     Search,
     Searchji,
     #[value(alias = "search*")] // for backwards compatability
@@ -240,8 +365,6 @@ enum CollationTable {
 impl CollationTable {
     fn to_datagen_value(self) -> &'static str {
         match self {
-            Self::Gb2312 => "gb2312",
-            Self::Big5han => "big5han",
             Self::Search => "search",
             Self::Searchji => "searchji",
             Self::SearchAll => "search*",
@@ -249,17 +372,7 @@ impl CollationTable {
     }
 }
 
-// Mirrors crate::FallbackMode
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
-enum Fallback {
-    Auto,
-    Hybrid,
-    Runtime,
-    RuntimeManual,
-    Preresolved,
-}
-
-// Mirrors crate::DeduplicationStrategy
+// Mirrors icu_provider_export::DeduplicationStrategy
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
 enum Deduplication {
     Maximal,
@@ -285,14 +398,22 @@ fn main() -> eyre::Result<()> {
             .unwrap()
     }
 
+    run(cli)
+}
+
+fn run(cli: Cli) -> eyre::Result<()> {
     let markers = if !cli.markers.is_empty() {
         match cli.markers.as_slice() {
             [x] if x == "none" => Default::default(),
             [x] if x == "all" => {
-                #[cfg(feature = "experimental")]
-                log::info!("The icu4x-datagen crate has been built with the `experimental` feature, so `--markers all` includes experimental markers");
-                #[cfg(not(feature = "experimental"))]
-                log::info!("The icu4x-datagen crate has been built without the `experimental` feature, so `--markers all` does not include experimental markers");
+                #[cfg(feature = "unstable")]
+                log::info!(
+                    "The icu4x-datagen crate has been built with the `unstable` feature, so `--markers all` includes unstable markers"
+                );
+                #[cfg(not(feature = "unstable"))]
+                log::info!(
+                    "The icu4x-datagen crate has been built without the `unstable` feature, so `--markers all` does not include unstable markers"
+                );
                 all_markers()
             }
             markers => markers
@@ -300,26 +421,28 @@ fn main() -> eyre::Result<()> {
                 .map(|k| match marker_lookup().get(k.as_str()) {
                     Some(Some(marker)) => Ok(*marker),
                     Some(None) => {
-                        eyre::bail!("Marker {k:?} requires `experimental` Cargo feature")
+                        eyre::bail!("Marker {k:?} requires `unstable` Cargo feature")
                     }
                     None => eyre::bail!("Unknown marker {k:?}"),
                 })
                 .collect::<Result<_, _>>()?,
         }
     } else if let Some(bin_path) = &cli.markers_for_bin {
-        icu::markers_for_bin(bin_path)?.into_iter().collect()
+        icu::markers_for_bin(&std::fs::read(bin_path)?)?
+            .into_iter()
+            .collect()
     } else {
         eyre::bail!("--markers or --markers-for-bin are required.")
     };
 
     enum PreprocessedLocales {
-        LanguageIdentifiers(Vec<LanguageIdentifier>),
+        Locales(Vec<DataLocale>),
         Full,
     }
 
     #[allow(unused_mut)]
     let mut preprocessed_locales = if cli.locales.as_slice() == ["none"] {
-        Some(PreprocessedLocales::LanguageIdentifiers(vec![]))
+        Some(PreprocessedLocales::Locales(vec![]))
     } else if cli.locales.as_slice() == ["full"] {
         Some(PreprocessedLocales::Full)
     } else {
@@ -331,37 +454,67 @@ fn main() -> eyre::Result<()> {
         None
     };
 
+    fn missing_data_message<T>(e: DataError) -> Result<T, eyre::Report> {
+        #[cfg(feature = "provider")]
+        if SourceDataProvider::is_missing_cldr_error(e) {
+            eyre::bail!("CLDR data is required for this invocation, set --cldr-root or --cldr-tag");
+        } else if SourceDataProvider::is_missing_icuexport_error(e) {
+            eyre::bail!(
+                "ICU data is required for this invocation, set --icuexport-root or --icuexport-tag"
+            );
+        } else if SourceDataProvider::is_missing_segmenter_lstm_error(e) {
+            eyre::bail!(
+                "Segmentation LSTM data is required for this invocation, set --segmenter-lstm-root or --segmenter-lstm-tag"
+            );
+        } else if SourceDataProvider::is_missing_rscd_error(e) {
+            eyre::bail!(
+                "RSCD data is required for this invocation, set --unicode-rscd-root or --unicode-tag"
+            );
+        } else if SourceDataProvider::is_missing_tzdb_error(e) {
+            eyre::bail!(
+                "Timezone data is required for this invocation, set --tzdb-root or --tzdb-tag"
+            );
+        }
+
+        Err(e.into())
+    }
+
     let (provider, fallbacker): (Box<dyn ExportableProvider>, _) = match () {
-        () if markers == [HelloWorldV1Marker::INFO] => {
+        () if markers == [HelloWorldV1::INFO] => {
             // Just do naive fallback instead of pulling in compiled data or something. We only use this code path to debug
             // providers, so we don't need 100% correct fallback.
-            (Box::new(icu_provider::hello_world::HelloWorldProvider), LocaleFallbacker::new_without_data())
+            (
+                Box::new(icu_provider::hello_world::HelloWorldProvider),
+                LocaleFallbacker::new_without_data(),
+            )
         }
-        () if markers.contains(&HelloWorldV1Marker::INFO) => {
-            eyre::bail!("HelloWorldV1Marker is only allowed as the only marker")
+        () if markers.contains(&HelloWorldV1::INFO) => {
+            eyre::bail!("HelloWorldV1 is only allowed as the only marker")
         }
         #[cfg(feature = "blob_input")]
         () if cli.input_blob.is_some() => {
-            let provider = icu_provider_blob::BlobDataProvider::try_new_from_blob(
+            let provider = BlobDataProvider::try_new_from_blob(
                 std::fs::read(cli.input_blob.unwrap())?.into(),
             )?;
             let fallbacker = LocaleFallbacker::try_new_with_buffer_provider(&provider)?;
             (Box::new(ReexportableBlobDataProvider(provider)), fallbacker)
-        },
+        }
 
-        #[cfg(all(not(feature = "provider"), feature = "input_blob"))]
+        #[cfg(all(not(feature = "provider"), feature = "blob_input"))]
         () => eyre::bail!("--input-blob is required without the `provider` Cargo feature"),
 
         #[cfg(feature = "provider")]
         () => {
             let mut p = SourceDataProvider::new_custom();
 
-            p = p.with_collation_han_database(match cli.collation_han_database {
-                CollationHanDatabase::Unihan => icu_provider_source::CollationHanDatabase::Unihan,
-                CollationHanDatabase::Implicit => {
-                    icu_provider_source::CollationHanDatabase::Implicit
-                }
+            p = p.with_collation_root_han(match cli.collation_root_han {
+                CollationRootHan::Unihan => icu_provider_source::CollationRootHan::Unihan,
+                CollationRootHan::Implicit => icu_provider_source::CollationRootHan::Implicit,
             });
+
+            p = p.with_alt_variants(cli.alt_variants.iter().copied().map(|v| match v {
+                AltVariantKind::DatetimeAscii => icu_provider_source::AltVariantKind::DatetimeAscii,
+            }));
 
             if cli.trie_type == TrieType::Fast {
                 p = p.with_fast_tries();
@@ -370,51 +523,66 @@ fn main() -> eyre::Result<()> {
             p = match (cli.cldr_root, cli.cldr_tag.as_str()) {
                 (Some(path), _) => p.with_cldr(&path)?,
                 #[cfg(feature = "networking")]
-                (_, "latest") => p.with_cldr_for_tag(SourceDataProvider::LATEST_TESTED_CLDR_TAG),
+                (_, "latest") => p.with_cldr_for_tag(SourceDataProvider::TESTED_CLDR_TAG),
                 #[cfg(feature = "networking")]
                 (_, tag) => p.with_cldr_for_tag(tag),
                 #[cfg(not(feature = "networking"))]
-                (None, _) => {
-                    eyre::bail!(
-                        "Downloading data from tags requires the `networking` Cargo feature"
-                    )
-                }
+                (None, _) => p,
             };
 
             p = match (cli.icuexport_root, cli.icuexport_tag.as_str()) {
                 (Some(path), _) => p.with_icuexport(&path)?,
                 #[cfg(feature = "networking")]
-                (_, "latest") => {
-                    p.with_icuexport_for_tag(SourceDataProvider::LATEST_TESTED_ICUEXPORT_TAG)
-                }
+                (_, "latest") => p.with_icuexport_for_tag(SourceDataProvider::TESTED_ICUEXPORT_TAG),
                 #[cfg(feature = "networking")]
                 (_, tag) => p.with_icuexport_for_tag(tag),
                 #[cfg(not(feature = "networking"))]
-                (None, _) => {
-                    eyre::bail!(
-                        "Downloading data from tags requires the `networking` Cargo feature"
-                    )
-                }
+                (None, _) => p,
             };
 
             p = match (cli.segmenter_lstm_root, cli.segmenter_lstm_tag.as_str()) {
                 (Some(path), _) => p.with_segmenter_lstm(&path)?,
                 #[cfg(feature = "networking")]
                 (_, "latest") => {
-                    p.with_segmenter_lstm_for_tag(SourceDataProvider::LATEST_TESTED_SEGMENTER_LSTM_TAG)
+                    p.with_segmenter_lstm_for_tag(SourceDataProvider::TESTED_SEGMENTER_LSTM_TAG)
                 }
                 #[cfg(feature = "networking")]
                 (_, tag) => p.with_segmenter_lstm_for_tag(tag),
                 #[cfg(not(feature = "networking"))]
-                (None, _) => {
-                    eyre::bail!(
-                        "Downloading data from tags requires the `networking` Cargo feature"
-                    )
+                (None, _) => p,
+            };
+
+            #[allow(deprecated)]
+            if cli.unihan_root.is_some() {
+                log::warn!("Ignoring --unihan-root, use --unicode-rscd-root instead")
+            }
+
+            p = match (cli.unicode_rscd_root, cli.unicode_tag.as_str()) {
+                (Some(path), _) => p.with_unicode_rscd(&path)?,
+                #[cfg(feature = "networking")]
+                (_, "latest") => {
+                    p.with_unicode_rscd_for_tag(SourceDataProvider::TESTED_UNICODE_TAG)
                 }
+                #[cfg(feature = "networking")]
+                (_, "latest-tag") => p.with_unicode_rscd_for_tag("latest"),
+                #[cfg(feature = "networking")]
+                (_, tag) => p.with_unicode_rscd_for_tag(tag),
+                #[cfg(not(feature = "networking"))]
+                (None, _) => p,
+            };
+
+            p = match (cli.tzdb_root, cli.tzdb_tag.as_str()) {
+                (Some(path), _) => p.with_tzdb(&path)?,
+                #[cfg(feature = "networking")]
+                (_, "latest") => p.with_tzdb_for_tag(SourceDataProvider::TESTED_TZDB_TAG),
+                #[cfg(feature = "networking")]
+                (_, tag) => p.with_tzdb_for_tag(tag),
+                #[cfg(not(feature = "networking"))]
+                (None, _) => p,
             };
 
             if cli.locales.as_slice() == ["recommended"] {
-                preprocessed_locales = Some(PreprocessedLocales::LanguageIdentifiers(
+                preprocessed_locales = Some(PreprocessedLocales::Locales(
                     p.locales_for_coverage_levels([
                         icu_provider_source::CoverageLevel::Modern,
                         icu_provider_source::CoverageLevel::Moderate,
@@ -434,26 +602,29 @@ fn main() -> eyre::Result<()> {
                 })
                 .collect::<Option<Vec<_>>>()
             {
-                preprocessed_locales = Some(PreprocessedLocales::LanguageIdentifiers(
-                    p.locales_for_coverage_levels(locale_subsets.into_iter())?
+                preprocessed_locales = Some(PreprocessedLocales::Locales(
+                    p.locales_for_coverage_levels(locale_subsets)?
                         .into_iter()
                         .collect(),
                 ));
             }
 
-            let fallbacker = LocaleFallbacker::try_new_unstable(&p)?;
+            let fallbacker =
+                LocaleFallbacker::try_new_unstable(&p).or_else(missing_data_message)?;
             (Box::new(p), fallbacker)
         }
 
-        #[cfg(not(feature = "provider"))]
-        () => eyre::bail!("Only the `HelloWorldV1 marker is supported without Cargo features `blob_input` or `provider`"),
+        #[cfg(not(any(feature = "provider", feature = "blob_input")))]
+        () => eyre::bail!(
+            "Only the `HelloWorld marker is supported without Cargo features `blob_input` or `provider`"
+        ),
     };
 
     let locale_families = match preprocessed_locales {
-        Some(PreprocessedLocales::Full) => vec![LocaleFamily::FULL],
-        Some(PreprocessedLocales::LanguageIdentifiers(lids)) => lids
+        Some(PreprocessedLocales::Full) => vec![DataLocaleFamily::FULL],
+        Some(PreprocessedLocales::Locales(locales)) => locales
             .into_iter()
-            .map(LocaleFamily::with_descendants)
+            .map(DataLocaleFamily::with_descendants)
             .collect(),
         None => cli
             .locales
@@ -463,18 +634,18 @@ fn main() -> eyre::Result<()> {
     };
 
     let deduplication_strategy = match cli.deduplication {
-        Some(Deduplication::Maximal) => icu_provider_export::DeduplicationStrategy::Maximal,
-        Some(Deduplication::RetainBaseLanguages) => {
-            icu_provider_export::DeduplicationStrategy::RetainBaseLanguages
-        }
-        Some(Deduplication::None) => icu_provider_export::DeduplicationStrategy::None,
+        Some(Deduplication::Maximal) => DeduplicationStrategy::Maximal,
+        Some(Deduplication::RetainBaseLanguages) => DeduplicationStrategy::RetainBaseLanguages,
+        Some(Deduplication::None) => DeduplicationStrategy::None,
         None => match cli.format {
-            Format::Dir | Format::Blob | Format::Blob2 => DeduplicationStrategy::None,
-            Format::Mod if cli.no_internal_fallback && cli.deduplication.is_none() =>
-                eyre::bail!("--no-internal-fallback requires an explicit --deduplication value. Baked exporter would default to maximal deduplication, which might not be intended"),
-            // TODO(2.0): Default to RetainBaseLanguages here
-            Format::Mod => DeduplicationStrategy::Maximal,
-        }
+            Format::Fs | Format::Blob => DeduplicationStrategy::None,
+            Format::Baked if cli.no_internal_fallback && cli.deduplication.is_none() => {
+                eyre::bail!(
+                    "--no-internal-fallback requires an explicit --deduplication value. Baked exporter would default to maximal deduplication, which might not be intended"
+                )
+            }
+            Format::Baked => DeduplicationStrategy::Maximal,
+        },
     };
 
     let mut driver = ExportDriver::new(locale_families, deduplication_strategy.into(), fallbacker);
@@ -504,13 +675,30 @@ fn main() -> eyre::Result<()> {
         driver.with_segmenter_models(cli.segmenter_models.clone())
     };
 
-    match cli.format {
+    let attribute_filters = cli.attribute_filter.into_iter().fold(
+        HashMap::<_, Vec<(Regex, bool)>>::new(),
+        |mut map, filter| {
+            map.entry(filter.domain)
+                .or_default()
+                .push((filter.regex, filter.inverted));
+            map
+        },
+    );
+    for (domain, filters) in attribute_filters {
+        driver = driver.with_marker_attributes_filter(&domain, move |attr| {
+            filters
+                .iter()
+                .all(|(regex, inverted)| regex.is_match(attr) ^ inverted)
+        })
+    }
+
+    let metadata: Result<ExportMetadata, DataError> = match cli.format {
         #[cfg(not(feature = "fs_exporter"))]
-        Format::Dir => {
+        Format::Fs => {
             eyre::bail!("Exporting to an FsProvider requires the `fs_exporter` Cargo feature")
         }
         #[cfg(feature = "fs_exporter")]
-        Format::Dir => driver.export(&provider, {
+        Format::Fs => driver.export(&provider, {
             use icu_provider_export::fs_exporter::*;
 
             FilesystemExporter::try_new(
@@ -529,13 +717,13 @@ fn main() -> eyre::Result<()> {
                     options
                 },
             )?
-        })?,
+        }),
         #[cfg(not(feature = "blob_exporter"))]
-        Format::Blob | Format::Blob2 => {
+        Format::Blob => {
             eyre::bail!("Exporting to a BlobProvider requires the `blob_exporter` Cargo feature")
         }
         #[cfg(feature = "blob_exporter")]
-        Format::Blob | Format::Blob2 => driver.export(&provider, {
+        Format::Blob => driver.export(&provider, {
             use icu_provider_export::blob_exporter::*;
 
             let sink: Box<dyn std::io::Write + Sync> = if let Some(path) = cli.output {
@@ -549,18 +737,14 @@ fn main() -> eyre::Result<()> {
             } else {
                 Box::new(std::io::stdout())
             };
-            if cli.format == Format::Blob {
-                BlobExporter::new_with_sink(sink)
-            } else {
-                BlobExporter::new_v2_with_sink(sink)
-            }
-        })?,
+            BlobExporter::new_with_sink(sink)
+        }),
         #[cfg(not(feature = "baked_exporter"))]
-        Format::Mod => {
+        Format::Baked => {
             eyre::bail!("Exporting to a baked provider requires the `baked_exporter` Cargo feature")
         }
         #[cfg(feature = "baked_exporter")]
-        Format::Mod => driver.export(&provider, {
+        Format::Baked => driver.export(&provider, {
             icu_provider_export::baked_exporter::BakedExporter::new(
                 cli.output.unwrap_or_else(|| PathBuf::from("icu4x_data")),
                 {
@@ -572,46 +756,48 @@ fn main() -> eyre::Result<()> {
                     options
                 },
             )?
-        })?,
-    }
+        }),
+    };
+
+    let _metadata = metadata.or_else(missing_data_message)?;
 
     Ok(())
 }
 
 macro_rules! cb {
-    ($($marker:path = $path:literal,)+ #[experimental] $($emarker:path = $epath:literal,)+) => {
+    ($($marker_ty:ty:$marker:ident,)+ #[unstable] $($emarker_ty:ty:$emarker:ident,)+) => {
         fn all_markers() -> Vec<DataMarkerInfo> {
             vec![
                 $(
-                    <$marker>::INFO,
+                    <$marker_ty>::INFO,
                 )+
                 $(
-                    #[cfg(feature = "experimental")]
-                    <$emarker>::INFO,
+                    #[cfg(feature = "unstable")]
+                    <$emarker_ty>::INFO,
                 )+
             ]
         }
 
-        fn marker_lookup() -> &'static HashMap<&'static str, Option<DataMarkerInfo>> {
+        fn marker_lookup() -> &'static HashMap<String, Option<DataMarkerInfo>> {
             use std::sync::OnceLock;
-            static LOOKUP: OnceLock<HashMap<&'static str, Option<DataMarkerInfo>>> = OnceLock::new();
+            static LOOKUP: OnceLock<HashMap<String, Option<DataMarkerInfo>>> = OnceLock::new();
             LOOKUP.get_or_init(|| {
-                [
-                    ("core/helloworld@1", Some(icu_provider::hello_world::HelloWorldV1Marker::INFO)),
-                    (stringify!(icu_provider::hello_world::HelloWorldV1Marker).split("::").last().unwrap().trim(), Some(icu_provider::hello_world::HelloWorldV1Marker::INFO)),
+                vec![
+                    (stringify!(icu_provider::hello_world::HelloWorldV1).replace(' ', ""), Some(icu_provider::hello_world::HelloWorldV1::INFO)),
+                    (stringify!(HelloWorldV1).into(), Some(icu_provider::hello_world::HelloWorldV1::INFO)),
                     $(
-                        ($path, Some(<$marker>::INFO)),
-                        (stringify!($marker).split("::").last().unwrap().trim(), Some(<$marker>::INFO)),
+                        (stringify!($marker_ty).replace(' ', ""), Some(<$marker_ty>::INFO)),
+                        (stringify!($marker).into(), Some(<$marker_ty>::INFO)),
                     )+
                     $(
-                        #[cfg(feature = "experimental")]
-                        ($epath, Some(<$emarker>::INFO)),
-                        #[cfg(feature = "experimental")]
-                        (stringify!($emarker).split("::").last().unwrap().trim(), Some(<$emarker>::INFO)),
-                        #[cfg(not(feature = "experimental"))]
-                        ($epath, None),
-                        #[cfg(not(feature = "experimental"))]
-                        (stringify!($emarker).split("::").last().unwrap().trim(), None),
+                        #[cfg(feature = "unstable")]
+                        (stringify!($emarker_ty).replace(' ', ""), Some(<$emarker_ty>::INFO)),
+                        #[cfg(feature = "unstable")]
+                        (stringify!($emarker).into(), Some(<$emarker_ty>::INFO)),
+                        #[cfg(not(feature = "unstable"))]
+                        (stringify!($emarker_ty).replace(' ', ""), None),
+                        #[cfg(not(feature = "unstable"))]
+                        (stringify!($emarker).into(), None),
                     )+
 
                 ]
@@ -622,8 +808,8 @@ macro_rules! cb {
 
         #[test]
         fn test_lookup() {
-            assert_eq!(marker_lookup().get("AndListV2Marker"), Some(&Some(icu::list::provider::AndListV2Marker::INFO)));
-            assert_eq!(marker_lookup().get("list/and@2"), Some(&Some(icu::list::provider::AndListV2Marker::INFO)));
+            assert_eq!(marker_lookup().get("ListAndV1"), Some(&Some(icu::list::provider::ListAndV1::INFO)));
+            assert_eq!(marker_lookup().get("icu::list::provider::ListAndV1"), Some(&Some(icu::list::provider::ListAndV1::INFO)));
             assert_eq!(marker_lookup().get("foo"), None);
         }
 
@@ -632,18 +818,20 @@ macro_rules! cb {
         icu_provider::export::make_exportable_provider!(
             ReexportableBlobDataProvider,
             [
-                icu_provider::hello_world::HelloWorldV1Marker,
+                icu_provider::hello_world::HelloWorldV1,
                 $(
-                    $marker,
+                    $marker_ty,
                 )+
                 $(
-                    #[cfg(feature = "experimental")]
-                    $emarker,
+                    #[cfg(feature = "unstable")]
+                    $emarker_ty,
                 )+
             ]
         );
     }
 }
+
+extern crate alloc;
 icu_provider_registry::registry!(cb);
 
 #[cfg(feature = "blob_input")]
@@ -654,7 +842,7 @@ use icu_provider::prelude::*;
 use icu_provider_blob::BlobDataProvider;
 
 #[cfg(feature = "blob_input")]
-struct ReexportableBlobDataProvider(icu_provider_blob::BlobDataProvider);
+struct ReexportableBlobDataProvider(BlobDataProvider);
 
 #[cfg(feature = "blob_input")]
 impl<M: DataMarker> DataProvider<M> for ReexportableBlobDataProvider
@@ -673,7 +861,85 @@ where
     BlobDataProvider: AsDeserializingBufferProvider,
     for<'a> DeserializingBufferProvider<'a, BlobDataProvider>: DataProvider<M>,
 {
-    fn iter_ids(&self) -> Result<std::collections::BTreeSet<DataIdentifierCow>, DataError> {
+    fn iter_ids(&self) -> Result<std::collections::BTreeSet<DataIdentifierCow<'_>>, DataError> {
         self.0.iter_ids_for_marker(M::INFO)
+    }
+}
+
+#[test]
+fn test_attributes_regex() {
+    let out = std::env::temp_dir().join("icu4x-datagen_test_attributes_regex_out");
+    let _ = std::fs::remove_dir_all(&out);
+
+    let mut args = Cli::parse_from([
+        "bin",
+        "--markers",
+        "HelloWorldV1",
+        "--locales",
+        "full",
+        "--format",
+        "fs",
+        "--attribute-filter",
+        "hello=/r.*?|.*?case/",
+        "--attribute-filter",
+        "hello=-/lowercase/",
+        "--attribute-filter",
+        "hello=-/.*3/",
+    ]);
+
+    args.output = Some(out.clone());
+
+    run(args).unwrap();
+
+    assert!(std::fs::exists(out.join("hello/world/v1/reverse")).unwrap());
+
+    assert!(std::fs::exists(out.join("hello/world/v1/rotate1")).unwrap());
+    assert!(std::fs::exists(out.join("hello/world/v1/rotate2")).unwrap());
+    assert!(!std::fs::exists(out.join("hello/world/v1/rotate3")).unwrap());
+
+    assert!(std::fs::exists(out.join("hello/world/v1/uppercase")).unwrap());
+    assert!(!std::fs::exists(out.join("hello/world/v1/lowercase")).unwrap());
+}
+
+#[cfg(test)]
+#[cfg_attr(icu4x_nightly_tests, deny(non_exhaustive_omitted_patterns))]
+#[allow(unreachable_patterns)]
+mod test_consistency {
+    #[test]
+    fn test_deduplication_consistency() {
+        use crate::Deduplication;
+        use icu_provider_export::DeduplicationStrategy as Upstream;
+        let upstream = Upstream::None;
+        let _ = match upstream {
+            Upstream::Maximal => Deduplication::Maximal,
+            Upstream::RetainBaseLanguages => Deduplication::RetainBaseLanguages,
+            Upstream::None => Deduplication::None,
+            _ => unreachable!(),
+        };
+    }
+
+    #[cfg(feature = "provider")]
+    #[test]
+    fn test_collation_root_han_consistency() {
+        use crate::CollationRootHan;
+        use icu_provider_source::CollationRootHan as Upstream;
+        let upstream = Upstream::Implicit;
+        let _ = match upstream {
+            Upstream::Implicit => CollationRootHan::Implicit,
+            Upstream::Unihan => CollationRootHan::Unihan,
+            _ => unreachable!(),
+        };
+    }
+
+    #[cfg(feature = "provider")]
+    #[test]
+    fn test_alt_variant_kind_consistency() {
+        use crate::AltVariantKind;
+        use icu_provider_source::AltVariantKind as Upstream;
+        let upstream = Upstream::DatetimeAscii;
+        let _ = match upstream {
+            Upstream::DatetimeAscii => AltVariantKind::DatetimeAscii,
+            _ => unreachable!(),
+        };
     }
 }

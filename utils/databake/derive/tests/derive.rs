@@ -8,8 +8,8 @@ use databake::*;
 
 #[derive(Bake)]
 #[databake(path = test)]
-pub struct IntExample {
-    x: u8,
+struct IntExample {
+    pub x: u8,
 }
 
 #[test]
@@ -19,9 +19,9 @@ fn test_int_example() {
 
 #[derive(Bake)]
 #[databake(path = test)]
-pub struct GenericsExample<T> {
-    x: u32,
-    y: T,
+struct GenericsExample<T> {
+    pub x: u32,
+    pub y: T,
 }
 
 #[test]
@@ -39,11 +39,11 @@ fn test_generics_example() {
 
 #[derive(Bake)]
 #[databake(path = test)]
-pub struct CowExample<'a> {
-    x: u8,
-    y: &'a str,
-    z: alloc::borrow::Cow<'a, str>,
-    w: alloc::borrow::Cow<'a, [u8]>,
+struct CowExample<'a> {
+    pub x: u8,
+    pub y: &'a str,
+    pub z: alloc::borrow::Cow<'a, str>,
+    pub w: alloc::borrow::Cow<'a, [u8]>,
 }
 
 #[test]

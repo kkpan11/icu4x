@@ -4,51 +4,64 @@
 
 //! This module contains provider implementations backed by built-in segmentation data.
 
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
+#[cfg(feature = "unstable")]
+use crate::DataHasher;
+#[cfg(feature = "unstable")]
+use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
-use icu::collections::codepointtrie;
+#[cfg(feature = "unstable")]
+use crate::source::Cache;
+use crate::source::{RscdCache, include_files};
+#[cfg(feature = "unstable")]
+use icu::collections::codepointinvlist::CodePointInversionList;
+#[cfg(feature = "unstable")]
+use icu::locale::extensions::unicode::key;
 use icu::properties::{
-    maps, sets, CanonicalCombiningClass, EastAsianWidth, GeneralCategory, GraphemeClusterBreak,
-    IndicSyllabicCategory, LineBreak, Script, SentenceBreak, WordBreak,
+    CodePointMapData, CodePointMapDataBorrowed, CodePointSetData,
+    props::{
+        EastAsianWidth, GeneralCategory, GraphemeClusterBreak, IndicConjunctBreak, LineBreak,
+        Script, SentenceBreak, WordBreak,
+    },
 };
+use icu::segmenter::options::WordType;
 use icu::segmenter::provider::*;
-use icu::segmenter::WordType;
-use icu_codepointtrie_builder::{CodePointTrieBuilder, CodePointTrieBuilderData};
 use icu_provider::prelude::*;
 use std::collections::HashSet;
+#[cfg(feature = "unstable")]
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Debug;
 use std::sync::OnceLock;
-use zerovec::ZeroVec;
 
 mod dictionary;
 mod lstm;
+#[cfg(feature = "unstable")]
+mod unihan;
 
 // state machine name define by builtin name
 // [[tables]]
 // name = "Double_Quote"
+//
+// state machine name define by combined state and as simple property
+// This doesn't break between properties even if combined rules are not matched.
+// [[tables]]
+// name = "ALetter_ZWJ"
+// as_simple_property = true
 //
 // state machine define for combined state
 // [[tables]]
 // name = "Double_Quote_ALetter"
 // left = "Double_Quote"
 // right = "ALetter"
-//
-// state machine define using code point
-// [[tables]]
-// name = "ABC"
-// codepoint = [32, 33, ...]
 #[derive(serde::Deserialize, Debug)]
 struct SegmenterProperty {
     name: String,
-    // If codepoint is defined, this is custom define, not builtin define.
-    codepoint: Option<Vec<u32>>,
     // If left and right are defined, this define is combined state.
     left: Option<String>,
     right: Option<String>,
     // This combine state is an intermediate match rule.
     interm_break_state: Option<bool>,
+    // Defiened as single property to move marker even if not matched.
+    as_simple_property: Option<bool>,
 }
 
 // state machine break result define
@@ -87,55 +100,12 @@ fn generate_rule_break_data(
     provider: &SourceDataProvider,
     rules_file: &str,
     trie_type: crate::TrieType,
-) -> RuleBreakDataV2<'static> {
-    let segmenter = provider
-        .icuexport()
-        .unwrap()
-        .read_and_parse_toml::<SegmenterRuleTable>(rules_file)
-        .expect("The data should be valid!");
+) -> Result<RuleBreakData<'static>, DataError> {
+    use icu::properties::{PropertyParser, props::ExtendedPictographic};
+    use icu_codepointtrie_builder::CodePointTrieBuilder;
 
-    let data = maps::load_word_break(provider).expect("The data should be valid!");
-    let wb = data.as_borrowed();
-
-    let data = maps::load_grapheme_cluster_break(provider).expect("The data should be valid!");
-    let gb = data.as_borrowed();
-
-    let data = maps::load_sentence_break(provider).expect("The data should be valid!");
-    let sb = data.as_borrowed();
-
-    let data = maps::load_line_break(provider).expect("The data should be valid!");
-    let lb = data.as_borrowed();
-
-    let data = maps::load_east_asian_width(provider).expect("The data should be valid!");
-    let eaw = data.as_borrowed();
-
-    let data = maps::load_general_category(provider).expect("The data should be valid!");
-    let gc = data.as_borrowed();
-
-    let data = maps::load_script(provider).expect("The data should be valid");
-    let script = data.as_borrowed();
-
-    let data = sets::load_extended_pictographic(provider).expect("The data should be valid!");
-    let extended_pictographic = data.as_borrowed();
-
-    let data = maps::load_indic_syllabic_category(provider).expect("The data should be valid!");
-    let insc = data.as_borrowed();
-
-    let data = maps::load_canonical_combining_class(provider).expect("The data should be valid!");
-    let ccc = data.as_borrowed();
-
-    let data =
-        GraphemeClusterBreak::get_name_to_enum_mapper(provider).expect("The data should be vaild!");
-    let gcb_name_to_enum = data.as_borrowed();
-
-    let data = LineBreak::get_name_to_enum_mapper(provider).expect("The data should be vaild!");
-    let lb_name_to_enum = data.as_borrowed();
-
-    let data = SentenceBreak::get_name_to_enum_mapper(provider).expect("The data should be vaild!");
-    let sb_name_to_enum = data.as_borrowed();
-
-    let data = WordBreak::get_name_to_enum_mapper(provider).expect("The data should be vaild!");
-    let wb_name_to_enum = data.as_borrowed();
+    let segmenter =
+        toml::from_str::<SegmenterRuleTable>(rules_file).expect("The data should be valid!");
 
     fn set_break_state(
         break_state_table: &mut [Option<BreakState>],
@@ -156,10 +126,16 @@ fn generate_rule_break_data(
         properties_names.iter().position(|n| n.eq(s))
     }
 
-    fn is_cjk_fullwidth(
-        eaw: maps::CodePointMapDataBorrowed<EastAsianWidth>,
-        codepoint: u32,
-    ) -> bool {
+    fn is_east_asian(eaw: CodePointMapDataBorrowed<EastAsianWidth>, codepoint: u32) -> bool {
+        matches!(
+            eaw.get32(codepoint),
+            EastAsianWidth::Fullwidth | EastAsianWidth::Halfwidth | EastAsianWidth::Wide
+        )
+    }
+
+    // The Unicode 15.1 rules, i.e. `SegmenterBreakLineV1`, use this instead of `is_east_asian`
+    // for the `PO_EAW` and `PR_EAW` properties.
+    fn is_cjk_fullwidth(eaw: CodePointMapDataBorrowed<EastAsianWidth>, codepoint: u32) -> bool {
         matches!(
             eaw.get32(codepoint),
             EastAsianWidth::Ambiguous | EastAsianWidth::Fullwidth | EastAsianWidth::Wide
@@ -181,35 +157,60 @@ fn generate_rule_break_data(
     // the default unassigned values, so it's ok to omit them in the table.
     const CODEPOINT_TABLE_LEN: usize = 0xE1000;
 
-    let mut properties_map = vec![0; CODEPOINT_TABLE_LEN];
+    let mut properties_trie = CodePointTrieBuilder::new(0u8, 0, trie_type.into());
     let mut properties_names = Vec::<String>::new();
     let mut simple_properties_count = 0;
 
     properties_names.push("Unknown".to_string());
     simple_properties_count += 1;
 
-    for p in &segmenter.tables {
-        let property_index = if !properties_names.contains(&p.name) {
-            properties_names.push(p.name.clone());
-            (properties_names.len() - 1).try_into().unwrap()
-        } else {
-            continue;
-        };
+    match &*segmenter.segmenter_type {
+        "word" => {
+            let wb = CodePointMapData::<WordBreak>::try_new_unstable(provider)?;
+            let wb = wb.as_borrowed();
+            let extended_pictographic =
+                CodePointSetData::try_new_unstable::<ExtendedPictographic>(provider)?;
+            let extended_pictographic = extended_pictographic.as_borrowed();
+            let script = CodePointMapData::<Script>::try_new_unstable(provider)?;
+            let script = script.as_borrowed();
+            let lb = CodePointMapData::<LineBreak>::try_new_unstable(provider)?;
+            let lb = lb.as_borrowed();
+            let wb_name_to_enum = PropertyParser::<WordBreak>::try_new_unstable(provider)?;
+            let wb_name_to_enum = wb_name_to_enum.as_borrowed();
 
-        if p.left.is_none() && p.right.is_none() && p.codepoint.is_none() {
-            // If any values aren't set, this is builtin type.
-            simple_properties_count += 1;
+            for p in &segmenter.tables {
+                let property_index = if !properties_names.contains(&p.name) {
+                    properties_names.push(p.name.clone());
+                    (properties_names.len() - 1).try_into().unwrap()
+                } else {
+                    continue;
+                };
 
-            match &*segmenter.segmenter_type {
-                "word" => {
-                    // Extended_Pictographic isn't a part of word break property
-                    // Extended pictographic property is within 0..U+0x20000
+                if p.left.is_none() && p.right.is_none() {
+                    // If any values aren't set, this is builtin type.
+                    simple_properties_count += 1;
+
+                    if p.as_simple_property.is_some() {
+                        // defined as simple property. It means that we move the marker to the next property.
+                        continue;
+                    }
                     if p.name == "Extended_Pictographic" {
-                        for i in 0..0x20000 {
-                            if let Some(c) = char::from_u32(i) {
-                                if extended_pictographic.contains(c) {
-                                    properties_map[c as usize] = property_index
-                                }
+                        // :Word_Break=ALetter: includes Extended_Pictographic. So we want to
+                        // exlude ALetter.
+                        // [[:Extended_Pictographic:] - [:Word_Break=ALetter:]]
+                        for range in extended_pictographic.iter_ranges() {
+                            for ch in range.filter(|ch| wb.get32(*ch) != WordBreak::ALetter) {
+                                properties_trie.set_value(ch, property_index);
+                            }
+                        }
+                        continue;
+                    }
+
+                    if p.name == "ALetter_Extended_Pictographic" {
+                        // [[:Extended_Pictographic:] & [:Word_Break=ALetter:]]
+                        for range in wb.iter_ranges_for_value(WordBreak::ALetter) {
+                            for ch in range.filter(|ch| extended_pictographic.contains32(*ch)) {
+                                properties_trie.set_value(ch, property_index);
                             }
                         }
                         continue;
@@ -217,18 +218,17 @@ fn generate_rule_break_data(
 
                     if p.name == "SA" {
                         // Word break property doesn't define SA, but we will use non-UAX29 rules.
-                        // SA/CJ property is within 0..U+0x40000
-                        for c in 0..0x40000 {
-                            if lb.get32(c) == LineBreak::ComplexContext {
-                                properties_map[c as usize] = property_index
-                            } else if let Some(c) = char::from_u32(c) {
-                                match script.get(c) {
-                                    Script::Han | Script::Hiragana => {
-                                        properties_map[c as usize] = property_index;
-                                    }
-
-                                    _ => {}
-                                }
+                        for range in script.iter_ranges_for_value(Script::Han) {
+                            properties_trie.set_range_value(range, property_index);
+                        }
+                        for range in script.iter_ranges_for_value(Script::Hiragana) {
+                            properties_trie.set_range_value(range, property_index);
+                        }
+                        for range in lb.iter_ranges_for_value(LineBreak::ComplexContext) {
+                            // Unicode 16.0 changes some Complex properties to others such as U+19DA.
+                            // Excluding Numriec should be removed after line break is 16.0
+                            for ch in range.filter(|ch| *ch != 0x19da) {
+                                properties_trie.set_value(ch, property_index);
                             }
                         }
                         continue;
@@ -241,155 +241,342 @@ fn generate_rule_break_data(
                     let prop = wb_name_to_enum
                         .get_loose(&p.name)
                         .expect("property name should be valid!");
-                    for c in 0..(CODEPOINT_TABLE_LEN as u32) {
-                        if wb.get32(c) == prop {
-                            properties_map[c as usize] = property_index;
+                    for range in wb.iter_ranges_for_value(prop) {
+                        if prop == WordBreak::Extend {
+                            // [[:Word_Break=Extend:] - [[:Hani:] [:Line_Break=Complex_Context:]]]
+                            for ch in range.filter(|ch| {
+                                script.get32(*ch) != Script::Han
+                                    && lb.get32(*ch) != LineBreak::ComplexContext
+                            }) {
+                                properties_trie.set_value(ch, property_index);
+                            }
+                        } else if prop == WordBreak::ALetter {
+                            // :Word_Break=ALetter: includes Extended_Pictographic. So we want to
+                            // exlude it.
+                            // "[[:Word_Break=ALetter:] - [:Extended_Pictographic:]]"
+                            for ch in range.filter(|ch| !extended_pictographic.contains32(*ch)) {
+                                properties_trie.set_value(ch, property_index);
+                            }
+                        } else {
+                            properties_trie.set_range_value(range, property_index);
                         }
                     }
+
                     continue;
                 }
+            }
+        }
 
-                "grapheme" => {
+        "grapheme" => {
+            let extended_pictographic =
+                CodePointSetData::try_new_unstable::<ExtendedPictographic>(provider)?;
+            let extended_pictographic = extended_pictographic.as_borrowed();
+            let incb = CodePointMapData::<IndicConjunctBreak>::try_new_unstable(provider)?;
+            let incb = incb.as_borrowed();
+            let gcb_name_to_enum =
+                PropertyParser::<GraphemeClusterBreak>::try_new_unstable(provider)?;
+            let gcb_name_to_enum = gcb_name_to_enum.as_borrowed();
+            let gb = CodePointMapData::<GraphemeClusterBreak>::try_new_unstable(provider)?;
+            let gb = gb.as_borrowed();
+
+            for p in &segmenter.tables {
+                let property_index = if !properties_names.contains(&p.name) {
+                    properties_names.push(p.name.clone());
+                    (properties_names.len() - 1).try_into().unwrap()
+                } else {
+                    continue;
+                };
+
+                if p.left.is_none() && p.right.is_none() {
+                    // If any values aren't set, this is builtin type.
+                    simple_properties_count += 1;
+
+                    if p.as_simple_property.is_some() {
+                        // defined as simple property. It means that we move the marker to the next property.
+                        continue;
+                    }
                     // Extended_Pictographic isn't a part of grapheme break property
-                    // Extended pictographic property is within 0..U+0x20000
                     if p.name == "Extended_Pictographic" {
-                        for i in 0..0x20000 {
-                            if let Some(c) = char::from_u32(i) {
-                                if extended_pictographic.contains(c) {
-                                    properties_map[c as usize] = property_index
-                                }
-                            }
+                        for range in extended_pictographic.iter_ranges() {
+                            properties_trie.set_range_value(range, property_index);
                         }
                         continue;
                     }
 
-                    // The Indic_Conjunct_Break property is separate from the Grapheme_Cluster_Break property.
-                    // See https://unicode.org/reports/tr44/#Indic_Conjunct_Break
-                    if p.name == "InCBConsonant" || p.name == "InCBLinker" || p.name == "InCBExtend"
-                    {
-                        let gcb_extend = gcb_name_to_enum
-                            .get_loose("Extend")
-                            .expect("property name should be valid!");
+                    let relevant_incb = match &*p.name {
+                        "InCBConsonant" => Some(IndicConjunctBreak::Consonant),
+                        "InCBLinker" => Some(IndicConjunctBreak::Linker),
+                        "InCBExtend" => Some(IndicConjunctBreak::Extend),
+                        _ => None,
+                    };
 
-                        for i in 0..(CODEPOINT_TABLE_LEN as u32) {
-                            if let Some(c) = char::from_u32(i) {
-                                let insc_value = insc.get(c);
-                                let sc = script.get(c);
-                                let is_gb9c_script = sc == Script::Bengali
-                                    || sc == Script::Devanagari
-                                    || sc == Script::Gujarati
-                                    || sc == Script::Malayalam
-                                    || sc == Script::Oriya
-                                    || sc == Script::Telugu;
-                                let is_incb_consonant = insc_value
-                                    == IndicSyllabicCategory::Consonant
-                                    && is_gb9c_script;
-                                let is_incb_linker =
-                                    insc_value == IndicSyllabicCategory::Virama && is_gb9c_script;
-                                // InCB = Linker or InCB = Consonant
-                                if (p.name == "InCBConsonant" && is_incb_consonant)
-                                    || (p.name == "InCBLinker" && is_incb_linker)
-                                    // ZWJ is InCB=Extend, but is in a different GCB class anyway so
-                                    // it needs to be special-cased in the tables.
-                                    // NOTE(eggrobin): UAX #44, Version 15.1, instead excludes based
-                                    // on InSC.
-                                    // I believe that to be a defect in that version of Unicode.
-                                    // This has been brought to the attention of the Properties and
-                                    // Algorithms Group.
-                                    || (p.name == "InCBExtend"
-                                        && (gb.get32(i) == gcb_extend
-                                            && ccc.get32(i) != CanonicalCombiningClass::NotReordered
-                                            && !is_incb_consonant
-                                            && !is_incb_linker))
-                                {
-                                    properties_map[c as usize] = property_index;
+                    if let Some(relevant_incb) = relevant_incb {
+                        for range in incb.iter_ranges_for_value(relevant_incb) {
+                            if range.contains(&0x200D) {
+                                // ZWJ is handled as a separate rule
+                                for ch in range.filter(|ch| *ch != 0x200D) {
+                                    properties_trie.set_value(ch, property_index);
                                 }
+                            } else {
+                                properties_trie.set_range_value(range, property_index);
                             }
                         }
+
                         continue;
                     }
 
                     let prop = gcb_name_to_enum
                         .get_loose(&p.name)
                         .expect("property name should be valid!");
-                    for c in 0..(CODEPOINT_TABLE_LEN as u32) {
-                        if gb.get32(c) == prop {
-                            properties_map[c as usize] = property_index;
-                        }
+
+                    for range in gb.iter_ranges_for_value(prop) {
+                        properties_trie.set_range_value(range, property_index);
                     }
                     continue;
                 }
+            }
+        }
 
-                "sentence" => {
+        "sentence" => {
+            let sb = CodePointMapData::<SentenceBreak>::try_new_unstable(provider)?;
+            let sb = sb.as_borrowed();
+            let sb_name_to_enum = PropertyParser::<SentenceBreak>::try_new_unstable(provider)?;
+            let sb_name_to_enum = sb_name_to_enum.as_borrowed();
+
+            for p in &segmenter.tables {
+                let property_index = if !properties_names.contains(&p.name) {
+                    properties_names.push(p.name.clone());
+                    (properties_names.len() - 1).try_into().unwrap()
+                } else {
+                    continue;
+                };
+
+                if p.left.is_none() && p.right.is_none() {
+                    // If any values aren't set, this is builtin type.
+                    simple_properties_count += 1;
+
+                    if p.as_simple_property.is_some() {
+                        // defined as simple property. It means that we move the marker to the next property.
+                        continue;
+                    }
                     let prop = sb_name_to_enum
                         .get_loose(&p.name)
                         .expect("property name should be valid!");
-                    for c in 0..(CODEPOINT_TABLE_LEN as u32) {
-                        if sb.get32(c) == prop {
-                            properties_map[c as usize] = property_index;
-                        }
+                    for range in sb.iter_ranges_for_value(prop) {
+                        properties_trie.set_range_value(range, property_index);
                     }
                     continue;
                 }
+            }
+        }
 
-                "line" => {
-                    if p.name == "CP_EA"
+        "line" => {
+            let lb = CodePointMapData::<LineBreak>::try_new_unstable(provider)?;
+            let lb = lb.as_borrowed();
+            let eaw = CodePointMapData::<EastAsianWidth>::try_new_unstable(provider)?;
+            let eaw = eaw.as_borrowed();
+            let gc = CodePointMapData::<GeneralCategory>::try_new_unstable(provider)?;
+            let gc = gc.as_borrowed();
+            let extended_pictographic =
+                CodePointSetData::try_new_unstable::<ExtendedPictographic>(provider)?;
+            let extended_pictographic = extended_pictographic.as_borrowed();
+            let lb_name_to_enum = PropertyParser::<LineBreak>::try_new_unstable(provider)?;
+            let lb_name_to_enum = lb_name_to_enum.as_borrowed();
+
+            // `SegmenterBreakLineV1` (Unicode 15.1) and `SegmenterBreakLineV3` (Unicode 17) are
+            // generated from different rule files, and derive some properties differently. The
+            // `OP_OP30` property only exists in the Unicode 15.1 rules.
+            let unicode_15_1_rules = segmenter.tables.iter().any(|p| p.name == "OP_OP30");
+
+            for p in &segmenter.tables {
+                let property_index = if !properties_names.contains(&p.name) {
+                    properties_names.push(p.name.clone());
+                    (properties_names.len() - 1).try_into().unwrap()
+                } else {
+                    continue;
+                };
+
+                if p.left.is_none() && p.right.is_none() {
+                    // If any values aren't set, this is builtin type.
+                    simple_properties_count += 1;
+
+                    if p.as_simple_property.is_some() {
+                        // defined as simple property. It means that we move the marker to the next property.
+                        continue;
+                    }
+                    if p.name == "ID_CN"
+                        || p.name == "QU_PI"
+                        || p.name == "QU_PF"
+                        // Unicode 15.1 rules only
+                        || p.name == "CP_EA"
                         || p.name == "OP_OP30"
                         || p.name == "OP_EA"
-                        || p.name == "ID_CN"
                         || p.name == "PO_EAW"
                         || p.name == "PR_EAW"
+                        || p.name == "AL_DOTTED_CIRCLE"
+                        // Unicode 17 rules only
+                        || p.name == "SA_MC_MN"
+                        || p.name == "AI_EastAsian"
+                        || p.name == "AL_DottedCircle"
+                        || p.name == "AL_EastAsian"
+                        || p.name == "BA_EastAsian"
+                        || p.name == "CL_EastAsian"
+                        || p.name == "CM_EastAsian"
+                        || p.name == "EB_EastAsian"
+                        || p.name == "EX_EastAsian"
+                        || p.name == "GL_EastAsian"
+                        || p.name == "ID_EastAsian"
+                        || p.name == "IN_EastAsian"
+                        || p.name == "NS_EastAsian"
+                        || p.name == "OP_EastAsian"
+                        || p.name == "PO_EastAsian"
+                        || p.name == "PR_EastAsian"
+                        || p.name == "XX_ExtPict"
                     {
-                        for i in 0..(CODEPOINT_TABLE_LEN as u32) {
-                            match lb.get32(i) {
-                                LineBreak::OpenPunctuation => {
-                                    if (p.name == "OP_OP30"
-                                        && (eaw.get32(i) != EastAsianWidth::Fullwidth
-                                            && eaw.get32(i) != EastAsianWidth::Halfwidth
-                                            && eaw.get32(i) != EastAsianWidth::Wide))
-                                        || (p.name == "OP_EA"
-                                            && (eaw.get32(i) == EastAsianWidth::Fullwidth
-                                                || eaw.get32(i) == EastAsianWidth::Halfwidth
-                                                || eaw.get32(i) == EastAsianWidth::Wide))
-                                    {
-                                        properties_map[i as usize] = property_index;
+                        for cp in 0..(CODEPOINT_TABLE_LEN as u32) {
+                            match lb.get32(cp) {
+                                LineBreak::OpenPunctuation
+                                    if (p.name == "OP_EastAsian" && is_east_asian(eaw, cp))
+                                        // `is_east_asian` is the Fullwidth/Halfwidth/Wide set that
+                                        // the Unicode 15.1 rules split OP on as well.
+                                        || (p.name == "OP_OP30" && !is_east_asian(eaw, cp))
+                                        || (p.name == "OP_EA" && is_east_asian(eaw, cp)) => {
+                                        properties_trie.set_value(cp, property_index);
                                     }
-                                }
 
-                                LineBreak::CloseParenthesis => {
+                                LineBreak::CloseParenthesis
                                     // CP_EA is unused on the latest spec.
                                     if p.name == "CP_EA"
-                                        && (eaw.get32(i) == EastAsianWidth::Fullwidth
-                                            || eaw.get32(i) == EastAsianWidth::Halfwidth
-                                            || eaw.get32(i) == EastAsianWidth::Wide)
-                                    {
-                                        properties_map[i as usize] = property_index;
+                                        && (eaw.get32(cp) == EastAsianWidth::Fullwidth
+                                            || eaw.get32(cp) == EastAsianWidth::Halfwidth
+                                            || eaw.get32(cp) == EastAsianWidth::Wide)
+                                    => {
+                                        properties_trie.set_value(cp, property_index);
                                     }
-                                }
 
                                 LineBreak::Ideographic => {
                                     if p.name == "ID_CN"
-                                        && gc.get32(i) == GeneralCategory::Unassigned
+                                        && gc.get32(cp) == GeneralCategory::Unassigned
                                     {
-                                        if let Some(c) = char::from_u32(i) {
+                                        if let Some(c) = char::from_u32(cp) {
                                             if extended_pictographic.contains(c) {
-                                                properties_map[i as usize] = property_index;
+                                                properties_trie.set_value(cp, property_index);
+                                            } else if unicode_15_1_rules {
+                                                // The Unicode 15.1 rules don't use Unicode 17's
+                                                // data, but extended_pictographic is 17.
+                                                // So this is a hack to use old Unicode rules with
+                                                // newer Unicode data.
+                                                // (https://github.com/unicode-org/icu4x/issues/7134)
+                                                match cp {
+                                                    0x1f774..=0x1f77f => properties_trie
+                                                        .set_value(cp, property_index),
+                                                    0x1f8ae..=0x1f8ff => properties_trie
+                                                        .set_value(cp, property_index),
+                                                    0x1f947..=0x1faff => properties_trie
+                                                        .set_value(cp, property_index),
+                                                    _ => {}
+                                                };
                                             }
                                         }
+                                    } else if p.name == "ID_EastAsian" && is_east_asian(eaw, cp) {
+                                        properties_trie.set_value(cp, property_index);
                                     }
                                 }
 
-                                LineBreak::PostfixNumeric => {
-                                    if p.name == "PO_EAW" && is_cjk_fullwidth(eaw, i) {
-                                        properties_map[i as usize] = property_index;
+                                LineBreak::PostfixNumeric
+                                    if (p.name == "PO_EastAsian" && is_east_asian(eaw, cp))
+                                        || (p.name == "PO_EAW" && is_cjk_fullwidth(eaw, cp)) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::PrefixNumeric
+                                    if (p.name == "PR_EastAsian" && is_east_asian(eaw, cp))
+                                        || (p.name == "PR_EAW" && is_cjk_fullwidth(eaw, cp)) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Ambiguous
+                                    if p.name == "AI_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Alphabetic
+                                    if (p.name == "AL_EastAsian" && is_east_asian(eaw, cp))
+                                        || (p.name == "AL_DottedCircle" && cp == 0x25CC)
+                                        || (p.name == "AL_DOTTED_CIRCLE" && cp == 0x25CC) =>
+                                    {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Quotation => {
+                                    if p.name == "QU_PI"
+                                        && gc.get32(cp) == GeneralCategory::InitialPunctuation
+                                    {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                    if p.name == "QU_PF"
+                                        && gc.get32(cp) == GeneralCategory::FinalPunctuation
+                                    {
+                                        properties_trie.set_value(cp, property_index);
                                     }
                                 }
 
-                                LineBreak::PrefixNumeric => {
-                                    if p.name == "PR_EAW" && is_cjk_fullwidth(eaw, i) {
-                                        properties_map[i as usize] = property_index;
+                                LineBreak::BreakAfter
+                                    if p.name == "BA_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
                                     }
-                                }
+
+                                LineBreak::ClosePunctuation
+                                    if p.name == "CL_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::CombiningMark
+                                    if p.name == "CM_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::ComplexContext
+                                    if p.name == "SA_MC_MN"
+                                        && (gc.get32(cp) == GeneralCategory::NonspacingMark
+                                            || gc.get32(cp) == GeneralCategory::SpacingMark) =>
+                                    {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::EBase
+                                    if p.name == "EB_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Exclamation
+                                    if p.name == "EX_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Glue
+                                    if p.name == "GL_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Inseparable
+                                    if p.name == "IN_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Nonstarter
+                                    if p.name == "NS_EastAsian" && is_east_asian(eaw, cp) => {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
+
+                                LineBreak::Unknown
+                                    if p.name == "XX_ExtPict"
+                                        && extended_pictographic.contains32(cp)
+                                        && gc.get32(cp) == GeneralCategory::Unassigned =>
+                                    {
+                                        properties_trie.set_value(cp, property_index);
+                                    }
 
                                 _ => {}
                             }
@@ -400,29 +587,165 @@ fn generate_rule_break_data(
                     let prop = lb_name_to_enum
                         .get_loose(&p.name)
                         .expect("property name should be valid!");
-                    for c in 0..(CODEPOINT_TABLE_LEN as u32) {
-                        if lb.get32(c) == prop {
-                            properties_map[c as usize] = property_index;
+                    for range in lb.iter_ranges_for_value(prop) {
+                        properties_trie.set_range_value(range, property_index);
+                    }
+
+                    if p.name == "AL" {
+                        // LB1: SG has no special rules.
+                        let prop = lb_name_to_enum
+                            .get_loose("SG")
+                            .expect("property name should be valid!");
+                        for range in lb.iter_ranges_for_value(prop) {
+                            properties_trie.set_range_value(range, property_index);
                         }
                     }
                     continue;
                 }
+            }
 
-                _ => {
-                    panic!("unknown built-in segmenter type");
-                }
+            // The runtime code hard-codes these property indices, so verify them here.
+            let expected_properties: &[(&str, u8)] = if unicode_15_1_rules {
+                &[
+                    ("AI", RuleBreakData::LINE_PROPERTY_AI),
+                    ("AK", RuleBreakData::LINE_PROPERTY_AK),
+                    (
+                        "AL_DOTTED_CIRCLE",
+                        RuleBreakData::LINE_PROPERTY_AL_DOTTED_CIRCLE,
+                    ),
+                    ("AL", RuleBreakData::LINE_PROPERTY_AL),
+                    ("AP", RuleBreakData::LINE_PROPERTY_AP),
+                    ("AS", RuleBreakData::LINE_PROPERTY_AS),
+                    ("B2", RuleBreakData::LINE_PROPERTY_B2),
+                    ("BA", RuleBreakData::LINE_PROPERTY_BA),
+                    ("BB", RuleBreakData::LINE_PROPERTY_BB),
+                    ("BK", RuleBreakData::LINE_PROPERTY_BK),
+                    ("CB", RuleBreakData::LINE_PROPERTY_CB),
+                    ("CJ", RuleBreakData::LINE_PROPERTY_CJ),
+                    ("CL", RuleBreakData::LINE_PROPERTY_CL),
+                    ("CM", RuleBreakData::LINE_PROPERTY_CM),
+                    ("CP", RuleBreakData::LINE_PROPERTY_CP),
+                    ("CR", RuleBreakData::LINE_PROPERTY_CR),
+                    ("EB", RuleBreakData::LINE_PROPERTY_EB),
+                    ("EM", RuleBreakData::LINE_PROPERTY_EM),
+                    ("EX", RuleBreakData::LINE_PROPERTY_EX),
+                    ("GL", RuleBreakData::LINE_PROPERTY_GL),
+                    ("H2", RuleBreakData::LINE_PROPERTY_H2),
+                    ("H3", RuleBreakData::LINE_PROPERTY_H3),
+                    ("HL", RuleBreakData::LINE_PROPERTY_HL),
+                    ("HY", RuleBreakData::LINE_PROPERTY_HY),
+                    ("ID_CN", RuleBreakData::LINE_PROPERTY_ID_CN),
+                    ("ID", RuleBreakData::LINE_PROPERTY_ID),
+                    ("IN", RuleBreakData::LINE_PROPERTY_IN),
+                    ("IS", RuleBreakData::LINE_PROPERTY_IS),
+                    ("JL", RuleBreakData::LINE_PROPERTY_JL),
+                    ("JT", RuleBreakData::LINE_PROPERTY_JT),
+                    ("JV", RuleBreakData::LINE_PROPERTY_JV),
+                    ("LF", RuleBreakData::LINE_PROPERTY_LF),
+                    ("NL", RuleBreakData::LINE_PROPERTY_NL),
+                    ("NS", RuleBreakData::LINE_PROPERTY_NS),
+                    ("NU", RuleBreakData::LINE_PROPERTY_NU),
+                    ("OP_EA", RuleBreakData::LINE_PROPERTY_OP_EA),
+                    ("OP_OP30", RuleBreakData::LINE_PROPERTY_OP_OP30),
+                    ("PO_EAW", RuleBreakData::LINE_PROPERTY_PO_EAW),
+                    ("PO", RuleBreakData::LINE_PROPERTY_PO),
+                    ("PR_EAW", RuleBreakData::LINE_PROPERTY_PR_EAW),
+                    ("PR", RuleBreakData::LINE_PROPERTY_PR),
+                    ("QU_PF", RuleBreakData::LINE_PROPERTY_QU_PF),
+                    ("QU_PI", RuleBreakData::LINE_PROPERTY_QU_PI),
+                    ("QU", RuleBreakData::LINE_PROPERTY_QU),
+                    ("RI", RuleBreakData::LINE_PROPERTY_RI),
+                    ("SP", RuleBreakData::LINE_PROPERTY_SP),
+                    ("SY", RuleBreakData::LINE_PROPERTY_SY),
+                    ("VF", RuleBreakData::LINE_PROPERTY_VF),
+                    ("VI", RuleBreakData::LINE_PROPERTY_VI),
+                    ("WJ", RuleBreakData::LINE_PROPERTY_WJ),
+                    ("XX", RuleBreakData::LINE_PROPERTY_XX),
+                    ("ZW", RuleBreakData::LINE_PROPERTY_ZW),
+                    ("ZWJ", RuleBreakData::LINE_PROPERTY_ZWJ),
+                ]
+            } else {
+                &[
+                    ("AI", RuleBreakData::LINE_V3_PROPERTY_AI),
+                    ("AK", RuleBreakData::LINE_V3_PROPERTY_AK),
+                    (
+                        "AL_DottedCircle",
+                        RuleBreakData::LINE_V3_PROPERTY_AL_DOTTED_CIRCLE,
+                    ),
+                    ("AL", RuleBreakData::LINE_V3_PROPERTY_AL),
+                    ("AP", RuleBreakData::LINE_V3_PROPERTY_AP),
+                    ("AS", RuleBreakData::LINE_V3_PROPERTY_AS),
+                    ("B2", RuleBreakData::LINE_V3_PROPERTY_B2),
+                    ("BA", RuleBreakData::LINE_V3_PROPERTY_BA),
+                    ("BA_EastAsian", RuleBreakData::LINE_V3_PROPERTY_BA_EASTASIAN),
+                    ("BB", RuleBreakData::LINE_V3_PROPERTY_BB),
+                    ("BK", RuleBreakData::LINE_V3_PROPERTY_BK),
+                    ("CB", RuleBreakData::LINE_V3_PROPERTY_CB),
+                    ("CJ", RuleBreakData::LINE_V3_PROPERTY_CJ),
+                    ("CL", RuleBreakData::LINE_V3_PROPERTY_CL),
+                    ("CL_EastAsian", RuleBreakData::LINE_V3_PROPERTY_CL_EASTASIAN),
+                    ("CM", RuleBreakData::LINE_V3_PROPERTY_CM),
+                    ("CM_EastAsian", RuleBreakData::LINE_V3_PROPERTY_CM_EASTASIAN),
+                    ("CP", RuleBreakData::LINE_V3_PROPERTY_CP),
+                    ("CR", RuleBreakData::LINE_V3_PROPERTY_CR),
+                    ("EB", RuleBreakData::LINE_V3_PROPERTY_EB),
+                    ("EB_EastAsian", RuleBreakData::LINE_V3_PROPERTY_EB_EASTASIAN),
+                    ("EM", RuleBreakData::LINE_V3_PROPERTY_EM),
+                    ("EX", RuleBreakData::LINE_V3_PROPERTY_EX),
+                    ("EX_EastAsian", RuleBreakData::LINE_V3_PROPERTY_EX_EASTASIAN),
+                    ("GL", RuleBreakData::LINE_V3_PROPERTY_GL),
+                    ("GL_EastAsian", RuleBreakData::LINE_V3_PROPERTY_GL_EASTASIAN),
+                    ("H2", RuleBreakData::LINE_V3_PROPERTY_H2),
+                    ("H3", RuleBreakData::LINE_V3_PROPERTY_H3),
+                    ("HL", RuleBreakData::LINE_V3_PROPERTY_HL),
+                    ("HY", RuleBreakData::LINE_V3_PROPERTY_HY),
+                    ("ID", RuleBreakData::LINE_V3_PROPERTY_ID),
+                    ("ID_CN", RuleBreakData::LINE_V3_PROPERTY_ID_CN),
+                    ("ID_EastAsian", RuleBreakData::LINE_V3_PROPERTY_ID_EASTASIAN),
+                    ("IN", RuleBreakData::LINE_V3_PROPERTY_IN),
+                    ("IN_EastAsian", RuleBreakData::LINE_V3_PROPERTY_IN_EASTASIAN),
+                    ("IS", RuleBreakData::LINE_V3_PROPERTY_IS),
+                    ("JL", RuleBreakData::LINE_V3_PROPERTY_JL),
+                    ("JT", RuleBreakData::LINE_V3_PROPERTY_JT),
+                    ("JV", RuleBreakData::LINE_V3_PROPERTY_JV),
+                    ("LF", RuleBreakData::LINE_V3_PROPERTY_LF),
+                    ("NL", RuleBreakData::LINE_V3_PROPERTY_NL),
+                    ("NS", RuleBreakData::LINE_V3_PROPERTY_NS),
+                    ("NS_EastAsian", RuleBreakData::LINE_V3_PROPERTY_NS_EASTASIAN),
+                    ("NU", RuleBreakData::LINE_V3_PROPERTY_NU),
+                    ("OP", RuleBreakData::LINE_V3_PROPERTY_OP),
+                    ("OP_EastAsian", RuleBreakData::LINE_V3_PROPERTY_OP_EASTASIAN),
+                    ("PO", RuleBreakData::LINE_V3_PROPERTY_PO),
+                    ("PO_EastAsian", RuleBreakData::LINE_V3_PROPERTY_PO_EASTASIAN),
+                    ("PR", RuleBreakData::LINE_V3_PROPERTY_PR),
+                    ("PR_EastAsian", RuleBreakData::LINE_V3_PROPERTY_PR_EASTASIAN),
+                    ("QU_PF", RuleBreakData::LINE_V3_PROPERTY_QU_PF),
+                    ("QU_PI", RuleBreakData::LINE_V3_PROPERTY_QU_PI),
+                    ("QU", RuleBreakData::LINE_V3_PROPERTY_QU),
+                    ("RI", RuleBreakData::LINE_V3_PROPERTY_RI),
+                    ("SP", RuleBreakData::LINE_V3_PROPERTY_SP),
+                    ("SY", RuleBreakData::LINE_V3_PROPERTY_SY),
+                    ("VF", RuleBreakData::LINE_V3_PROPERTY_VF),
+                    ("VI", RuleBreakData::LINE_V3_PROPERTY_VI),
+                    ("WJ", RuleBreakData::LINE_V3_PROPERTY_WJ),
+                    ("XX", RuleBreakData::LINE_V3_PROPERTY_XX),
+                    ("XX_ExtPict", RuleBreakData::LINE_V3_PROPERTY_XX_EXTPICT),
+                    ("ZW", RuleBreakData::LINE_V3_PROPERTY_ZW),
+                    ("ZWJ", RuleBreakData::LINE_V3_PROPERTY_ZWJ),
+                ]
+            };
+
+            for &(name, value) in expected_properties {
+                assert_eq!(
+                    get_index_from_name(&properties_names, name),
+                    Some(value as usize),
+                    "{name} {properties_names:?}"
+                );
             }
         }
 
-        if let Some(codepoint) = &p.codepoint {
-            simple_properties_count += 1;
-            for c in codepoint {
-                let c = *c as usize;
-                if c > CODEPOINT_TABLE_LEN {
-                    continue;
-                }
-                properties_map[c] = property_index;
-            }
+        _ => {
+            panic!("unknown built-in segmenter type");
         }
     }
 
@@ -470,7 +793,8 @@ fn generate_rule_break_data(
                 }
                 continue;
             }
-            let left_index = get_index_from_name(&properties_names, l).unwrap();
+            let left_index =
+                get_index_from_name(&properties_names, l).expect("left property should be valid!");
             for r in &rule.right {
                 // Special case: right is Any
                 if r == "Any" {
@@ -517,39 +841,30 @@ fn generate_rule_break_data(
 
     // State machine alias
     for p in &segmenter.tables {
-        if let Some(left) = &p.left {
-            if let Some(right) = &p.right {
-                let right_index = get_index_from_name(&properties_names, right).unwrap();
-                let left_index = get_index_from_name(&properties_names, left).unwrap();
+        if let Some(left) = &p.left
+            && let Some(right) = &p.right
+        {
+            let right_index = get_index_from_name(&properties_names, right).unwrap();
+            let left_index = get_index_from_name(&properties_names, left).unwrap();
 
-                let index = properties_names.iter().position(|n| n.eq(&p.name)).unwrap();
-                break_state_table[left_index * properties_names.len() + right_index] =
-                    Some(if p.interm_break_state.is_some() {
-                        BreakState::Intermediate(index.try_into().unwrap())
-                    } else {
-                        BreakState::Index(index.try_into().unwrap())
-                    })
-            }
+            let index = properties_names.iter().position(|n| n.eq(&p.name)).unwrap();
+            break_state_table[left_index * properties_names.len() + right_index] =
+                Some(if p.interm_break_state.is_some() {
+                    BreakState::Intermediate(index.try_into().unwrap())
+                } else {
+                    BreakState::Index(index.try_into().unwrap())
+                })
         }
     }
 
-    RuleBreakDataV2 {
-        property_table: CodePointTrieBuilder {
-            data: CodePointTrieBuilderData::ValuesByCodePoint(&properties_map),
-            default_value: 0,
-            error_value: 0,
-            trie_type: match trie_type {
-                crate::TrieType::Fast => codepointtrie::TrieType::Fast,
-                crate::TrieType::Small => codepointtrie::TrieType::Small,
-            },
-        }
-        .build(),
+    Ok(RuleBreakData {
+        property_table: properties_trie.build(),
         break_state_table: break_state_table
             .into_iter()
             // All states are initialized
             .map(|o| o.unwrap())
             .collect(),
-        word_type_table: if segmenter.segmenter_type == "word" {
+        rule_status_table: if segmenter.segmenter_type == "word" {
             segmenter
                 .tables
                 .iter()
@@ -559,7 +874,7 @@ fn generate_rule_break_data(
                         WordType::Letter
                     }
                     _ => WordType::None,
-                })
+                } as u8)
                 .collect()
         } else {
             Default::default()
@@ -573,11 +888,56 @@ fn generate_rule_break_data(
             .unwrap_or(127)
             .try_into()
             .unwrap(),
+    })
+}
+
+#[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+fn generate_rule_break_data_override(
+    _provider: &SourceDataProvider,
+    rules_file: &str,
+    trie_type: crate::TrieType,
+) -> RuleBreakDataOverride<'static> {
+    use icu_codepointtrie_builder::CodePointTrieBuilder;
+
+    let segmenter =
+        toml::from_str::<SegmenterRuleTable>(rules_file).expect("The data should be valid!");
+
+    let mut properties_trie = CodePointTrieBuilder::new(0u8, 0, trie_type.into());
+    let mut properties_names = Vec::<String>::new();
+
+    properties_names.push("Unknown".to_string());
+
+    for p in &segmenter.tables {
+        let property_index = if !properties_names.contains(&p.name) {
+            properties_names.push(p.name.clone());
+            (properties_names.len() - 1).try_into().unwrap()
+        } else {
+            continue;
+        };
+
+        if p.left.is_none() && p.right.is_none() {
+            // If any values aren't set, this is builtin type.
+            match &*segmenter.segmenter_type {
+                // UAX#29 doesn't define the 2 characters as STerm, but ICU4C's
+                // Greek data does.
+                //
+                // TODO: We have to consider this definition from CLDR instead.
+                "sentence" if p.name == "STerm" => {
+                    properties_trie.set_value(0x003b, property_index);
+                    properties_trie.set_value(0x037e, property_index);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    RuleBreakDataOverride {
+        property_table_override: properties_trie.build(),
     }
 }
 
 macro_rules! implement {
-    ($marker:ident, $rules:literal) => {
+    ($marker:ident, $rules:literal, $provider:expr) => {
         impl DataProvider<$marker> for SourceDataProvider {
             fn load(&self, req: DataRequest) -> Result<DataResponse<$marker>, DataError> {
                 #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
@@ -589,10 +949,10 @@ macro_rules! implement {
                 return {
                     self.check_req::<$marker>(req)?;
                     let data = generate_rule_break_data(
-                        &hardcoded_segmenter_provider(),
-                        $rules,
+                        ($provider)(self),
+                        include_str!(concat!("../../data/segmenter/", $rules)),
                         self.trie_type(),
-                    );
+                    )?;
 
                     Ok(DataResponse {
                         metadata: Default::default(),
@@ -610,90 +970,973 @@ macro_rules! implement {
     }
 }
 
-fn hardcoded_segmenter_provider() -> SourceDataProvider {
-    use crate::{
-        source::{AbstractFs, SerdeCache},
-        SourceDataProvider,
-    };
-    // Singleton so that all instantiations share the same cache.
-    static SINGLETON: OnceLock<SourceDataProvider> = OnceLock::new();
-    SINGLETON
-        .get_or_init(|| {
-            let mut provider = SourceDataProvider::new_custom();
-            provider.icuexport_paths =
-                Some(std::sync::Arc::new(SerdeCache::new(AbstractFs::Memory(
-                    [
-                        (
-                            "uprops/small/ccc.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/ccc.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/ea.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/ea.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/ExtPict.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/ExtPict.toml")
-                                .as_slice(),
-                        ),
-                        (
-                            "uprops/small/gc.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/gc.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/GCB.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/GCB.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/InSC.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/InSC.toml")
-                                .as_slice(),
-                        ),
-                        (
-                            "uprops/small/lb.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/lb.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/SB.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/SB.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/sc.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/sc.toml").as_slice(),
-                        ),
-                        (
-                            "uprops/small/WB.toml",
-                            include_bytes!("../../data/segmenter/uprops/small/WB.toml").as_slice(),
-                        ),
-                        (
-                            "segmenter/grapheme.toml",
-                            include_bytes!("../../data/segmenter/grapheme.toml").as_slice(),
-                        ),
-                        (
-                            "segmenter/line.toml",
-                            include_bytes!("../../data/segmenter/line.toml").as_slice(),
-                        ),
-                        (
-                            "segmenter/sentence.toml",
-                            include_bytes!("../../data/segmenter/sentence.toml").as_slice(),
-                        ),
-                        (
-                            "segmenter/word.toml",
-                            include_bytes!("../../data/segmenter/word.toml").as_slice(),
-                        ),
-                    ]
-                    .into_iter()
-                    .collect(),
-                ))));
-            provider
-        })
-        .clone()
+macro_rules! implement_override {
+    ($marker:ident, $rules:literal, [$($supported:expr),*]) => {
+        impl DataProvider<$marker> for SourceDataProvider {
+            fn load(&self, req: DataRequest) -> Result<DataResponse<$marker>, DataError> {
+                #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+                return Err(DataError::custom(
+                    "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+                )
+                .with_req($marker::INFO, req));
+                #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+                return {
+                    self.check_req::<$marker>(req)?;
+                    let data = generate_rule_break_data_override(
+                        self,
+                        include_str!(concat!("../../data/segmenter/", $rules)),
+                        self.trie_type(),
+                    );
+
+                    Ok(DataResponse {
+                        metadata: Default::default(),
+                        payload: DataPayload::from_owned(data),
+                    })
+                };
+            }
+        }
+
+        impl crate::IterableDataProviderCached<$marker> for SourceDataProvider {
+            fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+                const SUPPORTED: &[&str] = &[$($supported),*];
+                Ok(SUPPORTED
+                   .iter()
+                   .map(|l|DataIdentifierCow::from_locale(DataLocale::try_from_str(l).unwrap()))
+                   .collect())
+            }
+        }
+    }
 }
 
-implement!(LineBreakDataV2Marker, "segmenter/line.toml");
-implement!(GraphemeClusterBreakDataV2Marker, "segmenter/grapheme.toml");
-implement!(WordBreakDataV2Marker, "segmenter/word.toml");
-implement!(SentenceBreakDataV2Marker, "segmenter/sentence.toml");
+fn rscd_15_1() -> &'static SourceDataProvider {
+    // Singleton so that all instantiations share the same cache.
+    static SINGLETON: OnceLock<SourceDataProvider> = OnceLock::new();
+    SINGLETON.get_or_init(|| {
+        let mut provider = SourceDataProvider::new_custom();
+        provider.rscd_paths = Some(std::sync::Arc::new(RscdCache::new(include_files!(
+            "../../data/segmenter/rscd15/";
+            "ucd/DerivedCoreProperties.txt",
+            "ucd/emoji/emoji-data.txt",
+            "ucd/extracted/DerivedEastAsianWidth.txt",
+            "ucd/extracted/DerivedGeneralCategory.txt",
+            "ucd/LineBreak.txt",
+            "ucd/PropertyAliases.txt",
+            "ucd/PropertyValueAliases.txt",
+            "ucd/PropList.txt",
+        ))));
+        provider
+    })
+}
+
+fn rscd_17_0() -> &'static SourceDataProvider {
+    // Singleton so that all instantiations share the same cache.
+    static SINGLETON: OnceLock<SourceDataProvider> = OnceLock::new();
+    SINGLETON.get_or_init(|| {
+        let mut provider = SourceDataProvider::new_custom();
+        provider.rscd_paths = Some(std::sync::Arc::new(RscdCache::new(include_files!(
+            "../../data/segmenter/rscd17/";
+            "ucd/auxiliary/GraphemeBreakProperty.txt",
+            "ucd/auxiliary/SentenceBreakProperty.txt",
+            "ucd/auxiliary/WordBreakProperty.txt",
+            "ucd/DerivedCoreProperties.txt",
+            "ucd/emoji/emoji-data.txt",
+            "ucd/extracted/DerivedEastAsianWidth.txt",
+            "ucd/extracted/DerivedGeneralCategory.txt",
+            "ucd/LineBreak.txt",
+            "ucd/PropertyAliases.txt",
+            "ucd/PropertyValueAliases.txt",
+            "ucd/PropList.txt",
+            "ucd/Scripts.txt",
+        ))));
+        provider
+    })
+}
+
+implement!(SegmenterBreakLineV1, "line15.toml", |_| rscd_15_1());
+#[cfg(feature = "unstable")]
+implement!(SegmenterBreakLineV3, "line.toml", |_| rscd_17_0());
+implement!(SegmenterBreakGraphemeClusterV1, "grapheme.toml", |_| {
+    rscd_17_0()
+});
+implement!(SegmenterBreakWordV1, "word.toml", |_| rscd_17_0());
+implement!(SegmenterBreakSentenceV1, "sentence.toml", |_| rscd_17_0());
+implement_override!(SegmenterBreakWordOverrideV1, "word.toml", []);
+implement_override!(SegmenterBreakSentenceOverrideV1, "sentence.toml", ["el"]);
+
+#[test]
+#[ignore]
+#[cfg(all(feature = "unstable", feature = "networking"))]
+#[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+fn download() {
+    use std::fs::File;
+    use std::io::Write;
+
+    let data_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data/segmenter/pri555");
+
+    for file in std::fs::read_dir(&data_root).unwrap() {
+        let file = file.unwrap();
+        if !file.file_type().unwrap().is_file() {
+            continue;
+        }
+        crlify::BufWriterWithLineEndingFix::new(File::create(file.path()).unwrap())
+            .write_all(
+                &crate::source::AbstractFs::new_from_url(format!(
+                    "https://unicode.org/review/pri555/{}",
+                    SourceDataProvider::TESTED_UNICODE_TAG
+                ))
+                .read_to_buf(file.file_name().to_str().unwrap())
+                .unwrap(),
+            )
+            .unwrap();
+    }
+}
+
+#[cfg(feature = "unstable")]
+type TailoredSegmenter = (
+    SegmenterStateMachine<'static>,
+    BTreeMap<DataIdentifierCow<'static>, SegmenterStateMachineOverride<'static>>,
+    u64,
+);
+
+#[cfg(feature = "unstable")]
+#[derive(Debug, Default)]
+pub(crate) struct NeoSegmenters {
+    line: Cache<TailoredSegmenter>,
+    word: Cache<TailoredSegmenter>,
+    sentence: Cache<TailoredSegmenter>,
+    grapheme_cluster: Cache<TailoredSegmenter>,
+}
+
+#[cfg(feature = "unstable")]
+#[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+impl SourceDataProvider {
+    fn line_segmenter(&self) -> Result<&TailoredSegmenter, DataError> {
+        self.rscd()?
+            .segmenter_cache
+            .line
+            .get_or_init(|| {
+                self.build_segmenter("LineBreak", |s| if s == "Mandatory" { 1 } else { 0 })
+            })
+            .as_ref()
+            .map_err(|&e| e)
+    }
+
+    fn word_segmenter(&self) -> Result<&TailoredSegmenter, DataError> {
+        self.rscd()?
+            .segmenter_cache
+            .word
+            .get_or_init(|| {
+                self.build_segmenter("WordBreak", |s| match s {
+                    "Letter" => WordType::Letter,
+                    "Number" => WordType::Number,
+                    _ => WordType::None,
+                } as u8)
+            })
+            .as_ref()
+            .map_err(|&e| e)
+    }
+
+    fn sentence_segmenter(&self) -> Result<&TailoredSegmenter, DataError> {
+        self.rscd()?
+            .segmenter_cache
+            .sentence
+            .get_or_init(|| {
+                self.build_segmenter(
+                    "SentenceBreak",
+                    |s| {
+                        if s == "Nonterminated" { 1 } else { 0 }
+                    },
+                )
+            })
+            .as_ref()
+            .map_err(|&e| e)
+    }
+
+    fn grapheme_cluster_segmenter(&self) -> Result<&TailoredSegmenter, DataError> {
+        self.rscd()?
+            .segmenter_cache
+            .grapheme_cluster
+            .get_or_init(|| {
+                self.build_segmenter("GraphemeClusterBreak", |s| match s {
+                    "" => 0,
+                    s => unreachable!("{s}"),
+                })
+            })
+            .as_ref()
+            .map_err(|&e| e)
+    }
+
+    fn build_segmenter(
+        &self,
+        prefix: &str,
+        status_lookup: fn(&str) -> u8,
+    ) -> Result<TailoredSegmenter, DataError> {
+        let rscd = self.rscd()?;
+
+        let mut magic_symbols = BTreeMap::new();
+        let mut complex_symbols = BTreeMap::new();
+        let symbols = rscd.read_to_string(&format!("ucd/auxiliary/{prefix}Symbols.txt"))?;
+        let symbols = symbols
+            .lines()
+            .map(|l| l.split('#').next().unwrap().trim())
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                let mut iter = line.split(';').map(str::trim);
+                let symbol = iter.next().unwrap();
+                let unicode_set = iter.next().unwrap();
+
+                if let Some(non_complex_equivalent) = iter.next()
+                    && !non_complex_equivalent.is_empty()
+                {
+                    complex_symbols.insert(symbol, non_complex_equivalent);
+                }
+
+                let set = icu::properties::unicodeset_parse::parse_unstable(unicode_set, self)
+                    .map_err(|e| {
+                        DataError::custom("unicodeset parse")
+                            .with_display_context(&e.fmt_with_source(unicode_set))
+                    })?
+                    .0;
+                for string in set.strings().iter() {
+                    assert_eq!(magic_symbols.insert(String::from(string), symbol), None);
+                }
+                let set = set.code_points().clone();
+                Ok((symbol.to_owned(), set))
+            })
+            .collect::<Result<BTreeMap<_, _>, DataError>>()?;
+        let eot_symbol = magic_symbols.remove("eot").unwrap_or("eot").to_string();
+        let magic_symbols = magic_symbols;
+        let complex_symbols = complex_symbols;
+
+        let states = rscd.read_to_string(&format!("ucd/auxiliary/{prefix}States.txt"))?;
+        let states = states
+            .lines()
+            .map(|l| l.split('#').next().unwrap().trim())
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                let mut iter = line.split(';');
+                let state = iter.next().unwrap().trim();
+                let accepting = iter.next().unwrap().trim();
+                let lookahead = iter.next().unwrap().trim();
+                let status = iter.next().unwrap().trim();
+                (
+                    state,
+                    (accepting, Some(lookahead).filter(|s| !s.is_empty()), status),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let transitions = rscd.read_to_string(&format!("ucd/auxiliary/{prefix}Transitions.txt"))?;
+        let transitions = transitions
+            .lines()
+            .map(|l| l.split('#').next().unwrap().trim())
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                let mut iter = line.split(';');
+                let state = iter.next().unwrap().trim();
+                let symbol = iter.next().unwrap().trim();
+                let next_state = iter.next().unwrap().trim();
+                ((state, symbol), next_state)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let lookaheads = states
+            .iter()
+            .flat_map(|(_, &(_, lookahead, _))| lookahead)
+            .collect::<BTreeSet<_>>();
+
+        let complex_languages = match prefix {
+            "LineBreak" => [
+                (ComplexScript::Myanmar, "[:sc=Myanmar:]&[:lb=SA:]"),
+                (ComplexScript::Khmer, "[:sc=Khmer:]&[:lb=SA:]"),
+                (ComplexScript::Lao, "[:sc=Lao:]&[:lb=SA:]"),
+                (ComplexScript::Thai, "[:sc=Thai:]&[:lb=SA:]"),
+            ]
+            .as_slice(),
+            "WordBreak" => [
+                (ComplexScript::Myanmar, "[:sc=Myanmar:]&[:lb=SA:]"),
+                (
+                    ComplexScript::ChineseOrJapanese,
+                    "[[[:sc=Han:] [:sc=Hiragana:] [:wb=Katakana:] 가-힣] - [:lb=SA:]]",
+                ),
+                (ComplexScript::Khmer, "[:sc=Khmer:]&[:lb=SA:]"),
+                (ComplexScript::Lao, "[:sc=Lao:]&[:lb=SA:]"),
+                (ComplexScript::Thai, "[:sc=Thai:]&[:lb=SA:]"),
+            ]
+            .as_slice(),
+            _ => &[],
+        }
+        .iter()
+        .map(|&(l, set)| {
+            (
+                l,
+                icu::properties::unicodeset_parse::parse_unstable(set, self)
+                    .unwrap()
+                    .0
+                    .code_points()
+                    .clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+        let mut tailorings = BTreeMap::new();
+
+        let cldr = self.cldr()?.segments();
+
+        for locale in cldr.list_locales()? {
+            if !cldr.file_exists(&locale, "tailorings.json")? {
+                continue;
+            }
+            let Some(ts) = cldr
+                .read_and_parse::<crate::cldr_serde::segmentation::Resource>(
+                    &locale,
+                    "tailorings.json",
+                )?
+                .segments
+                .segmentations
+                .0
+                .get(prefix)
+            else {
+                continue;
+            };
+
+            for (keywords, lines) in ts.iter().map(|(k, v)| (&k.extensions.unicode.keywords, v)) {
+                let mut overrides = BTreeMap::<String, BTreeSet<char>>::new();
+
+                for line in lines {
+                    let mut iter = line.split(';');
+                    let unicode_set = iter.next().unwrap().trim();
+                    let target = iter.next().unwrap().trim();
+
+                    let set = icu::properties::unicodeset_parse::parse_unstable(unicode_set, self)
+                        .map_err(|e| {
+                            DataError::custom("unicodeset parse")
+                                .with_display_context(&e.fmt_with_source(unicode_set))
+                        })?
+                        .0;
+
+                    let target = icu::properties::unicodeset_parse::parse_unstable(target, self)
+                        .map_err(|e| {
+                            DataError::custom("unicodeset parse")
+                                .with_display_context(&e.fmt_with_source(unicode_set))
+                        })?
+                        .0;
+
+                    let target_symbol = if target.has_strings() {
+                        magic_symbols[target.strings().iter().next().unwrap()]
+                    } else {
+                        let target = target.code_points().iter_chars().next().unwrap();
+                        symbols
+                            .iter()
+                            .find(|(_, set)| set.contains(target))
+                            .unwrap()
+                            .0
+                            .as_str()
+                    };
+
+                    for c in set.code_points().iter_chars() {
+                        overrides
+                            .entry(target_symbol.to_owned())
+                            .or_default()
+                            .insert(c);
+                    }
+                }
+
+                let id = if prefix == "LineBreak" {
+                    let x;
+                    DataIdentifierCow::from_marker_attributes_owned(
+                        DataMarkerAttributes::try_from_string(format!(
+                            "{}{}{}",
+                            if locale.is_unknown() {
+                                ""
+                            } else {
+                                x = locale.to_string();
+                                &x
+                            },
+                            if locale.is_unknown() || keywords.is_empty() {
+                                ""
+                            } else {
+                                "-"
+                            },
+                            keywords
+                                .get(&key!("lb"))
+                                .or_else(|| keywords.get(&key!("lw")))
+                                .map(|v| v.to_string())
+                                .unwrap_or_default()
+                        ))
+                        .unwrap(),
+                    )
+                } else {
+                    DataIdentifierCow::from_owned(
+                        DataMarkerAttributes::try_from_string(
+                            keywords
+                                .get(&key!("lb"))
+                                .or_else(|| keywords.get(&key!("lw")))
+                                .map(|v| v.to_string())
+                                .unwrap_or_default(),
+                        )
+                        .unwrap(),
+                        locale,
+                    )
+                };
+
+                tailorings.insert(
+                    id,
+                    overrides
+                        .into_iter()
+                        .map(|(k, v)| {
+                            let mut builder = CodePointInversionListBuilder::new();
+                            v.into_iter().for_each(|c| builder.add_char(c));
+                            (k, builder.build())
+                        })
+                        .collect::<BTreeMap<_, CodePointInversionList>>(),
+                );
+            }
+        }
+
+        // We now mutate the state machine.
+
+        let mut symbols = symbols;
+        let mut transitions = transitions;
+        let mut pseudo_symbol_map = BTreeMap::<String, (String, ComplexScript)>::new();
+
+        // Create pseudo symbols for complex scripts, allowing the state machine to use the correct
+        // dictionary without further lookup.
+        for (&symbol, &non_complex_symbol) in &complex_symbols {
+            let set = symbols.get(symbol).unwrap().clone();
+
+            let mut set_builder = CodePointInversionListBuilder::new();
+            set_builder.add_set(&set);
+
+            for &(language, ref language_set) in &complex_languages {
+                if language_set
+                    .iter_ranges()
+                    .all(|mut range| range.all(|c| !set.contains32(c)))
+                {
+                    // no overlap
+                    continue;
+                }
+
+                set_builder.remove_set(language_set);
+
+                let mut intersection = CodePointInversionListBuilder::new();
+                intersection.add_set(language_set);
+                for r in set.iter_ranges_complemented() {
+                    intersection.remove_range32(r);
+                }
+
+                let intersection_symbol = format!("{symbol}_{language:?}");
+
+                pseudo_symbol_map.insert(
+                    intersection_symbol.clone(),
+                    (non_complex_symbol.into(), language),
+                );
+                symbols.insert(intersection_symbol, intersection.build());
+            }
+
+            if symbol != non_complex_symbol {
+                let symbol_transitions = transitions
+                    .iter()
+                    .filter(|&(&(_, s), _)| s == symbol)
+                    .map(|(&(before, _), &after)| (before, after))
+                    .collect::<BTreeSet<_>>();
+                let non_complex_symbol_transitions = transitions
+                    .iter()
+                    .filter(|&(&(_, s), _)| s == non_complex_symbol)
+                    .map(|(&(before, _), &after)| (before, after))
+                    .collect::<BTreeSet<_>>();
+
+                if symbol_transitions == non_complex_symbol_transitions {
+                    let non_complex_set = symbols.get_mut(non_complex_symbol).unwrap();
+                    let mut non_complex_set_builder = CodePointInversionListBuilder::new();
+                    non_complex_set_builder.add_set(non_complex_set);
+                    non_complex_set_builder.add_set(&set_builder.build());
+                    *non_complex_set = non_complex_set_builder.build();
+
+                    symbols.remove(symbol);
+                    transitions.retain(|&(_, s), _| s != symbol);
+                } else {
+                    log::warn!(
+                        "{symbol}/{non_complex_symbol}: {:?} != {:?}",
+                        symbol_transitions
+                            .difference(&non_complex_symbol_transitions)
+                            .collect::<Vec<_>>(),
+                        non_complex_symbol_transitions
+                            .difference(&symbol_transitions)
+                            .collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+
+        // Create pseudo symbols for all tailorings sets.
+        for (tailoring, overrides) in tailorings.clone() {
+            for (rule, set) in overrides {
+                for (symbol, set2) in symbols.clone().into_iter().collect::<Vec<_>>() {
+                    if set.iter_chars().any(|c| set2.contains(c)) {
+                        // Overlapping sets. We need to create a new pseudo-symbol.
+                        let pseudo_symbol = format!("{symbol}_{tailoring}_{rule}");
+                        // Add the intersection as a new symbol.
+                        symbols.insert(pseudo_symbol.clone(), {
+                            let mut builder = CodePointInversionListBuilder::new();
+                            builder.add_set(&set);
+                            for r in set2.iter_ranges_complemented() {
+                                builder.remove_range32(r);
+                            }
+                            builder.build()
+                        });
+                        pseudo_symbol_map.insert(pseudo_symbol, {
+                            let mut s = &*symbol;
+                            // Non-pseudo symbols have Language::Other
+                            let mut l = ComplexScript::None;
+                            while let Some(&(ref x, y)) = pseudo_symbol_map.get(s) {
+                                s = x.as_str();
+                                l = y;
+                            }
+                            (s.to_string(), l)
+                        });
+                        // Remove the intersection from the root symbol.
+                        symbols.insert(symbol, {
+                            let mut builder = CodePointInversionListBuilder::new();
+                            builder.add_set(&set2);
+                            builder.remove_set(&set);
+                            builder.build()
+                        });
+                    }
+                }
+            }
+        }
+
+        let mut unused_pseudo_symbols = pseudo_symbol_map.keys().cloned().collect::<BTreeSet<_>>();
+        let tailorings = tailorings
+            .into_iter()
+            .map(|(tailoring, overrides)| {
+                let mut tailored_pseudo_symbol_map = BTreeMap::new();
+
+                for (target_symbol, set) in overrides {
+                    // TODO?
+                    let target_language = ComplexScript::None;
+                    // The set might cover multiple pseudo symbols
+                    for c in set.iter_chars() {
+                        let pseudo_symbol =
+                            symbols.iter().find(|(_, set)| set.contains(c)).unwrap().0;
+                        unused_pseudo_symbols.remove(pseudo_symbol);
+                        tailored_pseudo_symbol_map.insert(
+                            pseudo_symbol.to_owned(),
+                            (target_symbol.clone(), target_language),
+                        );
+                    }
+                }
+
+                (tailoring, tailored_pseudo_symbol_map)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        // Remove unused pseudo symbols. It's hard to not generate unused pseudo symbols, because when we split
+        // a previously created pseudo symbol, we don't know which half the other tailoring actually needs.
+        for unused in unused_pseudo_symbols {
+            if pseudo_symbol_map.get(&unused).unwrap().1 != ComplexScript::None {
+                continue;
+            }
+            let resolved = pseudo_symbol_map.remove(&unused).unwrap().0;
+            let set = symbols.remove(&unused).unwrap();
+            let resolved_set = symbols.get_mut(&resolved).unwrap();
+
+            let mut builder = CodePointInversionListBuilder::new();
+            builder.add_set(resolved_set);
+            builder.add_set(&set);
+            *resolved_set = builder.build();
+        }
+
+        // Remove unused symbols
+        symbols.retain(|n, set| {
+            if pseudo_symbol_map.contains_key(n) {
+                // Symbol is a pseudo symbol
+                return true;
+            }
+
+            if !set.is_empty() {
+                // Symbol used in root
+                return true;
+            }
+
+            if pseudo_symbol_map
+                .values()
+                .any(|(root_symbol, _)| root_symbol == n)
+                || tailorings.values().any(|tailored_pseudo_symbol_map| {
+                    tailored_pseudo_symbol_map
+                        .values()
+                        .any(|(target_symbol, _)| target_symbol == n)
+                })
+            {
+                // Symbol is a pseudo symbol target
+                return true;
+            }
+
+            transitions.retain(|&(_, m), _| m != n);
+
+            false
+        });
+
+        let symbols = symbols;
+        let pseudo_symbol_map = pseudo_symbol_map;
+
+        // Done. The rest of this function encodes the state machine.
+
+        let hash = {
+            use core::hash::{Hash, Hasher};
+
+            let mut hash = DataHasher::new();
+            symbols.hash(&mut hash);
+            pseudo_symbol_map.hash(&mut hash);
+            states.hash(&mut hash);
+            transitions.hash(&mut hash);
+            hash.finish()
+        };
+
+        let symbol_lookup = symbols
+            .keys()
+            .filter(|&s| s != &eot_symbol && !pseudo_symbol_map.contains_key(s))
+            .enumerate()
+            .map(|(i, symbol)| (symbol.as_str(), Symbol::try_from(i + 1).unwrap()))
+            .chain([(eot_symbol.as_str(), SegmenterStateMachine::EOT_SYMBOL)])
+            .collect::<BTreeMap<_, _>>();
+
+        let pseudo_symbol_shift = symbol_lookup.values().copied().max().unwrap() + 1;
+        let pseudo_symbol_lookup = pseudo_symbol_map
+            .keys()
+            .enumerate()
+            .map(|(i, k)| {
+                (
+                    k.as_str(),
+                    Symbol::try_from(i + usize::from(pseudo_symbol_shift)).unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        // Reserve two states for START and TRASH
+        assert!(states.len() < usize::from(State::MAX) - 2);
+        let state_lookup = core::iter::once("START")
+            .chain(states.keys().filter(|&&s| s != "START").copied())
+            .enumerate()
+            .map(|(i, state)| (state, State::try_from(i).unwrap()))
+            .collect::<BTreeMap<_, _>>();
+        assert!(lookaheads.len() < 0b11111);
+        let lookahead_lookup = lookaheads
+            .iter()
+            .enumerate()
+            .map(|(i, lookahead)| (*lookahead, Lookahead::try_from(i).unwrap()))
+            .collect::<BTreeMap<_, _>>();
+
+        use icu::collections::codepointinvlist::CodePointInversionListBuilder;
+        use icu::collections::codepointtrie::TrieType;
+        use icu_codepointtrie_builder::CodePointTrieBuilder;
+
+        let mut builder = CodePointTrieBuilder::new(0, 0, TrieType::Fast);
+        let mut missing_codepoints = CodePointInversionListBuilder::new();
+        missing_codepoints.add_set(&CodePointInversionList::all());
+        for (symbol, set) in &symbols {
+            for range in set.iter_ranges() {
+                missing_codepoints.remove_range32(range.clone());
+                builder.set_range_value(
+                    range.clone(),
+                    symbol_lookup
+                        .get(symbol.as_str())
+                        .or_else(|| pseudo_symbol_lookup.get(symbol.as_str()))
+                        .copied()
+                        .unwrap(),
+                );
+            }
+        }
+        let missing_codepoints = missing_codepoints.build();
+        assert!(missing_codepoints.is_empty(), "{missing_codepoints:?}");
+        let symbols = builder.build();
+
+        let states = states
+            .iter()
+            .map(|(&state, &(accepting, lookahead, status))| {
+                let status = status_lookup(status);
+                // This bound comes from Acceptance::to_unaligned
+                assert!(status < 0b111);
+
+                let acceptance = match accepting {
+                    "Yes" => Acceptance::Accept(status),
+                    "No" => Acceptance::Continue,
+                    l => Acceptance::Conditional(lookahead_lookup[l], status),
+                };
+
+                (
+                    state_lookup[state],
+                    (acceptance, lookahead.as_ref().map(|l| lookahead_lookup[l])),
+                )
+            })
+            .collect::<BTreeMap<_, _>>()
+            .into_values()
+            .collect();
+
+        let transitions = transitions
+            .iter()
+            .map(|(&(state, symbol), &next_state)| {
+                (
+                    usize::from(state_lookup[state])
+                        + state_lookup.len() * usize::from(symbol_lookup[symbol]),
+                    *state_lookup.get(next_state).expect(next_state),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let transitions = (0..=*transitions.last_key_value().unwrap().0)
+            .map(|i| {
+                transitions
+                    .get(&i)
+                    .copied()
+                    .unwrap_or(SegmenterStateMachine::TRASH_STATE)
+            })
+            .collect();
+
+        let build_pseudo_map = |map: &BTreeMap<String, (String, ComplexScript)>| {
+            map.iter()
+                .map(|(pseudo_symbol, &(ref symbol, complex_script))| {
+                    (
+                        pseudo_symbol_lookup[pseudo_symbol.as_str()],
+                        (symbol_lookup[symbol.as_str()], complex_script),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+                .into_values()
+                .collect()
+        };
+
+        let tailorings = tailorings
+            .into_iter()
+            .map(|(tailoring, tailored_pseudo_symbol_map)| {
+                (
+                    tailoring,
+                    SegmenterStateMachineOverride {
+                        pseudo_symbol_map: build_pseudo_map(
+                            &pseudo_symbol_map
+                                .clone()
+                                .into_iter()
+                                .chain(tailored_pseudo_symbol_map)
+                                .collect(),
+                        ),
+                    },
+                )
+            })
+            .collect();
+
+        Ok((
+            SegmenterStateMachine {
+                transitions,
+                symbols,
+                states,
+                num_lookaheads: lookahead_lookup.len(),
+                pseudo_symbol_shift,
+                pseudo_symbol_map: build_pseudo_map(&pseudo_symbol_map),
+            },
+            tailorings,
+            hash,
+        ))
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl DataProvider<SegmenterBreakLineV2> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<SegmenterBreakLineV2>, DataError> {
+        self.check_req::<SegmenterBreakLineV2>(req)?;
+
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_req(SegmenterBreakLineV2::INFO, req));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(DataResponse {
+            metadata: DataResponseMetadata::default().with_checksum(self.line_segmenter()?.2),
+            payload: DataPayload::from_owned(self.line_segmenter()?.0.clone()),
+        })
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl DataProvider<SegmenterBreakWordV2> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<SegmenterBreakWordV2>, DataError> {
+        self.check_req::<SegmenterBreakWordV2>(req)?;
+
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_req(SegmenterBreakWordV2::INFO, req));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(DataResponse {
+            metadata: DataResponseMetadata::default().with_checksum(self.word_segmenter()?.2),
+            payload: DataPayload::from_owned(self.word_segmenter()?.0.clone()),
+        })
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl DataProvider<SegmenterBreakSentenceV2> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<SegmenterBreakSentenceV2>, DataError> {
+        self.check_req::<SegmenterBreakSentenceV2>(req)?;
+
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_req(SegmenterBreakSentenceV2::INFO, req));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(DataResponse {
+            metadata: DataResponseMetadata::default().with_checksum(self.sentence_segmenter()?.2),
+            payload: DataPayload::from_owned(self.sentence_segmenter()?.0.clone()),
+        })
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl DataProvider<SegmenterBreakGraphemeClusterV2> for SourceDataProvider {
+    fn load(
+        &self,
+        req: DataRequest,
+    ) -> Result<DataResponse<SegmenterBreakGraphemeClusterV2>, DataError> {
+        self.check_req::<SegmenterBreakGraphemeClusterV2>(req)?;
+
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_req(SegmenterBreakGraphemeClusterV2::INFO, req));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(DataResponse {
+            metadata: DataResponseMetadata::default()
+                .with_checksum(self.grapheme_cluster_segmenter()?.2),
+            payload: DataPayload::from_owned(self.grapheme_cluster_segmenter()?.0.clone()),
+        })
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl IterableDataProviderCached<SegmenterBreakLineV2> for SourceDataProvider {
+    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        Ok([Default::default()].into_iter().collect())
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl IterableDataProviderCached<SegmenterBreakSentenceV2> for SourceDataProvider {
+    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        Ok([Default::default()].into_iter().collect())
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl IterableDataProviderCached<SegmenterBreakWordV2> for SourceDataProvider {
+    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        Ok([Default::default()].into_iter().collect())
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl IterableDataProviderCached<SegmenterBreakGraphemeClusterV2> for SourceDataProvider {
+    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        Ok([Default::default()].into_iter().collect())
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl DataProvider<SegmenterBreakLineOverrideV2> for SourceDataProvider {
+    fn load(
+        &self,
+        req: DataRequest,
+    ) -> Result<DataResponse<SegmenterBreakLineOverrideV2>, DataError> {
+        self.check_req::<SegmenterBreakLineOverrideV2>(req)?;
+
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_req(SegmenterBreakLineOverrideV2::INFO, req));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(DataResponse {
+            metadata: DataResponseMetadata::default().with_checksum(self.line_segmenter()?.2),
+            payload: DataPayload::from_owned(
+                self.line_segmenter()?
+                    .1
+                    .get(&req.id.as_cow())
+                    .ok_or_else(|| {
+                        DataErrorKind::IdentifierNotFound
+                            .with_req(SegmenterBreakLineOverrideV2::INFO, req)
+                    })?
+                    .clone(),
+            ),
+        })
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl IterableDataProviderCached<SegmenterBreakLineOverrideV2> for SourceDataProvider {
+    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_marker(SegmenterBreakLineOverrideV2::INFO));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(self.line_segmenter()?.1.keys().cloned().collect())
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl DataProvider<SegmenterBreakSentenceOverrideV2> for SourceDataProvider {
+    fn load(
+        &self,
+        req: DataRequest,
+    ) -> Result<DataResponse<SegmenterBreakSentenceOverrideV2>, DataError> {
+        self.check_req::<SegmenterBreakSentenceOverrideV2>(req)?;
+
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_req(SegmenterBreakSentenceOverrideV2::INFO, req));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(DataResponse {
+            metadata: DataResponseMetadata::default().with_checksum(self.sentence_segmenter()?.2),
+            payload: DataPayload::from_owned(
+                self.sentence_segmenter()?
+                    .1
+                    .get(&req.id.as_cow())
+                    .ok_or_else(|| {
+                        DataErrorKind::IdentifierNotFound
+                            .with_req(SegmenterBreakSentenceOverrideV2::INFO, req)
+                    })?
+                    .clone(),
+            ),
+        })
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl IterableDataProviderCached<SegmenterBreakSentenceOverrideV2> for SourceDataProvider {
+    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build segmentation rules",
+        )
+        .with_marker(SegmenterBreakSentenceOverrideV2::INFO));
+
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        Ok(self.sentence_segmenter()?.1.keys().cloned().collect())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -702,7 +1945,7 @@ mod tests {
     #[test]
     fn load_grapheme_cluster_data() {
         let provider = SourceDataProvider::new_testing();
-        let response: DataResponse<GraphemeClusterBreakDataV2Marker> = provider
+        let response: DataResponse<SegmenterBreakGraphemeClusterV1> = provider
             .load(Default::default())
             .expect("Loading should succeed!");
         assert_eq!(
@@ -713,9 +1956,9 @@ mod tests {
     }
 
     #[test]
-    fn load_line_data() {
+    fn load_line_data_v1() {
         let provider = SourceDataProvider::new_testing();
-        let response: DataResponse<LineBreakDataV2Marker> = provider
+        let response: DataResponse<SegmenterBreakLineV1> = provider
             .load(Default::default())
             .expect("Loading should succeed!");
         let data = response.payload.get();
@@ -730,9 +1973,9 @@ mod tests {
         //     _ => XX,
         // }
 
-        const CM: u8 = 10;
-        const XX: u8 = 45;
-        const ID: u8 = 21;
+        const CM: u8 = 14;
+        const XX: u8 = 52;
+        const ID: u8 = 25;
 
         assert_eq!(data.property_table.get32(0x20000), ID);
         assert_eq!(data.property_table.get32(0x3fffd), ID);
@@ -740,4 +1983,45 @@ mod tests {
         assert_eq!(data.property_table.get32(0xe0001), CM);
         assert_eq!(data.property_table.get32(0xe0020), CM);
     }
+
+    #[test]
+    #[cfg(feature = "unstable")]
+    fn load_line_data() {
+        let provider = SourceDataProvider::new_testing();
+        let response: DataResponse<SegmenterBreakLineV3> = provider
+            .load(Default::default())
+            .expect("Loading should succeed!");
+        let data = response.payload.get();
+        // Note: The following match statement had been used in line.rs:
+        //
+        // match codepoint {
+        //     0x20000..=0x2fffd => ID,
+        //     0x30000..=0x3fffd => ID,
+        //     0xe0001 => CM,
+        //     0xe0020..=0xe007f => CM,
+        //     0xe0100..=0xe01ef => CM,
+        //     _ => XX,
+        // }
+
+        const CM: u8 = 18;
+        const XX: u8 = 65;
+        const ID: u8 = 36;
+
+        assert_eq!(data.property_table.get32(0x20000), ID);
+        assert_eq!(data.property_table.get32(0x3fffd), ID);
+        assert_eq!(data.property_table.get32(0xd0000), XX);
+        assert_eq!(data.property_table.get32(0xe0001), CM);
+        assert_eq!(data.property_table.get32(0xe0020), CM);
+    }
+
+    #[test]
+    #[should_panic]
+    fn missing_locale_data() {
+        let provider = SourceDataProvider::new_testing();
+        let response: DataResponse<SegmenterBreakSentenceOverrideV1> = provider
+            .load(Default::default())
+            .expect("Loading should succeed!");
+        response.payload.get();
+    }
+    // TODO: Add loading override table data. But no locales in testdata.
 }

@@ -2,9 +2,6 @@
   "main": {
     "ccp": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "ccp"
       },
       "numbers": {
@@ -113,6 +110,18 @@
             }
           }
         },
+        "rationalFormats-numberSystem-cakm": {
+          "rationalPattern": "{0}⁄{1}",
+          "integerAndRationalPattern": "{0} {1}",
+          "integerAndRationalPattern-alt-superSub": "{0}⁠{1}",
+          "rationalUsage": "sometimes"
+        },
+        "rationalFormats-numberSystem-latn": {
+          "rationalPattern": "{0}⁄{1}",
+          "integerAndRationalPattern": "{0} {1}",
+          "integerAndRationalPattern-alt-superSub": "{0}⁠{1}",
+          "rationalUsage": "sometimes"
+        },
         "scientificFormats-numberSystem-cakm": {
           "standard": "#E0"
         },
@@ -139,8 +148,10 @@
             }
           },
           "standard": "#,##,##0.00¤",
+          "standard-alphaNextToNumber": "¤ #,##0.00",
           "standard-noCurrency": "#,##0.00",
           "accounting": "#,##,##0.00¤;(#,##,##0.00¤)",
+          "accounting-alphaNextToNumber": "¤ #,##0.00",
           "accounting-noCurrency": "#,##0.00",
           "short": {
             "standard": {
@@ -150,12 +161,18 @@
               "1000000-count-other": "¤ 0M",
               "10000000-count-other": "¤ 00M",
               "100000000-count-other": "¤ 000M",
-              "1000000000-count-other": "¤ 0G",
-              "10000000000-count-other": "¤ 00G",
-              "100000000000-count-other": "¤ 000G",
-              "1000000000000-count-other": "¤ 0T",
-              "10000000000000-count-other": "¤ 00T",
-              "100000000000000-count-other": "¤ 000T"
+              "1000000000-count-other": "0G¤",
+              "1000000000-count-other-alt-alphaNextToNumber": "0G ¤",
+              "10000000000-count-other": "00G¤",
+              "10000000000-count-other-alt-alphaNextToNumber": "00G ¤",
+              "100000000000-count-other": "000G¤",
+              "100000000000-count-other-alt-alphaNextToNumber": "000G ¤",
+              "1000000000000-count-other": "0T¤",
+              "1000000000000-count-other-alt-alphaNextToNumber": "0T ¤",
+              "10000000000000-count-other": "00T¤",
+              "10000000000000-count-other-alt-alphaNextToNumber": "00T ¤",
+              "100000000000000-count-other": "000T¤",
+              "100000000000000-count-other-alt-alphaNextToNumber": "000T ¤"
             }
           },
           "currencyPatternAppendISO": "{0} ¤¤",
@@ -176,8 +193,10 @@
             }
           },
           "standard": "#,##,##0.00¤",
+          "standard-alphaNextToNumber": "¤ #,##0.00",
           "standard-noCurrency": "#,##0.00",
           "accounting": "#,##,##0.00¤;(#,##,##0.00¤)",
+          "accounting-alphaNextToNumber": "¤ #,##0.00",
           "accounting-noCurrency": "#,##0.00",
           "short": {
             "standard": {
@@ -187,12 +206,18 @@
               "1000000-count-other": "¤ 0M",
               "10000000-count-other": "¤ 00M",
               "100000000-count-other": "¤ 000M",
-              "1000000000-count-other": "¤ 0G",
-              "10000000000-count-other": "¤ 00G",
-              "100000000000-count-other": "¤ 000G",
-              "1000000000000-count-other": "¤ 0T",
-              "10000000000000-count-other": "¤ 00T",
-              "100000000000000-count-other": "¤ 000T"
+              "1000000000-count-other": "0G¤",
+              "1000000000-count-other-alt-alphaNextToNumber": "0G ¤",
+              "10000000000-count-other": "00G¤",
+              "10000000000-count-other-alt-alphaNextToNumber": "00G ¤",
+              "100000000000-count-other": "000G¤",
+              "100000000000-count-other-alt-alphaNextToNumber": "000G ¤",
+              "1000000000000-count-other": "0T¤",
+              "1000000000000-count-other-alt-alphaNextToNumber": "0T ¤",
+              "10000000000000-count-other": "00T¤",
+              "10000000000000-count-other-alt-alphaNextToNumber": "00T ¤",
+              "100000000000000-count-other": "000T¤",
+              "100000000000000-count-other-alt-alphaNextToNumber": "000T ¤"
             }
           },
           "currencyPatternAppendISO": "{0} ¤¤",
@@ -213,8 +238,7 @@
         },
         "minimalPairs": {
           "pluralMinimalPairs-count-one": "𑄥𑄧𑄥𑄬{0}𑄑𑄨 𑄃𑄛𑄬𑄣𑄴 𑄈𑄬𑄣𑄧, 𑄥𑄨𑄠𑄚𑄴 𑄉𑄧𑄟𑄴",
-          "pluralMinimalPairs-count-other": "𑄥𑄧𑄥𑄬{0}𑄑𑄨 𑄃𑄛𑄬𑄣𑄴 𑄈𑄬𑄣𑄧, 𑄥𑄨𑄉𑄪𑄚𑄴 𑄉𑄧𑄟𑄴",
-          "other": "{0}?"
+          "pluralMinimalPairs-count-other": "𑄥𑄧𑄥𑄬{0}𑄑𑄨 𑄃𑄛𑄬𑄣𑄴 𑄈𑄬𑄣𑄧, 𑄥𑄨𑄉𑄪𑄚𑄴 𑄉𑄧𑄟𑄴"
         }
       }
     }

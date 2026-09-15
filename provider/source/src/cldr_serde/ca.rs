@@ -9,7 +9,11 @@
 //! Sample file:
 //! <https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-dates-full/main/en/ca-gregorian.json>
 
-use icu::datetime::provider::neo::marker_attrs::{Context, Length, PatternLength};
+use crate::cldr_serde::alt::WithAlt;
+use icu::datetime::provider::semantic_skeletons::marker_attrs::{Context, Length, PatternLength};
+use icu_pattern::DoublePlaceholder;
+use icu_pattern::PatternString;
+use icu_pattern::SinglePlaceholder;
 use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -74,12 +78,12 @@ impl<Symbols> Contexts<Symbols> {
     /// I.e. missing `standalone`s fall back to `format`, missing `short` falls back to
     /// `abbr`.
     pub(crate) fn get_symbols(&self, context: Context, length: Length) -> &Symbols {
-        if context == Context::Standalone {
-            if let Some(sym) = self.get_symbols_exact(context, length) {
-                return sym;
-            }
-            // fall back to format
+        if context == Context::Standalone
+            && let Some(sym) = self.get_symbols_exact(context, length)
+        {
+            return sym;
         }
+        // fall back to format
 
         if let Some(sym) = self.get_symbols_exact(Context::Format, length) {
             return sym;
@@ -97,10 +101,10 @@ impl<Symbols> Contexts<Symbols> {
 }
 
 #[derive(Debug, PartialEq, Clone, Deserialize)]
-pub(crate) struct MonthSymbols(pub(crate) HashMap<String, String>);
+pub(crate) struct MonthSymbols(pub(crate) HashMap<WithAlt<String>, String>);
 #[derive(Debug, PartialEq, Clone, Deserialize)]
 pub(crate) struct MonthPatternSymbols {
-    pub(crate) leap: String,
+    pub(crate) leap: PatternString<SinglePlaceholder>,
 }
 
 #[derive(Debug, PartialEq, Clone, Deserialize)]
@@ -122,6 +126,8 @@ pub(crate) struct DayPeriodSymbols {
     pub(crate) pm: Cow<'static, str>,
     pub(crate) noon: Option<Cow<'static, str>>,
     pub(crate) midnight: Option<Cow<'static, str>>,
+    #[serde(flatten)]
+    pub(crate) flexible: BTreeMap<String, Cow<'static, str>>,
 }
 
 #[derive(PartialEq, Debug, Deserialize, Clone)]
@@ -159,7 +165,7 @@ pub(crate) struct Eras {
 impl Eras {
     /// Load the era corresponding to a [`Length`] value
     ///
-    /// Panics on Length::Short
+    /// Panics on [`Length::Short`]
     pub(crate) fn load(&self, length: Length) -> &HashMap<String, String> {
         match length {
             Length::Abbr => &self.abbr,
@@ -175,9 +181,17 @@ impl Eras {
 #[derive(PartialEq, Debug, Deserialize, Clone)]
 pub(crate) struct LengthPatterns {
     pub(crate) full: LengthPattern,
+    #[serde(rename = "full-alt-ascii")]
+    pub(crate) full_alt_ascii: Option<LengthPattern>,
     pub(crate) long: LengthPattern,
+    #[serde(rename = "long-alt-ascii")]
+    pub(crate) long_alt_ascii: Option<LengthPattern>,
     pub(crate) medium: LengthPattern,
+    #[serde(rename = "medium-alt-ascii")]
+    pub(crate) medium_alt_ascii: Option<LengthPattern>,
     pub(crate) short: LengthPattern,
+    #[serde(rename = "short-alt-ascii")]
+    pub(crate) short_alt_ascii: Option<LengthPattern>,
 }
 
 #[derive(PartialEq, Debug, Deserialize, Clone)]
@@ -188,20 +202,68 @@ pub(crate) struct DateTimeFormats {
     pub(crate) short: LengthPattern,
     #[serde(rename = "availableFormats")]
     pub(crate) available_formats: AvailableFormats,
+    #[serde(rename = "appendItems")]
+    pub(crate) append_items: AppendItems,
+    #[serde(rename = "intervalFormats")]
+    pub(crate) interval_formats: Option<IntervalFormats>,
 }
 
-impl DateTimeFormats {
+#[derive(PartialEq, Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct AppendItems {
+    #[serde(rename = "Day")]
+    pub(crate) day: String,
+    #[serde(rename = "Day-Of-Week")]
+    pub(crate) day_of_week: String,
+    #[serde(rename = "Era")]
+    pub(crate) era: String,
+    #[serde(rename = "Hour")]
+    pub(crate) hour: String,
+    #[serde(rename = "Minute")]
+    pub(crate) minute: String,
+    #[serde(rename = "Month")]
+    pub(crate) month: String,
+    #[serde(rename = "Quarter")]
+    pub(crate) quarter: String,
+    #[serde(rename = "Second")]
+    pub(crate) second: String,
+    #[serde(rename = "Timezone")]
+    pub(crate) timezone: PatternString<DoublePlaceholder>,
+    #[serde(rename = "Week")]
+    pub(crate) week: String,
+    #[serde(rename = "Year")]
+    pub(crate) year: String,
+}
+
+/// dateTimeFormats-atTime, dateTimeFormats-relative
+#[derive(PartialEq, Debug, Deserialize, Clone)]
+pub(crate) struct DateTimeFormatsVariant {
+    pub(crate) standard: LengthPatterns,
+}
+
+impl DateTimeFormatsVariant {
     pub(crate) fn get_pattern(&self, length: PatternLength) -> &LengthPattern {
         match length {
-            PatternLength::Long => &self.long,
-            PatternLength::Medium => &self.medium,
-            PatternLength::Short => &self.short,
+            PatternLength::Long => &self.standard.long,
+            PatternLength::Medium => &self.standard.medium,
+            PatternLength::Short => &self.standard.short,
         }
     }
 }
 
 #[derive(PartialEq, Clone, Debug, Deserialize)]
-pub(crate) struct AvailableFormats(pub(crate) HashMap<String, String>);
+pub(crate) struct AvailableFormats(pub(crate) BTreeMap<String, String>);
+
+#[derive(PartialEq, Clone, Debug, Deserialize)]
+pub(crate) struct IntervalFormats {
+    #[serde(rename = "intervalFormatFallback")]
+    pub(crate) fallback: String,
+    #[allow(dead_code)]
+    #[serde(rename = "intervalFormatRanges")]
+    pub(crate) interval_format_ranges: HashMap<String, String>,
+    #[serde(flatten)]
+    pub(crate) patterns: HashMap<String, HashMap<String, String>>,
+}
 
 #[derive(PartialEq, Clone, Debug, Deserialize)]
 pub(crate) struct CyclicNameSets {
@@ -228,8 +290,14 @@ pub(crate) struct Dates {
     pub(crate) date_formats: LengthPatterns,
     #[serde(rename = "timeFormats")]
     pub(crate) time_formats: LengthPatterns,
+    #[serde(rename = "dateSkeletons")]
+    pub(crate) date_skeletons: LengthPatterns,
+    #[serde(rename = "timeSkeletons")]
+    pub(crate) time_skeletons: LengthPatterns,
     #[serde(rename = "dateTimeFormats")]
     pub(crate) datetime_formats: DateTimeFormats,
+    #[serde(rename = "dateTimeFormats-atTime")]
+    pub(crate) datetime_formats_at_time: DateTimeFormatsVariant,
 }
 
 #[derive(PartialEq, Debug, Deserialize)]

@@ -2,9 +2,6 @@
   "main": {
     "es-AR": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "es",
         "territory": "AR"
       },
@@ -119,7 +116,7 @@
               "referring": {
                 "formal": "{surname}, {title} {given} {given2}",
                 "formal-alt-1": "{surname} {surname2}, {title} {given} {given2}",
-                "informal": "{surname} {surname2}, {given-informal}",
+                "informal": "{surname}, {given-informal}",
                 "informal-alt-1": "{surname} {surname2}, {given-informal}"
               }
             },

@@ -2,14 +2,18 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+use crate::SourceDataProvider;
 use crate::cldr_serde;
 use crate::cldr_serde::units::data::DurationUnits;
-use crate::SourceDataProvider;
-use icu::experimental::duration::provider::{HmPadding, HmsPadding, MsPadding};
 use icu_provider::prelude::*;
+
+#[cfg(feature = "unstable")]
 use std::{borrow::Cow, collections::HashSet};
 
-use icu::experimental::duration::provider::{DigitalDurationDataV1, DigitalDurationDataV1Marker};
+#[cfg(feature = "unstable")]
+use icu::experimental::duration::provider::{DigitalDurationData, UnitsDurationDigitalV1};
+#[cfg(feature = "unstable")]
+use icu::experimental::duration::provider::{HmPadding, HmsPadding, MsPadding};
 
 /// Strips multiples of the given character from the start of the string.
 /// Returns padding size and modifies `s` to point to the stripped string.
@@ -65,17 +69,57 @@ fn strip_separated_padded_characters<'s, const N: usize>(
     ))
 }
 
-impl DataProvider<DigitalDurationDataV1Marker> for SourceDataProvider {
-    fn load(
-        &self,
-        req: DataRequest,
-    ) -> Result<DataResponse<DigitalDurationDataV1Marker>, DataError> {
-        self.check_req::<DigitalDurationDataV1Marker>(req)?;
-        let langid = req.id.locale.get_langid();
+#[cfg(feature = "unstable")]
+impl DataProvider<UnitsDurationDigitalV1> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<UnitsDurationDigitalV1>, DataError> {
+        self.check_req::<UnitsDurationDigitalV1>(req)?;
 
+        let (
+            hm_hour_pad,
+            hm_min_pad,
+            hm_sep,
+            ms_min_pad,
+            ms_sec_pad,
+            hms_hour_pad,
+            hms_min_pad,
+            hms_sec_pad,
+        ) = self.load_duration_parts_internal(req)?;
+
+        let result = DigitalDurationData {
+            separator: Cow::Owned(hm_sep.to_string()),
+            hms_padding: HmsPadding {
+                h: hms_hour_pad,
+                m: hms_min_pad,
+                s: hms_sec_pad,
+            },
+            hm_padding: HmPadding {
+                h: hm_hour_pad,
+                m: hm_min_pad,
+            },
+            ms_padding: MsPadding {
+                m: ms_min_pad,
+                s: ms_sec_pad,
+            },
+        };
+
+        Ok(DataResponse {
+            metadata: Default::default(),
+            payload: DataPayload::from_owned(result),
+        })
+    }
+}
+
+impl SourceDataProvider {
+    #[expect(clippy::type_complexity)]
+    pub(crate) fn load_duration_parts_internal(
+        &self,
+        req: DataRequest<'_>,
+    ) -> Result<(u8, u8, &str, u8, u8, u8, u8, u8), DataError> {
         // Get units
-        let units_format_data: &cldr_serde::units::data::Resource =
-            self.cldr()?.units().read_and_parse(&langid, "units.json")?;
+        let units_format_data: &cldr_serde::units::data::Resource = self
+            .cldr()?
+            .units()
+            .read_and_parse(req.id.locale, "units.json")?;
         let DurationUnits { hms, hm, ms } = &units_format_data.main.value.units.duration;
 
         // Find paddings for hm
@@ -100,44 +144,34 @@ impl DataProvider<DigitalDurationDataV1Marker> for SourceDataProvider {
             ));
         }
 
-        let result = DigitalDurationDataV1 {
-            separator: Cow::Owned(hm_sep.to_string()),
-            hms_padding: HmsPadding {
-                h: hms_hour_pad,
-                m: hms_min_pad,
-                s: hms_sec_pad,
-            },
-            hm_padding: HmPadding {
-                h: hm_hour_pad,
-                m: hm_min_pad,
-            },
-            ms_padding: MsPadding {
-                m: ms_min_pad,
-                s: ms_sec_pad,
-            },
-        };
-
-        Ok(DataResponse {
-            metadata: Default::default(),
-            payload: DataPayload::from_owned(result),
-        })
+        Ok((
+            hm_hour_pad,
+            hm_min_pad,
+            hm_sep,
+            ms_min_pad,
+            ms_sec_pad,
+            hms_hour_pad,
+            hms_min_pad,
+            hms_sec_pad,
+        ))
     }
 }
 
-impl crate::IterableDataProviderCached<DigitalDurationDataV1Marker> for SourceDataProvider {
+#[cfg(feature = "unstable")]
+impl crate::IterableDataProviderCached<UnitsDurationDigitalV1> for SourceDataProvider {
     fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
         Ok(self
             .cldr()?
             .numbers()
-            .list_langs()?
-            .filter(|langid| {
+            .list_locales()?
+            .filter(|locale| {
                 self.cldr()
                     .unwrap()
                     .units()
-                    .read_and_parse::<cldr_serde::units::data::Resource>(langid, "units.json")
+                    .read_and_parse::<cldr_serde::units::data::Resource>(locale, "units.json")
                     .is_ok()
             })
-            .map(|langid| DataIdentifierCow::from_locale(DataLocale::from(&langid)))
+            .map(DataIdentifierCow::from_locale)
             .collect())
     }
 }

@@ -4,9 +4,10 @@
 
 use core::str::FromStr;
 
-use icu_experimental::units::converter::UnitsConverter;
+use icu_experimental::units::InvalidConversionError;
 use icu_experimental::units::converter_factory::ConverterFactory;
 use icu_experimental::units::ratio::IcuRatio;
+use icu_experimental::{measure::measureunit::MeasureUnit, units::converter::UnitsConverter};
 use num_bigint::BigInt;
 use num_rational::Ratio;
 use num_traits::{Signed, ToPrimitive};
@@ -38,17 +39,19 @@ fn test_cldr_unit_tests() {
         .collect();
 
     let converter_factory = ConverterFactory::new();
-    let parser = converter_factory.parser();
 
     for test in tests {
-        let input_unit = parser
-            .try_from_str(&test.input_unit)
-            .expect("Failed to parse input unit");
-        let output_unit = parser
-            .try_from_str(&test.output_unit)
-            .expect("Failed to parse output unit");
+        if test.input_unit == "beaufort" {
+            // TODO(#6804): Support beaufort
+            continue;
+        }
 
-        let converter: UnitsConverter<Ratio<BigInt>> = converter_factory
+        let input_unit =
+            MeasureUnit::try_from_str(&test.input_unit).expect("Failed to parse input unit");
+        let output_unit =
+            MeasureUnit::try_from_str(&test.output_unit).expect("Failed to parse output unit");
+
+        let converter: UnitsConverter<&Ratio<BigInt>> = converter_factory
             .converter(&input_unit, &output_unit)
             .expect("Failed to create converter");
         let result =
@@ -57,7 +60,7 @@ fn test_cldr_unit_tests() {
         let converter_f64: UnitsConverter<f64> = converter_factory
             .converter(&input_unit, &output_unit)
             .expect("Failed to create converter for f64");
-        let result_f64 = converter_f64.convert(&1000.0);
+        let result_f64 = converter_f64.convert(1000.0);
 
         let diff_ratio = ((result.clone() - test.result.clone().get_ratio())
             / test.result.clone().get_ratio())
@@ -65,7 +68,11 @@ fn test_cldr_unit_tests() {
         assert!(
             diff_ratio <= Ratio::new(BigInt::from(1), BigInt::from(1000000)),
             "Failed test: Category: {:?}, Input Unit: {:?}, Output Unit: {:?}, Result: {:?}, Expected Result: {:?}",
-            test.category, test.input_unit, test.output_unit, result, test.result
+            test.category,
+            test.input_unit,
+            test.output_unit,
+            result,
+            test.result
         );
 
         let test_result_f64 = test
@@ -77,7 +84,11 @@ fn test_cldr_unit_tests() {
         assert!(
             diff_ratio_f64 <= 0.000001,
             "Failed test: Category: {:?}, Input Unit: {:?}, Output Unit: {:?}, Result: {:?}, Expected Result: {:?}",
-            test.category, test.input_unit, test.output_unit, result_f64, test_result_f64
+            test.category,
+            test.input_unit,
+            test.output_unit,
+            result_f64,
+            test_result_f64
         );
     }
 }
@@ -207,23 +218,16 @@ fn test_units_non_convertible() {
     ];
 
     let converter_factory = ConverterFactory::new();
-    let parser = converter_factory.parser();
 
     for (input, output) in non_convertible_units.iter() {
-        let input_unit = parser
-            .try_from_str(input)
-            .expect("Failed to parse input unit");
-        let output_unit = parser
-            .try_from_str(output)
-            .expect("Failed to parse output unit");
+        let input_unit = MeasureUnit::try_from_str(input).expect("Failed to parse input unit");
+        let output_unit = MeasureUnit::try_from_str(output).expect("Failed to parse output unit");
 
-        let result: Option<UnitsConverter<f64>> =
-            converter_factory.converter(&input_unit, &output_unit);
+        let result: Result<UnitsConverter<f64>, InvalidConversionError> =
+            converter_factory.converter::<f64>(&input_unit, &output_unit);
         assert!(
-            result.is_none(),
-            "Conversion should not be possible between {:?} and {:?}",
-            input,
-            output
+            result.is_err(),
+            "Conversion should not be possible between {input:?} and {output:?}"
         );
     }
 }
@@ -285,14 +289,10 @@ fn test_unparsable_units() {
         "meter second",
     ];
 
-    let converter_factory = ConverterFactory::new();
-    let parser = converter_factory.parser();
-
     unparsable_units.iter().for_each(|unit| {
         assert!(
-            parser.try_from_str(unit).is_err(),
-            "Unit '{}' should be unparsable but was parsed successfully.",
-            unit
+            MeasureUnit::try_from_str(unit).is_err(),
+            "Unit '{unit}' should be unparsable but was parsed successfully."
         );
     });
 }

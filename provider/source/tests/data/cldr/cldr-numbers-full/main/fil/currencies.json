@@ -2,9 +2,6 @@
   "main": {
     "fil": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "fil"
       },
       "numbers": {
@@ -143,8 +140,8 @@
           },
           "BYN": {
             "displayName": "Ruble ng Belarus",
-            "displayName-count-one": "ruble ng Belarus",
-            "displayName-count-other": "rubles ng Belarus",
+            "displayName-count-one": "Belarusian ruble",
+            "displayName-count-other": "na Belarusian ruble",
             "symbol-alt-narrow": "р."
           },
           "BYR": {
@@ -173,7 +170,9 @@
           "CHF": {
             "displayName": "Swiss Franc",
             "displayName-count-one": "Swiss franc",
-            "displayName-count-other": "Swiss francs"
+            "displayName-count-other": "Swiss francs",
+            "symbol": "CHF",
+            "symbol-alt-narrow": "Fr."
           },
           "CLP": {
             "displayName": "Piso ng Chile",
@@ -229,7 +228,8 @@
             "symbol-alt-narrow": "Kč"
           },
           "DEM": {
-            "displayName": "Deutsche Marks"
+            "displayName": "Deutsche Marks",
+            "displayName-count-other": "Deutsche Marks"
           },
           "DJF": {
             "displayName": "Djiboutian Franc",
@@ -254,7 +254,8 @@
             "displayName-count-other": "Algerian dinars"
           },
           "EEK": {
-            "displayName": "Estonian Kroon"
+            "displayName": "Estonian Kroon",
+            "displayName-count-other": "Estonian Kroon"
           },
           "EGP": {
             "displayName": "Pound ng Egypt",
@@ -290,12 +291,13 @@
           },
           "FKP": {
             "displayName": "Pound ng Falkland Islands",
-            "displayName-count-one": "pound ng Falkland Islands",
+            "displayName-count-one": "Falkland Islands pound",
             "displayName-count-other": "pounds ng Falkland Islands",
             "symbol-alt-narrow": "£"
           },
           "FRF": {
-            "displayName": "French Franc"
+            "displayName": "French Franc",
+            "displayName-count-other": "French Franc"
           },
           "GBP": {
             "displayName": "British Pound",
@@ -545,7 +547,7 @@
             "symbol-alt-narrow": "Ar"
           },
           "MKD": {
-            "displayName": "Denar ng Macedonia",
+            "displayName": "Macedonian Denar",
             "displayName-count-one": "denar ng North Macedonia",
             "displayName-count-other": "denari ng North Macedonia"
           },
@@ -723,7 +725,8 @@
           "SAR": {
             "displayName": "Saudi Riyal",
             "displayName-count-one": "Saudi riyal",
-            "displayName-count-other": "Saudi riyals"
+            "displayName-count-other": "Saudi riyals",
+            "symbol-alt-variant": "⃁"
           },
           "SBD": {
             "displayName": "Dolyar ng Solomon Islands",
@@ -760,10 +763,12 @@
             "symbol-alt-narrow": "£"
           },
           "SIT": {
-            "displayName": "Slovenian Tolar"
+            "displayName": "Slovenian Tolar",
+            "displayName-count-other": "Slovenian Tolar"
           },
           "SKK": {
-            "displayName": "Slovak Koruna"
+            "displayName": "Slovak Koruna",
+            "displayName-count-other": "Slovak Koruna"
           },
           "SLE": {
             "displayName": "Sierra Leonean Leone",
@@ -897,7 +902,8 @@
             "displayName-count-other": "Uzbekistan som"
           },
           "VEB": {
-            "displayName": "Venezuelan Bolívar (1871–2008)"
+            "displayName": "Venezuelan Bolívar (1871–2008)",
+            "displayName-count-other": "Venezuelan Bolívar (1871–2008)"
           },
           "VEF": {
             "displayName": "Bolívar ng Venezuela (2008–2018)",
@@ -941,6 +947,9 @@
             "symbol-alt-narrow": "$"
           },
           "XCG": {
+            "displayName": "Caribbean guilder",
+            "displayName-count-one": "Caribbean guilder",
+            "displayName-count-other": "Caribbean guilders",
             "symbol": "Cg."
           },
           "XOF": {
@@ -973,13 +982,19 @@
             "symbol-alt-narrow": "R"
           },
           "ZMK": {
-            "displayName": "Zambian Kwacha (1968–2012)"
+            "displayName": "Zambian Kwacha (1968–2012)",
+            "displayName-count-other": "Zambian Kwacha (1968–2012)"
           },
           "ZMW": {
             "displayName": "Zambian Kwacha",
             "displayName-count-one": "Zambian kwacha",
             "displayName-count-other": "Zambian kwachas",
             "symbol-alt-narrow": "ZK"
+          },
+          "ZWG": {
+            "displayName": "Zimbabwean Gold",
+            "displayName-count-one": "Zimbabwean gold",
+            "displayName-count-other": "Zimbabwean gold"
           }
         }
       }

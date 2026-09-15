@@ -2,101 +2,113 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::cldr_serde;
+use super::coverage_experimental::CoverageLevelForXPath;
 use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
-use core::convert::TryFrom;
+use crate::cldr_serde;
+use crate::cldr_serde::alt::{Alt, WithAlt};
+use crate::displaynames::extract_names_for_zeromap_struct;
 use icu::experimental::displaynames::provider::*;
+use icu::locale::provider::names::*;
 use icu::locale::subtags::Region;
 use icu_provider::prelude::*;
 use std::collections::{BTreeMap, HashSet};
+use zerovec::VarZeroCow;
 
-impl DataProvider<RegionDisplayNamesV1Marker> for SourceDataProvider {
-    fn load(
-        &self,
-        req: DataRequest,
-    ) -> Result<DataResponse<RegionDisplayNamesV1Marker>, DataError> {
-        self.check_req::<RegionDisplayNamesV1Marker>(req)?;
-        let langid = req.id.locale.get_langid();
+impl DataProvider<LocaleNamesRegionV0> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<LocaleNamesRegionV0>, DataError> {
+        self.check_req::<LocaleNamesRegionV0>(req)?;
 
         let data: &cldr_serde::displaynames::region::Resource = self
             .cldr()?
             .displaynames()
-            .read_and_parse(&langid, "territories.json")?;
+            .read_and_parse(req.id.locale, "territories.json")?;
 
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(RegionDisplayNamesV1::try_from(data).map_err(
-                |e| DataError::custom("data for RegionDisplayNames").with_display_context(&e),
-            )?),
+            payload: DataPayload::from_owned(RegionDisplayNames::from(data)),
         })
     }
 }
 
-impl IterableDataProviderCached<RegionDisplayNamesV1Marker> for SourceDataProvider {
-    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        Ok(self
-            .cldr()?
-            .displaynames()
-            .list_langs()?
-            .filter(|langid| {
-                // The directory might exist without territories.json
-                self.cldr()
-                    .unwrap()
-                    .displaynames()
-                    .file_exists(langid, "territories.json")
-                    .unwrap_or_default()
-            })
-            .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
-            .collect())
-    }
-}
+crate::displaynames::impl_displaynames_legacy_iter_v1!(LocaleNamesRegionV0, "territories.json");
 
-/// Substring used to denote alternative region names data variants for a given region. For example: "BA-alt-short", "TL-alt-variant".
-const ALT_SUBSTRING: &str = "-alt-";
-/// Substring used to denote short region display names data variants for a given region. For example: "BA-alt-short".
-const SHORT_SUBSTRING: &str = "-alt-short";
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesRegionMediumTinyV1,
+    Region,
+    cldr_serde::displaynames::region::Resource,
+    "territories.json",
+    regions,
+    None,
+    territory,
+    CoverageLevelForXPath::Basic | CoverageLevelForXPath::Core,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesRegionMediumLightV1,
+    Region,
+    cldr_serde::displaynames::region::Resource,
+    "territories.json",
+    regions,
+    None,
+    territory,
+    CoverageLevelForXPath::Moderate,
+);
 
-impl TryFrom<&cldr_serde::displaynames::region::Resource> for RegionDisplayNamesV1<'static> {
-    type Error = icu::locale::ParseError;
-    fn try_from(other: &cldr_serde::displaynames::region::Resource) -> Result<Self, Self::Error> {
-        let mut names = BTreeMap::new();
-        let mut short_names = BTreeMap::new();
-        for (region, value) in other.main.value.localedisplaynames.regions.iter() {
-            if let Some(region) = region.strip_suffix(SHORT_SUBSTRING) {
-                short_names.insert(Region::try_from_str(region)?.into_tinystr(), value.as_str());
-            } else if !region.contains(ALT_SUBSTRING) {
-                names.insert(Region::try_from_str(region)?.into_tinystr(), value.as_str());
-            }
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesRegionShortTinyV1,
+    Region,
+    cldr_serde::displaynames::region::Resource,
+    "territories.json",
+    regions,
+    Some(Alt::Short),
+    territory,
+    CoverageLevelForXPath::Basic,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesRegionShortLightV1,
+    Region,
+    cldr_serde::displaynames::region::Resource,
+    "territories.json",
+    regions,
+    Some(Alt::Short),
+    territory,
+    CoverageLevelForXPath::Moderate,
+);
+
+impl From<&cldr_serde::displaynames::region::Resource> for RegionDisplayNames<'static> {
+    fn from(other: &cldr_serde::displaynames::region::Resource) -> Self {
+        let extracted = extract_names_for_zeromap_struct(
+            &other.main.value.localedisplaynames.regions,
+            // TODO(#8012): Handle preference-specific alt variants, perhaps with datagen alt flags.
+            &[Alt::Variant, Alt::Chagos, Alt::Biot],
+            "region",
+            |region| Some(region.to_tinystr()),
+        );
+
+        let to_zero_map = |map: BTreeMap<tinystr::TinyAsciiStr<3>, &str>| {
+            map.into_iter()
+                .map(|(k, v)| (k.to_unvalidated(), v))
+                .collect()
+        };
+
+        Self {
+            names: to_zero_map(extracted.names),
+            short_names: to_zero_map(extracted.short_names),
         }
-        Ok(Self {
-            // Old CLDR versions may contain trivial entries, so filter
-            names: names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-            short_names: short_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-        })
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu::locale::{langid, subtags::region};
+    use icu::locale::{data_locale, subtags::region};
 
     #[test]
     fn test_basic() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<RegionDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesRegionV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -105,7 +117,7 @@ mod tests {
         assert_eq!(
             data.get()
                 .names
-                .get(&region!("AE").into_tinystr().to_unvalidated())
+                .get(&region!("AE").to_tinystr().to_unvalidated())
                 .unwrap(),
             "United Arab Emirates"
         );
@@ -115,9 +127,9 @@ mod tests {
     fn test_basic_short_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<RegionDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesRegionV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -126,9 +138,151 @@ mod tests {
         assert_eq!(
             data.get()
                 .short_names
-                .get(&region!("BA").into_tinystr().to_unvalidated())
+                .get(&region!("BA").to_tinystr().to_unvalidated())
                 .unwrap(),
             "Bosnia"
         );
+    }
+
+    #[test]
+    fn test_locale_names_region_medium_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesRegionMediumLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("AF").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Afghanistan");
+    }
+
+    #[test]
+    fn test_locale_names_region_short_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesRegionShortLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("BA").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Bosnia");
+    }
+
+    #[test]
+    fn test_locale_names_region_medium_tiny() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesRegionMediumTinyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("US").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "United States");
+    }
+
+    #[test]
+    fn test_locale_names_region_short_tiny() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesRegionShortTinyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("GB").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "UK");
+    }
+
+    /// The cartesian product of Region x (Short | Medium) x (Minimal | Core | Extended)
+    /// contains some data markers that are uninhabited. This test ensures that every region display name
+    /// key and coverage tier combination in CLDR is covered by an existing marker, so if future CLDR releases
+    /// add data for uninhabited markers, we learn about it and can take action.
+    #[test]
+    #[cfg(feature = "networking")]
+    fn test_empty_coverage_tiers_assert_no_data() {
+        use crate::displaynames::coverage_experimental::CheckAltCoverage;
+
+        let provider = SourceDataProvider::new();
+        let cldr = provider.cldr().unwrap();
+
+        crate::displaynames::coverage_experimental::for_each_cldr_key_and_tier(
+            cldr,
+            "territories.json",
+            // TODO(#8012): Handle preference-specific alt variants, perhaps with datagen alt flags.
+            &[Alt::Variant, Alt::Chagos, Alt::Biot],
+            |l| &l.territory,
+            |res: &cldr_serde::displaynames::region::Resource| {
+                &res.main.value.localedisplaynames.regions
+            },
+            |locale, key, tier| {
+                if LocaleNamesRegionMediumTinyV1::contains_key(key, tier)
+                    || LocaleNamesRegionMediumLightV1::contains_key(key, tier)
+                    || LocaleNamesRegionShortTinyV1::contains_key(key, tier)
+                    || LocaleNamesRegionShortLightV1::contains_key(key, tier)
+                {
+                    return;
+                }
+
+                panic!(
+                    "Found unexpected alt, menu, and tier combination for region: {key:?} in locale: {locale:?} and tier: {tier:?}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "networking")]
+    fn test_modern_locales_have_maximized_region_display_names() {
+        use crate::CoverageLevel;
+        use icu::locale::LocaleExpander;
+
+        let provider = SourceDataProvider::new();
+        let cldr = provider.cldr().unwrap();
+        let modern_locales = cldr.locales([CoverageLevel::Modern]).unwrap();
+
+        let expander = LocaleExpander::try_new_extended_unstable(&provider).unwrap();
+
+        let tiny_region_ids =
+            IterableDataProvider::<LocaleNamesRegionMediumTinyV1>::iter_ids(&provider).unwrap();
+
+        for data_locale in modern_locales {
+            if data_locale.is_unknown() {
+                continue;
+            }
+            let mut langid = data_locale.into_locale().id;
+            expander.maximize(&mut langid);
+            let region = langid.region.unwrap();
+
+            let data_id = DataIdentifierCow::from_borrowed_and_owned(
+                DataMarkerAttributes::from_str_or_panic(region.as_str()),
+                data_locale,
+            );
+
+            // Assert that all modern locales contain a region displayname for their maximized region in the tiny slice
+            assert!(tiny_region_ids.contains(&data_id), "{data_locale}");
+        }
     }
 }

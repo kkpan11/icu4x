@@ -2,9 +2,6 @@
   "main": {
     "es": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "es"
       },
       "dates": {
@@ -325,6 +322,10 @@
               "short": "Hmm"
             },
             "dateTimeFormats": {
+              "numericSeparators": {
+                "numericDateSeparator": "/",
+                "numericTimeSeparator": ":"
+              },
               "full": "{1}, {0}",
               "long": "{1}, {0}",
               "medium": "{1}, {0}",
@@ -335,15 +336,19 @@
                 "Bhms": "h:mm:ss B",
                 "d": "d",
                 "E": "ccc",
+                "EBh": "E h B",
                 "EBhm": "E h:mm B",
                 "EBhms": "E h:mm:ss B",
                 "Ed": "E d",
+                "Eh": "E h a",
                 "Ehm": "E, h:mm a",
                 "EHm": "E, H:mm",
                 "Ehms": "E, h:mm:ss a",
                 "EHms": "E, H:mm:ss",
                 "Gy": "y G",
-                "GyMd": "d/M/y GGGGG",
+                "GyM": "M/y G",
+                "GyMd": "d/M/y G",
+                "GyMEd": "E, d/M/y G",
                 "GyMMM": "MMM y G",
                 "GyMMMd": "d MMM y G",
                 "GyMMMEd": "E, d MMM y G",
@@ -362,6 +367,8 @@
                 "Hmsvvvv": "H:mm:ss (vvvv)",
                 "hmv": "h:mm a v",
                 "Hmv": "H:mm v",
+                "hv": "h a v",
+                "Hv": "H v",
                 "M": "L",
                 "Md": "d/M",
                 "MEd": "E, d/M",
@@ -378,40 +385,47 @@
                 "y": "y",
                 "yM": "M/y",
                 "yMd": "d/M/y",
-                "yMEd": "EEE, d/M/y",
+                "yMEd": "E, d/M/y",
                 "yMM": "M/y",
                 "yMMM": "MMM y",
                 "yMMMd": "d MMM y",
-                "yMMMEd": "EEE, d MMM y",
+                "yMMMEd": "E, d MMM y",
                 "yMMMM": "MMMM 'de' y",
                 "yMMMMd": "d 'de' MMMM 'de' y",
-                "yMMMMEd": "EEE, d 'de' MMMM 'de' y",
+                "yMMMMEd": "E, d 'de' MMMM 'de' y",
                 "yQQQ": "QQQ y",
                 "yQQQQ": "QQQQ 'de' y",
                 "yw-count-one": "'semana' w 'de' Y",
                 "yw-count-other": "'semana' w 'de' Y"
               },
               "appendItems": {
+                "Date-Timezone": "{0} {1}",
                 "Day": "{0} ({2}: {1})",
-                "Day-Of-Week": "{0} {1}",
-                "Era": "{1} {0}",
+                "Day-Of-Week": "{1}, {0}",
+                "Era": "{0} {1}",
                 "Hour": "{0} ({2}: {1})",
                 "Minute": "{0} ({2}: {1})",
                 "Month": "{0} ({2}: {1})",
                 "Quarter": "{0} ({2}: {1})",
                 "Second": "{0} ({2}: {1})",
+                "Time-Day-Of-Week": "{1}, {0}",
                 "Timezone": "{0} {1}",
                 "Week": "{0} ({2}: {1})",
                 "Year": "{1} {0}"
               },
               "intervalFormats": {
+                "intervalFormatRanges": {
+                  "mixed": "{0} – {1}",
+                  "non-numeric": "{0}–{1}",
+                  "numeric": "{0}–{1}"
+                },
                 "intervalFormatFallback": "{0} – {1}",
                 "Bh": {
-                  "B": "h B – h B",
+                  "B": "h B – h B",
                   "h": "h–h B"
                 },
                 "Bhm": {
-                  "B": "h:mm B – h:mm B",
+                  "B": "h:mm B – h:mm B",
                   "h": "h:mm–h:mm B",
                   "m": "h:mm–h:mm B"
                 },
@@ -566,6 +580,14 @@
               }
             },
             "dateTimeFormats-atTime": {
+              "standard": {
+                "full": "{1}, {0}",
+                "long": "{1} 'a' 'las' {0}",
+                "medium": "{1}, {0}",
+                "short": "{1}, {0}"
+              }
+            },
+            "dateTimeFormats-relative": {
               "standard": {
                 "full": "{1}, {0}",
                 "long": "{1}, {0}",

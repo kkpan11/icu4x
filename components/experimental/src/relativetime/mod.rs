@@ -4,8 +4,6 @@
 
 //! Relative time formatting
 
-#![warn(missing_docs)]
-
 mod format;
 pub mod options;
 pub mod provider;
@@ -14,3 +12,5 @@ mod relativetime;
 pub use format::FormattedRelativeTime;
 pub use options::RelativeTimeFormatterOptions;
 pub use relativetime::RelativeTimeFormatter;
+pub use relativetime::RelativeTimeFormatterPreferences;
+pub use relativetime::preferences;

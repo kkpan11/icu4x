@@ -21,6 +21,12 @@ pub(crate) struct CurrencyPatterns {
     #[serde(rename = "displayName")]
     pub(crate) display_name: Option<String>,
 
+    #[serde(rename = "displayName-count-0")]
+    pub(crate) explicit_zero: Option<String>,
+
+    #[serde(rename = "displayName-count-1")]
+    pub(crate) explicit_one: Option<String>,
+
     #[serde(rename = "displayName-count-zero")]
     pub(crate) zero: Option<String>,
 
@@ -38,6 +44,12 @@ pub(crate) struct CurrencyPatterns {
 
     #[serde(rename = "displayName-count-other")]
     pub(crate) other: Option<String>,
+
+    /// Decimal separator override for this currency (UTS 35 `<currency><decimal>`).
+    pub(crate) decimal: Option<String>,
+
+    /// Grouping separator override for this currency (UTS 35 `<currency><group>`).
+    pub(crate) group: Option<String>,
 }
 
 #[derive(PartialEq, Debug, Deserialize)]

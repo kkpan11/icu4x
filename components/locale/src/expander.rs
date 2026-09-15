@@ -3,9 +3,9 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use crate::provider::*;
-
-use icu_locale_core::subtags::{Language, Region, Script};
 use icu_locale_core::LanguageIdentifier;
+use icu_locale_core::subtags::{Language, Region, Script, region, script};
+use icu_locale_fallback::provider::{LikelySubtagsForLanguage, LocaleLikelySubtagsLanguageV1};
 use icu_provider::prelude::*;
 
 use crate::TransformResult;
@@ -21,30 +21,30 @@ use crate::TransformResult;
 /// use icu::locale::locale;
 /// use icu::locale::{LocaleExpander, TransformResult};
 ///
-/// let lc = LocaleExpander::new();
+/// let lc = LocaleExpander::new_common();
 ///
 /// let mut locale = locale!("zh-CN");
-/// assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
+/// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
 /// assert_eq!(locale, locale!("zh-Hans-CN"));
 ///
 /// let mut locale = locale!("zh-Hant-TW");
-/// assert_eq!(lc.maximize(&mut locale), TransformResult::Unmodified);
+/// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
 /// assert_eq!(locale, locale!("zh-Hant-TW"));
 /// ```
 ///
 /// Remove likely subtags:
 ///
 /// ```
-/// use icu::locale::{locale, LocaleExpander, TransformResult};
+/// use icu::locale::{LocaleExpander, TransformResult, locale};
 ///
-/// let lc = LocaleExpander::new();
+/// let lc = LocaleExpander::new_common();
 ///
 /// let mut locale = locale!("zh-Hans-CN");
-/// assert_eq!(lc.minimize(&mut locale), TransformResult::Modified);
+/// assert_eq!(lc.minimize(&mut locale.id), TransformResult::Modified);
 /// assert_eq!(locale, locale!("zh"));
 ///
 /// let mut locale = locale!("zh");
-/// assert_eq!(lc.minimize(&mut locale), TransformResult::Unmodified);
+/// assert_eq!(lc.minimize(&mut locale.id), TransformResult::Unmodified);
 /// assert_eq!(locale, locale!("zh"));
 /// ```
 ///
@@ -52,32 +52,32 @@ use crate::TransformResult;
 /// locales for maximization, use [`try_new_extended`](Self::try_new_extended_unstable):
 ///
 /// ```
-/// use icu::locale::{locale, LocaleExpander, TransformResult};
+/// use icu::locale::{LocaleExpander, TransformResult, locale};
 ///
 /// let lc = LocaleExpander::new_extended();
 ///
 /// let mut locale = locale!("atj");
-/// assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
+/// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
 /// assert_eq!(locale, locale!("atj-Latn-CA"));
 /// ```
 ///
 /// [UTS #35: Likely Subtags]: https://www.unicode.org/reports/tr35/#Likely_Subtags
 #[derive(Debug, Clone)]
 pub struct LocaleExpander {
-    likely_subtags_l: DataPayload<LikelySubtagsForLanguageV1Marker>,
-    likely_subtags_sr: DataPayload<LikelySubtagsForScriptRegionV1Marker>,
-    likely_subtags_ext: Option<DataPayload<LikelySubtagsExtendedV1Marker>>,
+    likely_subtags_l: DataPayload<LocaleLikelySubtagsLanguageV1>,
+    likely_subtags_sr: DataPayload<LocaleLikelySubtagsScriptRegionV1>,
+    likely_subtags_ext: Option<DataPayload<LocaleLikelySubtagsExtendedV1>>,
 }
 
 struct LocaleExpanderBorrowed<'a> {
-    likely_subtags_l: &'a LikelySubtagsForLanguageV1<'a>,
-    likely_subtags_sr: &'a LikelySubtagsForScriptRegionV1<'a>,
-    likely_subtags_ext: Option<&'a LikelySubtagsExtendedV1<'a>>,
+    likely_subtags_l: &'a LikelySubtagsForLanguage<'a>,
+    likely_subtags_sr: &'a LikelySubtagsForScriptRegion<'a>,
+    likely_subtags_ext: Option<&'a LikelySubtagsExtended<'a>>,
 }
 
 impl LocaleExpanderBorrowed<'_> {
     fn get_l(&self, l: Language) -> Option<(Script, Region)> {
-        let key = &l.into_tinystr().to_unvalidated();
+        let key = &l.to_tinystr().to_unvalidated();
         self.likely_subtags_l.language.get_copied(key).or_else(|| {
             self.likely_subtags_ext
                 .and_then(|ext| ext.language.get_copied(key))
@@ -86,8 +86,8 @@ impl LocaleExpanderBorrowed<'_> {
 
     fn get_ls(&self, l: Language, s: Script) -> Option<Region> {
         let key = &(
-            l.into_tinystr().to_unvalidated(),
-            s.into_tinystr().to_unvalidated(),
+            l.to_tinystr().to_unvalidated(),
+            s.to_tinystr().to_unvalidated(),
         );
         self.likely_subtags_l
             .language_script
@@ -100,8 +100,8 @@ impl LocaleExpanderBorrowed<'_> {
 
     fn get_lr(&self, l: Language, r: Region) -> Option<Script> {
         let key = &(
-            l.into_tinystr().to_unvalidated(),
-            r.into_tinystr().to_unvalidated(),
+            l.to_tinystr().to_unvalidated(),
+            r.to_tinystr().to_unvalidated(),
         );
         self.likely_subtags_l
             .language_region
@@ -113,7 +113,7 @@ impl LocaleExpanderBorrowed<'_> {
     }
 
     fn get_s(&self, s: Script) -> Option<(Language, Region)> {
-        let key = &s.into_tinystr().to_unvalidated();
+        let key = &s.to_tinystr().to_unvalidated();
         self.likely_subtags_sr.script.get_copied(key).or_else(|| {
             self.likely_subtags_ext
                 .and_then(|ext| ext.script.get_copied(key))
@@ -122,8 +122,8 @@ impl LocaleExpanderBorrowed<'_> {
 
     fn get_sr(&self, s: Script, r: Region) -> Option<Language> {
         let key = &(
-            s.into_tinystr().to_unvalidated(),
-            r.into_tinystr().to_unvalidated(),
+            s.to_tinystr().to_unvalidated(),
+            r.to_tinystr().to_unvalidated(),
         );
         self.likely_subtags_sr
             .script_region
@@ -135,7 +135,7 @@ impl LocaleExpanderBorrowed<'_> {
     }
 
     fn get_r(&self, r: Region) -> Option<(Language, Script)> {
-        let key = &r.into_tinystr().to_unvalidated();
+        let key = &r.to_tinystr().to_unvalidated();
         self.likely_subtags_sr.region.get_copied(key).or_else(|| {
             self.likely_subtags_ext
                 .and_then(|ext| ext.region.get_copied(key))
@@ -156,7 +156,7 @@ fn update_langid(
 ) -> TransformResult {
     let mut modified = false;
 
-    if langid.language.is_empty() && !language.is_empty() {
+    if langid.language.is_unknown() && !language.is_unknown() {
         langid.language = language;
         modified = true;
     }
@@ -209,13 +209,6 @@ fn update_langid_minimize(
     }
 }
 
-#[cfg(feature = "compiled_data")]
-impl Default for LocaleExpander {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl LocaleExpander {
     /// Creates a [`LocaleExpander`] with compiled data for commonly-used locales
     /// (locales with *Basic* or higher [CLDR coverage]).
@@ -228,16 +221,41 @@ impl LocaleExpander {
     ///
     /// [CLDR coverage]: https://www.unicode.org/reports/tr35/tr35-info.html#Coverage_Levels
     #[cfg(feature = "compiled_data")]
-    pub const fn new() -> Self {
+    pub const fn new_common() -> Self {
         LocaleExpander {
             likely_subtags_l: DataPayload::from_static_ref(
-                crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_FOR_LANGUAGE_V1_MARKER,
+                icu_locale_fallback::provider::Baked::SINGLETON_LOCALE_LIKELY_SUBTAGS_LANGUAGE_V1,
             ),
             likely_subtags_sr: DataPayload::from_static_ref(
-                crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_FOR_SCRIPT_REGION_V1_MARKER,
+                Baked::SINGLETON_LOCALE_LIKELY_SUBTAGS_SCRIPT_REGION_V1,
             ),
             likely_subtags_ext: None,
         }
+    }
+
+    icu_provider::gen_buffer_data_constructors!(() -> error: DataError,
+        functions: [
+        new_common: skip,
+        try_new_common_with_buffer_provider,
+        try_new_common_unstable,
+        Self
+    ]);
+
+    #[doc = icu_provider::gen_buffer_unstable_docs!(UNSTABLE, Self::new_common)]
+    pub fn try_new_common_unstable<P>(provider: &P) -> Result<LocaleExpander, DataError>
+    where
+        P: DataProvider<LocaleLikelySubtagsLanguageV1>
+            + DataProvider<LocaleLikelySubtagsScriptRegionV1>
+            + ?Sized,
+    {
+        let likely_subtags_l = provider.load(Default::default())?.payload;
+        let likely_subtags_sr = provider.load(Default::default())?.payload;
+
+        Ok(LocaleExpander {
+            likely_subtags_l,
+            likely_subtags_sr,
+            likely_subtags_ext: None,
+        })
     }
 
     /// Creates a [`LocaleExpander`] with compiled data for all locales.
@@ -254,23 +272,31 @@ impl LocaleExpander {
     pub const fn new_extended() -> Self {
         LocaleExpander {
             likely_subtags_l: DataPayload::from_static_ref(
-                crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_FOR_LANGUAGE_V1_MARKER,
+                icu_locale_fallback::provider::Baked::SINGLETON_LOCALE_LIKELY_SUBTAGS_LANGUAGE_V1,
             ),
             likely_subtags_sr: DataPayload::from_static_ref(
-                crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_FOR_SCRIPT_REGION_V1_MARKER,
+                Baked::SINGLETON_LOCALE_LIKELY_SUBTAGS_SCRIPT_REGION_V1,
             ),
             likely_subtags_ext: Some(DataPayload::from_static_ref(
-                crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_EXTENDED_V1_MARKER,
+                Baked::SINGLETON_LOCALE_LIKELY_SUBTAGS_EXTENDED_V1,
             )),
         }
     }
 
-    #[doc = icu_provider::gen_any_buffer_unstable_docs!(UNSTABLE, Self::new_extended)]
+    icu_provider::gen_buffer_data_constructors!(() -> error: DataError,
+        functions: [
+        new_extended: skip,
+        try_new_extended_with_buffer_provider,
+        try_new_extended_unstable,
+        Self
+    ]);
+
+    #[doc = icu_provider::gen_buffer_unstable_docs!(UNSTABLE, Self::new_extended)]
     pub fn try_new_extended_unstable<P>(provider: &P) -> Result<LocaleExpander, DataError>
     where
-        P: DataProvider<LikelySubtagsForLanguageV1Marker>
-            + DataProvider<LikelySubtagsForScriptRegionV1Marker>
-            + DataProvider<LikelySubtagsExtendedV1Marker>
+        P: DataProvider<LocaleLikelySubtagsLanguageV1>
+            + DataProvider<LocaleLikelySubtagsScriptRegionV1>
+            + DataProvider<LocaleLikelySubtagsExtendedV1>
             + ?Sized,
     {
         let likely_subtags_l = provider.load(Default::default())?.payload;
@@ -284,84 +310,7 @@ impl LocaleExpander {
         })
     }
 
-    icu_provider::gen_any_buffer_data_constructors!(() -> error: DataError,
-        functions: [
-        new_extended: skip,
-        try_new_extended_with_any_provider,
-        try_new_extended_with_buffer_provider,
-        try_new_extended_unstable,
-        Self
-    ]);
-
-    #[doc = icu_provider::gen_any_buffer_unstable_docs!(ANY, Self::new)]
-    pub fn try_new_with_any_provider(
-        provider: &(impl AnyProvider + ?Sized),
-    ) -> Result<LocaleExpander, DataError> {
-        Self::try_new_compat(&provider.as_downcasting())
-    }
-
-    #[doc = icu_provider::gen_any_buffer_unstable_docs!(BUFFER, Self::new)]
-    #[cfg(feature = "serde")]
-    pub fn try_new_with_buffer_provider(
-        provider: &(impl BufferProvider + ?Sized),
-    ) -> Result<LocaleExpander, DataError> {
-        Self::try_new_compat(&provider.as_deserializing())
-    }
-
-    #[doc = icu_provider::gen_any_buffer_unstable_docs!(UNSTABLE, Self::new)]
-    pub fn try_new_unstable<P>(provider: &P) -> Result<LocaleExpander, DataError>
-    where
-        P: DataProvider<LikelySubtagsForLanguageV1Marker>
-            + DataProvider<LikelySubtagsForScriptRegionV1Marker>
-            + ?Sized,
-    {
-        let likely_subtags_l = provider.load(Default::default())?.payload;
-        let likely_subtags_sr = provider.load(Default::default())?.payload;
-
-        Ok(LocaleExpander {
-            likely_subtags_l,
-            likely_subtags_sr,
-            likely_subtags_ext: None,
-        })
-    }
-
-    fn try_new_compat<P>(provider: &P) -> Result<LocaleExpander, DataError>
-    where
-        P: DataProvider<LikelySubtagsForLanguageV1Marker>
-            + DataProvider<LikelySubtagsForScriptRegionV1Marker>
-            + DataProvider<LikelySubtagsExtendedV1Marker>
-            + DataProvider<LikelySubtagsV1Marker>
-            + ?Sized,
-    {
-        let payload_l = provider.load(Default::default()).map(|r| r.payload);
-        let payload_sr = provider.load(Default::default()).map(|r| r.payload);
-        let payload_ext = provider.load(Default::default()).map(|r| r.payload);
-
-        let (likely_subtags_l, likely_subtags_sr, likely_subtags_ext) =
-            match (payload_l, payload_sr, payload_ext) {
-                (Ok(l), Ok(sr), Err(_)) => (l, sr, None),
-                (Ok(l), Ok(sr), Ok(ext)) => (l, sr, Some(ext)),
-                _ => {
-                    let response: DataResponse<LikelySubtagsV1Marker> =
-                        provider.load(Default::default())?;
-                    (
-                        response.payload.map_project_cloned(|st, _| {
-                            LikelySubtagsForLanguageV1::clone_from_borrowed(st)
-                        }),
-                        response.payload.map_project(|st, _| st.into()),
-                        None,
-                    )
-                }
-            };
-
-        Ok(LocaleExpander {
-            likely_subtags_l,
-            likely_subtags_sr,
-            likely_subtags_ext,
-        })
-    }
-
-    fn as_borrowed(&self) -> LocaleExpanderBorrowed {
+    fn as_borrowed(&self) -> LocaleExpanderBorrowed<'_> {
         LocaleExpanderBorrowed {
             likely_subtags_l: self.likely_subtags_l.get(),
             likely_subtags_sr: self.likely_subtags_sr.get(),
@@ -385,16 +334,16 @@ impl LocaleExpander {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{locale, LocaleExpander, TransformResult};
+    /// use icu::locale::{LocaleExpander, TransformResult, locale};
     ///
-    /// let lc = LocaleExpander::new();
+    /// let lc = LocaleExpander::new_common();
     ///
     /// let mut locale = locale!("zh-CN");
-    /// assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
+    /// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
     /// assert_eq!(locale, locale!("zh-Hans-CN"));
     ///
     /// let mut locale = locale!("zh-Hant-TW");
-    /// assert_eq!(lc.maximize(&mut locale), TransformResult::Unmodified);
+    /// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
     /// assert_eq!(locale, locale!("zh-Hant-TW"));
     /// ```
     ///
@@ -403,76 +352,92 @@ impl LocaleExpander {
     /// more languages.
     ///
     /// ```
-    /// use icu::locale::{locale, LocaleExpander, TransformResult};
+    /// use icu::locale::{LocaleExpander, TransformResult, locale};
     ///
-    /// let lc = LocaleExpander::new();
+    /// let lc = LocaleExpander::new_common();
     ///
     /// // No subtags data for ccp in the default set:
     /// let mut locale = locale!("ccp");
-    /// assert_eq!(lc.maximize(&mut locale), TransformResult::Unmodified);
+    /// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
     /// assert_eq!(locale, locale!("ccp"));
     ///
     /// // The extended set supports it:
     /// let lc = LocaleExpander::new_extended();
     /// let mut locale = locale!("ccp");
-    /// assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
+    /// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
     /// assert_eq!(locale, locale!("ccp-Cakm-BD"));
     ///
     /// // But even the extended set does not support all language subtags:
     /// let mut locale = locale!("mul");
-    /// assert_eq!(lc.maximize(&mut locale), TransformResult::Unmodified);
+    /// assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
     /// assert_eq!(locale, locale!("mul"));
     /// ```
-    pub fn maximize<T: AsMut<LanguageIdentifier>>(&self, mut langid: T) -> TransformResult {
-        let langid = langid.as_mut();
+    pub fn maximize(&self, langid: &mut LanguageIdentifier) -> TransformResult {
         let data = self.as_borrowed();
+        let (und_l, und_s, und_r) = data.get_und();
 
-        if !langid.language.is_empty() && langid.script.is_some() && langid.region.is_some() {
-            return TransformResult::Unmodified;
+        // Stripping a placeholder is itself a modification, even if no further
+        // maximization data is found afterwards (e.g. `und-Zzzz-ZZ` -> `und`).
+        let mut stripped_transform_result = TransformResult::Unmodified;
+        if langid.script == Some(script!("Zzzz")) {
+            langid.script = None;
+            stripped_transform_result = TransformResult::Modified;
+        }
+        if langid.region == Some(region!("ZZ")) {
+            langid.region = None;
+            stripped_transform_result = TransformResult::Modified;
         }
 
-        if !langid.language.is_empty() {
-            if let Some(region) = langid.region {
-                if let Some(script) = data.get_lr(langid.language, region) {
-                    return update_langid(Language::UND, Some(script), None, langid);
-                }
+        if !langid.language.is_unknown() && langid.script.is_some() && langid.region.is_some() {
+            return stripped_transform_result;
+        }
+
+        if !langid.language.is_unknown() {
+            if let Some(region) = langid.region
+                && let Some(script) = data.get_lr(langid.language, region)
+            {
+                return update_langid(Language::UNKNOWN, Some(script), None, langid);
             }
-            if let Some(script) = langid.script {
-                if let Some(region) = data.get_ls(langid.language, script) {
-                    return update_langid(Language::UND, None, Some(region), langid);
-                }
+            if let Some(script) = langid.script
+                && let Some(region) = data.get_ls(langid.language, script)
+            {
+                return update_langid(Language::UNKNOWN, None, Some(region), langid);
             }
             if let Some((script, region)) = data.get_l(langid.language) {
-                return update_langid(Language::UND, Some(script), Some(region), langid);
+                return update_langid(Language::UNKNOWN, Some(script), Some(region), langid);
             }
-            // Language not found: return unmodified.
-            return TransformResult::Unmodified;
+            // Language not found: return unmodified, unless we already
+            // stripped a placeholder subtag.
+            return stripped_transform_result;
         }
         if let Some(script) = langid.script {
-            if let Some(region) = langid.region {
-                if let Some(language) = data.get_sr(script, region) {
-                    return update_langid(language, None, None, langid);
-                }
+            if let Some(region) = langid.region
+                && let Some(language) = data
+                    .get_sr(script, region)
+                    .or_else(|| ((script, region) == (und_s, und_r)).then_some(und_l))
+            {
+                return update_langid(language, None, None, langid);
             }
-            if let Some((language, region)) = data.get_s(script) {
+            if let Some((language, region)) = data
+                .get_s(script)
+                .or_else(|| (script == und_s).then_some((und_l, und_r)))
+            {
                 return update_langid(language, None, Some(region), langid);
             }
         }
-        if let Some(region) = langid.region {
-            if let Some((language, script)) = data.get_r(region) {
-                return update_langid(language, Some(script), None, langid);
-            }
+        if let Some(region) = langid.region
+            && let Some((language, script)) = data
+                .get_r(region)
+                .or_else(|| (region == und_r).then_some((und_l, und_s)))
+        {
+            return update_langid(language, Some(script), None, langid);
         }
 
         // We failed to find anything in the und-SR, und-S, or und-R tables,
         // to fall back to bare "und"
-        debug_assert!(langid.language.is_empty());
-        update_langid(
-            data.get_und().0,
-            Some(data.get_und().1),
-            Some(data.get_und().2),
-            langid,
-        )
+        debug_assert!(langid.language.is_unknown());
+
+        stripped_transform_result
     }
 
     /// This returns a new Locale that is the result of running the
@@ -488,19 +453,19 @@ impl LocaleExpander {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{locale, LocaleExpander, TransformResult};
+    /// use icu::locale::{LocaleExpander, TransformResult, locale};
     ///
-    /// let lc = LocaleExpander::new();
+    /// let lc = LocaleExpander::new_common();
     ///
     /// let mut locale = locale!("zh-Hans-CN");
-    /// assert_eq!(lc.minimize(&mut locale), TransformResult::Modified);
+    /// assert_eq!(lc.minimize(&mut locale.id), TransformResult::Modified);
     /// assert_eq!(locale, locale!("zh"));
     ///
     /// let mut locale = locale!("zh");
-    /// assert_eq!(lc.minimize(&mut locale), TransformResult::Unmodified);
+    /// assert_eq!(lc.minimize(&mut locale.id), TransformResult::Unmodified);
     /// assert_eq!(locale, locale!("zh"));
     /// ```
-    pub fn minimize<T: AsMut<LanguageIdentifier>>(&self, langid: T) -> TransformResult {
+    pub fn minimize(&self, langid: &mut LanguageIdentifier) -> TransformResult {
         self.minimize_impl(langid, true)
     }
 
@@ -517,31 +482,26 @@ impl LocaleExpander {
     /// # Examples
     ///
     /// ```
-    /// use icu::locale::{locale, LocaleExpander, TransformResult};
+    /// use icu::locale::{LocaleExpander, TransformResult, locale};
     ///
-    /// let lc = LocaleExpander::new();
+    /// let lc = LocaleExpander::new_common();
     ///
-    /// let mut locale = locale!("zh_TW");
+    /// let mut locale = locale!("zh-TW");
     /// assert_eq!(
-    ///     lc.minimize_favor_script(&mut locale),
+    ///     lc.minimize_favor_script(&mut locale.id),
     ///     TransformResult::Modified
     /// );
-    /// assert_eq!(locale, locale!("zh_Hant"));
+    /// assert_eq!(locale, locale!("zh-Hant"));
     /// ```
-    pub fn minimize_favor_script<T: AsMut<LanguageIdentifier>>(
-        &self,
-        langid: T,
-    ) -> TransformResult {
+    pub fn minimize_favor_script(&self, langid: &mut LanguageIdentifier) -> TransformResult {
         self.minimize_impl(langid, false)
     }
 
-    fn minimize_impl<T: AsMut<LanguageIdentifier>>(
+    fn minimize_impl(
         &self,
-        mut langid: T,
+        langid: &mut LanguageIdentifier,
         favor_region: bool,
     ) -> TransformResult {
-        let langid = langid.as_mut();
-
         let mut max = langid.clone();
         self.maximize(&mut max);
 
@@ -591,46 +551,52 @@ impl LocaleExpander {
 
     // TODO(3492): consider turning this and a future get_likely_region/get_likely_language public
     #[inline]
-    pub(crate) fn get_likely_script<T: AsRef<LanguageIdentifier>>(
-        &self,
-        langid: T,
-    ) -> Option<Script> {
-        let langid = langid.as_ref();
+    #[doc(hidden)] // for testing in SourceDataProvider
+    pub fn get_likely_script(&self, langid: &LanguageIdentifier) -> Option<Script> {
         langid
             .script
+            .filter(|s| *s != script!("Zzzz"))
             .or_else(|| self.infer_likely_script(langid.language, langid.region))
     }
 
     fn infer_likely_script(&self, language: Language, region: Option<Region>) -> Option<Script> {
+        // This is an inlined and simplified `maximize`.
         let data = self.as_borrowed();
+        let (und_l, und_s, und_r) = data.get_und();
 
-        // proceed through _all possible cases_ in order of specificity
-        // (borrowed from LocaleExpander::maximize):
-        // 1. language + region
-        // 2. language
-        // 3. region
-        // we need to check all cases, because e.g. for "en-US" the default script is associated
-        // with "en" but not "en-US"
-        if language != Language::UND {
-            if let Some(region) = region {
-                // 1. we know both language and region
-                if let Some(script) = data.get_lr(language, region) {
-                    return Some(script);
-                }
+        let region = region.filter(|r| *r != region!("ZZ"));
+
+        if !language.is_unknown() {
+            if let Some(region) = region
+                && let Some(script) = data.get_lr(language, region)
+            {
+                return Some(script);
             }
-            // 2. we know language, but we either do not know region or knowing region did not help
             if let Some((script, _)) = data.get_l(language) {
                 return Some(script);
             }
+            // Language not found: return None.
+            return None;
         }
-        if let Some(region) = region {
-            // 3. we know region, but we either do not know language or knowing language did not help
-            if let Some((_, script)) = data.get_r(region) {
-                return Some(script);
-            }
+        if let Some(region) = region
+            && let Some((_, script)) = data
+                .get_r(region)
+                .or_else(|| (region == und_r).then_some((und_l, und_s)))
+        {
+            return Some(script);
         }
-        // we could not figure out the script from the given locale
+
+        // We failed to find anything in the und-SR, und-S, or und-R tables,
+        // to fall back to bare "und"
+        debug_assert!(language.is_unknown());
+
         None
+    }
+}
+
+impl AsRef<LocaleExpander> for LocaleExpander {
+    fn as_ref(&self) -> &LocaleExpander {
+        self
     }
 }
 
@@ -638,149 +604,14 @@ impl LocaleExpander {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu_locale_core::locale;
-
-    struct RejectByKeyProvider {
-        markers: Vec<DataMarkerInfo>,
-    }
-
-    impl AnyProvider for RejectByKeyProvider {
-        fn load_any(
-            &self,
-            marker: DataMarkerInfo,
-            _: DataRequest,
-        ) -> Result<AnyResponse, DataError> {
-            if self.markers.contains(&marker) {
-                return Err(DataErrorKind::MarkerNotFound.with_str_context("rejected"));
-            }
-
-            let l = crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_FOR_LANGUAGE_V1_MARKER;
-            let ext = crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_EXTENDED_V1_MARKER;
-            let sr = crate::provider::Baked::SINGLETON_LIKELY_SUBTAGS_FOR_SCRIPT_REGION_V1_MARKER;
-
-            let payload = if marker.path.hashed() == LikelySubtagsV1Marker::INFO.path.hashed() {
-                DataPayload::<LikelySubtagsV1Marker>::from_owned(LikelySubtagsV1 {
-                    language_script: l
-                        .language_script
-                        .iter_copied()
-                        .chain(ext.language_script.iter_copied())
-                        .collect(),
-                    language_region: l
-                        .language_region
-                        .iter_copied()
-                        .chain(ext.language_region.iter_copied())
-                        .collect(),
-                    language: l
-                        .language
-                        .iter_copied()
-                        .chain(ext.language.iter_copied())
-                        .collect(),
-                    script_region: ext.script_region.clone(),
-                    script: ext.script.clone(),
-                    region: ext.region.clone(),
-                    und: l.und,
-                })
-                .wrap_into_any_payload()
-            } else if marker.path.hashed() == LikelySubtagsForLanguageV1Marker::INFO.path.hashed() {
-                DataPayload::<LikelySubtagsForLanguageV1Marker>::from_static_ref(l)
-                    .wrap_into_any_payload()
-            } else if marker.path.hashed() == LikelySubtagsExtendedV1Marker::INFO.path.hashed() {
-                DataPayload::<LikelySubtagsExtendedV1Marker>::from_static_ref(ext)
-                    .wrap_into_any_payload()
-            } else if marker.path.hashed()
-                == LikelySubtagsForScriptRegionV1Marker::INFO.path.hashed()
-            {
-                DataPayload::<LikelySubtagsForScriptRegionV1Marker>::from_static_ref(sr)
-                    .wrap_into_any_payload()
-            } else {
-                return Err(DataErrorKind::MarkerNotFound.into_error());
-            };
-
-            Ok(AnyResponse {
-                payload,
-                metadata: Default::default(),
-            })
-        }
-    }
-
-    #[test]
-    fn test_old_keys() {
-        let provider = RejectByKeyProvider {
-            markers: vec![
-                LikelySubtagsForLanguageV1Marker::INFO,
-                LikelySubtagsForScriptRegionV1Marker::INFO,
-                LikelySubtagsExtendedV1Marker::INFO,
-            ],
-        };
-        let lc = LocaleExpander::try_new_with_any_provider(&provider)
-            .expect("should create with old keys");
-        let mut locale = locale!("zh-CN");
-        assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
-        assert_eq!(locale, locale!("zh-Hans-CN"));
-    }
-
-    #[test]
-    fn test_new_keys() {
-        let provider = RejectByKeyProvider {
-            markers: vec![LikelySubtagsV1Marker::INFO],
-        };
-        let lc = LocaleExpander::try_new_with_any_provider(&provider)
-            .expect("should create with new keys");
-        let mut locale = locale!("zh-CN");
-        assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
-        assert_eq!(locale, locale!("zh-Hans-CN"));
-    }
-
-    #[test]
-    fn test_mixed_keys() {
-        // Include the old key and one of the new keys but not both new keys.
-        // Not sure if this is a useful test.
-        let provider = RejectByKeyProvider {
-            markers: vec![LikelySubtagsForScriptRegionV1Marker::INFO],
-        };
-        let lc = LocaleExpander::try_new_with_any_provider(&provider)
-            .expect("should create with mixed keys");
-        let mut locale = locale!("zh-CN");
-        assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
-        assert_eq!(locale, locale!("zh-Hans-CN"));
-    }
-
-    #[test]
-    fn test_no_keys() {
-        let provider = RejectByKeyProvider {
-            markers: vec![
-                LikelySubtagsForLanguageV1Marker::INFO,
-                LikelySubtagsForScriptRegionV1Marker::INFO,
-                LikelySubtagsV1Marker::INFO,
-            ],
-        };
-        if LocaleExpander::try_new_with_any_provider(&provider).is_ok() {
-            panic!("should not create: no data present")
-        };
-    }
-
-    #[test]
-    fn test_new_small_keys() {
-        // Include the new small keys but not the extended key
-        let provider = RejectByKeyProvider {
-            markers: vec![
-                LikelySubtagsExtendedV1Marker::INFO,
-                LikelySubtagsV1Marker::INFO,
-            ],
-        };
-        let lc = LocaleExpander::try_new_with_any_provider(&provider)
-            .expect("should create with mixed keys");
-        let mut locale = locale!("zh-CN");
-        assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
-        assert_eq!(locale, locale!("zh-Hans-CN"));
-    }
+    use icu_locale_core::{locale, subtags::script};
 
     #[test]
     fn test_minimize_favor_script() {
-        let lc = LocaleExpander::new();
+        let lc = LocaleExpander::new_common();
         let mut locale = locale!("yue-Hans");
         assert_eq!(
-            lc.minimize_favor_script(&mut locale),
+            lc.minimize_favor_script(&mut locale.id),
             TransformResult::Unmodified
         );
         assert_eq!(locale, locale!("yue-Hans"));
@@ -788,9 +619,116 @@ mod tests {
 
     #[test]
     fn test_minimize_favor_region() {
-        let lc = LocaleExpander::new();
+        let lc = LocaleExpander::new_common();
         let mut locale = locale!("yue-Hans");
-        assert_eq!(lc.minimize(&mut locale), TransformResult::Modified);
+        assert_eq!(lc.minimize(&mut locale.id), TransformResult::Modified);
         assert_eq!(locale, locale!("yue-CN"));
+    }
+
+    #[test]
+    fn test_get_likely_script() {
+        let lc = LocaleExpander::new_common();
+
+        assert_eq!(lc.get_likely_script(&locale!("und").id), None);
+
+        assert_eq!(
+            lc.get_likely_script(&locale!("en").id),
+            Some(script!("Latn"))
+        );
+        assert_eq!(
+            lc.get_likely_script(&locale!("en-US").id),
+            Some(script!("Latn"))
+        );
+        assert_eq!(
+            lc.get_likely_script(&locale!("und-US").id),
+            Some(script!("Latn"))
+        );
+
+        assert_eq!(
+            lc.get_likely_script(&locale!("und-SA").id),
+            Some(script!("Arab"))
+        );
+
+        assert_eq!(lc.get_likely_script(&locale!("tlh").id), None);
+        assert_eq!(lc.get_likely_script(&locale!("tlh-US").id), None);
+        assert_eq!(lc.get_likely_script(&locale!("tlh-SA").id), None);
+
+        // A placeholder 'Zzzz' script on the input shouldn't be returned
+        // verbatim; it should be treated like no script at all.
+        // Mirrors the cases covered for `maximize` above.
+        assert_eq!(
+            lc.get_likely_script(&locale!("de-Zzzz").id),
+            Some(script!("Latn"))
+        );
+        assert_eq!(
+            lc.get_likely_script(&locale!("de-Zzzz-ZZ").id),
+            Some(script!("Latn"))
+        );
+        assert_eq!(lc.get_likely_script(&locale!("und-ZZ").id), None);
+    }
+
+    #[test]
+    fn test_maximize() {
+        let lc = LocaleExpander::new_common();
+
+        let mut locale;
+
+        locale = locale!("und");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
+
+        locale = locale!("en");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("en-Latn-US"));
+
+        locale = locale!("en-US");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("en-Latn-US"));
+
+        locale = locale!("und-US");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("en-Latn-US"));
+
+        locale = locale!("und-SA");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("ar-Arab-SA"));
+
+        locale = locale!("tlh");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
+        locale = locale!("tlh-US");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
+        locale = locale!("tlh-SA");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
+    }
+
+    #[test]
+    fn test_maximize_strips_placeholder_subtags() {
+        let lc = LocaleExpander::new_extended();
+
+        let mut locale = locale!("de-Latn-ZZ");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("de-Latn-DE"));
+
+        let mut locale = locale!("de-Zzzz-DE");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("de-Latn-DE"));
+
+        let mut locale = locale!("de-Zzzz-ZZ");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("de-Latn-DE"));
+    }
+
+    #[test]
+    fn test_maximize_strips_placeholder_subtags_no_further_data() {
+        let lc = LocaleExpander::new_extended();
+
+        // Stripping the placeholders is itself a modification, even when no
+        // further maximization data is found afterwards.
+        let mut locale = locale!("und-Zzzz-ZZ");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("und"));
+
+        let mut locale = locale!("tlh-Zzzz-ZZ");
+        assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
+        assert_eq!(locale, locale!("tlh"));
     }
 }

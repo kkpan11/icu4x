@@ -2,52 +2,56 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use icu_calendar::Gregorian;
+use icu_calendar::{Date, Gregorian};
 use icu_datetime::{
-    options::{components, length, preferences},
-    DateTimeFormatterOptions, TypedDateTimeFormatter,
+    FixedCalendarDateTimeFormatter,
+    fieldsets::{self, enums::*},
+    options::{Alignment, SubsecondDigits, TimePrecision, YearStyle},
+    provider::fields::components,
 };
-use icu_locale_core::locale;
 use icu_locale_core::Locale;
+use icu_locale_core::{locale, preferences::extensions::unicode::keywords::HourCycle};
+use icu_time::{DateTime, Time};
 
 fn assert_resolved_components(
-    options: DateTimeFormatterOptions,
+    skeleton: CompositeDateTimeFieldSet,
     bag: &components::Bag,
     locale: Locale,
 ) {
-    let dtf = TypedDateTimeFormatter::<Gregorian>::try_new_experimental(&locale.into(), options)
-        .expect("Failed to create a TypedDateTimeFormatter.");
-
-    assert_eq!(dtf.resolve_components(), *bag);
+    let dtf =
+        FixedCalendarDateTimeFormatter::<Gregorian, _>::try_new(locale.into(), skeleton).unwrap();
+    let datetime = DateTime {
+        date: Date::try_new_gregorian(2024, 1, 1).unwrap(),
+        time: Time::start_of_day(),
+    };
+    let resolved_pattern = dtf.format(&datetime).pattern();
+    assert_eq!(components::Bag::from(&resolved_pattern), *bag);
 }
 
 #[test]
 fn test_length_date() {
-    let length_bag = length::Bag::from_date_style(length::Date::Medium);
+    let skeleton = CompositeDateTimeFieldSet::Date(DateFieldSet::YMD(fieldsets::YMD::medium()));
 
     let mut components_bag = components::Bag::default();
     components_bag.year = Some(components::Year::Numeric);
     components_bag.month = Some(components::Month::Short);
     components_bag.day = Some(components::Day::NumericDayOfMonth);
-    assert_resolved_components(
-        DateTimeFormatterOptions::Length(length_bag),
-        &components_bag,
-        locale!("en"),
-    );
+
+    assert_resolved_components(skeleton, &components_bag, locale!("en"));
 }
 
 #[test]
 fn test_length_time() {
-    let length_bag = length::Bag::from_time_style(length::Time::Medium);
+    let skeleton = CompositeDateTimeFieldSet::Time(TimeFieldSet::T(fieldsets::T::medium()));
+
     let mut components_bag = components::Bag::default();
     components_bag.hour = Some(components::Numeric::Numeric);
     components_bag.minute = Some(components::Numeric::TwoDigit);
     components_bag.second = Some(components::Numeric::TwoDigit);
-    components_bag.preferences = Some(preferences::Bag::from_hour_cycle(
-        preferences::HourCycle::H12,
-    ));
+    components_bag.hour_cycle = Some(HourCycle::H12);
+
     assert_resolved_components(
-        DateTimeFormatterOptions::Length(length_bag),
+        skeleton,
         &components_bag,
         "en-u-hc-h12".parse::<Locale>().unwrap(),
     );
@@ -55,45 +59,89 @@ fn test_length_time() {
 
 #[test]
 fn test_length_time_preferences() {
-    let length_bag = length::Bag::from_time_style(length::Time::Medium);
+    let skeleton = CompositeDateTimeFieldSet::Time(TimeFieldSet::T(
+        fieldsets::T::medium().with_alignment(Alignment::Column),
+    ));
 
     let mut components_bag = components::Bag::default();
     components_bag.hour = Some(components::Numeric::TwoDigit);
     components_bag.minute = Some(components::Numeric::TwoDigit);
     components_bag.second = Some(components::Numeric::TwoDigit);
-    components_bag.preferences = Some(preferences::Bag::from_hour_cycle(
-        preferences::HourCycle::H24,
-    ));
+    components_bag.hour_cycle = Some(HourCycle::H23);
 
     assert_resolved_components(
-        DateTimeFormatterOptions::Length(length_bag),
+        skeleton,
         &components_bag,
-        "en-u-hc-h24".parse::<Locale>().unwrap(),
+        "en-u-hc-h23".parse::<Locale>().unwrap(),
     );
 }
 
 #[test]
-fn test_components_bag() {
+fn test_date_and_time() {
+    let skeleton = CompositeDateTimeFieldSet::DateTime(DateAndTimeFieldSet::YMDET(
+        fieldsets::YMDET::medium()
+            .with_year_style(YearStyle::WithEra)
+            .with_alignment(Alignment::Column)
+            .with_time_precision(TimePrecision::Subsecond(SubsecondDigits::S4)),
+    ));
+
     let mut input_bag = components::Bag::default();
     input_bag.era = Some(components::Text::Short);
     input_bag.year = Some(components::Year::Numeric);
     input_bag.month = Some(components::Month::Numeric);
     input_bag.day = Some(components::Day::TwoDigitDayOfMonth);
-    input_bag.weekday = Some(components::Text::Long);
-    input_bag.hour = Some(components::Numeric::Numeric);
+    input_bag.weekday = Some(components::Text::Short);
+    input_bag.hour = Some(components::Numeric::TwoDigit);
     input_bag.minute = Some(components::Numeric::TwoDigit);
     input_bag.second = Some(components::Numeric::TwoDigit);
-    input_bag.fractional_second = Some(4);
-    input_bag.preferences = None;
+    input_bag.subsecond = Some(SubsecondDigits::S4);
+    input_bag.hour_cycle = None;
     let mut output_bag = input_bag; // make a copy
     output_bag.month = Some(components::Month::Short);
-    output_bag.preferences = Some(preferences::Bag::from_hour_cycle(
-        preferences::HourCycle::H23,
-    ));
+    output_bag.hour_cycle = Some(HourCycle::H23);
 
     assert_resolved_components(
-        DateTimeFormatterOptions::Components(input_bag),
+        skeleton,
         &output_bag,
         "en-u-hc-h23".parse::<Locale>().unwrap(),
     );
+}
+
+/// More thorough test of `components::Bag::hour_cycle` across multiple locales,
+/// including region-based defaults and explicit overrides.
+/// Fixes <https://github.com/unicode-org/icu4x/issues/594>.
+#[test]
+fn test_hour_cycle_resolved_components() {
+    let skeleton = CompositeDateTimeFieldSet::Time(TimeFieldSet::T(fieldsets::T::short()));
+
+    let check = |locale_str: &str, expected: HourCycle| {
+        let locale: Locale = locale_str.parse().unwrap();
+        let dtf = FixedCalendarDateTimeFormatter::<Gregorian, _>::try_new(locale.into(), skeleton)
+            .unwrap();
+        let datetime = DateTime {
+            date: Date::try_new_gregorian(2024, 1, 15).unwrap(),
+            time: Time::try_new(21, 22, 0, 0).unwrap(),
+        };
+        let bag = components::Bag::from(&dtf.format(&datetime).pattern());
+        assert_eq!(
+            bag.hour_cycle,
+            Some(expected),
+            "{locale_str}: expected {expected:?}, got {:?}",
+            bag.hour_cycle,
+        );
+    };
+
+    // h12 locales
+    check("en", HourCycle::H12);
+    check("ko", HourCycle::H12);
+
+    // h23 locales
+    check("fr", HourCycle::H23);
+    check("ja", HourCycle::H23);
+    check("de", HourCycle::H23);
+    check("en-GB", HourCycle::H23); // same language, different region
+
+    // explicit -u-hc- overrides
+    check("fr-u-hc-h12", HourCycle::H12);
+    check("en-u-hc-h23", HourCycle::H23);
 }

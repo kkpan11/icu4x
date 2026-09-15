@@ -2,9 +2,6 @@
   "main": {
     "ja": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "ja"
       },
       "dates": {
@@ -1110,6 +1107,10 @@
               "short": "Hmm"
             },
             "dateTimeFormats": {
+              "numericSeparators": {
+                "numericDateSeparator": "/",
+                "numericTimeSeparator": ":"
+              },
               "full": "{1} {0}",
               "long": "{1} {0}",
               "medium": "{1} {0}",
@@ -1120,6 +1121,7 @@
                 "Bhms": "BK:mm:ss",
                 "d": "d日",
                 "E": "ccc",
+                "EBh": "BK時 (E)",
                 "EBhm": "BK:mm (E)",
                 "EBhms": "BK:mm:ss (E)",
                 "Ed": "d日(E)",
@@ -1139,6 +1141,8 @@
                 "Hm": "H:mm",
                 "hms": "aK:mm:ss",
                 "Hms": "H:mm:ss",
+                "hv": "aK時 v",
+                "Hv": "H時 v",
                 "M": "MMM",
                 "Md": "M/d",
                 "MEd": "M/d(E)",
@@ -1171,26 +1175,33 @@
                 "yyyyQQQQ": "U年QQQQ"
               },
               "appendItems": {
+                "Date-Timezone": "{0} {1}",
                 "Day": "{0} ({2}: {1})",
-                "Day-Of-Week": "{0} {1}",
+                "Day-Of-Week": "{0}({1})",
                 "Era": "{1} {0}",
                 "Hour": "{0} ({2}: {1})",
                 "Minute": "{0} ({2}: {1})",
                 "Month": "{0} ({2}: {1})",
                 "Quarter": "{0} ({2}: {1})",
                 "Second": "{0} ({2}: {1})",
+                "Time-Day-Of-Week": "{0} ({1})",
                 "Timezone": "{0} {1}",
                 "Week": "{0} ({2}: {1})",
                 "Year": "{1} {0}"
               },
               "intervalFormats": {
+                "intervalFormatRanges": {
+                  "mixed": "{0}～{1}",
+                  "non-numeric": "{0}～{1}",
+                  "numeric": "{0}～{1}"
+                },
                 "intervalFormatFallback": "{0}～{1}",
                 "Bh": {
-                  "B": "h B – h B",
+                  "B": "h B – h B",
                   "h": "h–h B"
                 },
                 "Bhm": {
-                  "B": "h:mm B – h:mm B",
+                  "B": "h:mm B – h:mm B",
                   "h": "h:mm–h:mm B",
                   "m": "h:mm–h:mm B"
                 },
@@ -1292,6 +1303,14 @@
               }
             },
             "dateTimeFormats-atTime": {
+              "standard": {
+                "full": "{1} {0}",
+                "long": "{1} {0}",
+                "medium": "{1} {0}",
+                "short": "{1} {0}"
+              }
+            },
+            "dateTimeFormats-relative": {
               "standard": {
                 "full": "{1} {0}",
                 "long": "{1} {0}",

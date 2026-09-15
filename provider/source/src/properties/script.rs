@@ -3,66 +3,133 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use crate::SourceDataProvider;
-use icu::collections::codepointtrie::CodePointTrie;
-use icu::properties::provider::{
-    ScriptWithExtensionsPropertyV1, ScriptWithExtensionsPropertyV1Marker,
-};
+use icu::collections::codepointtrie::TrieValue;
+use icu::properties::props::EnumeratedProperty;
+use icu::properties::props::Script;
+use icu::properties::provider::{PropertyScriptWithExtensionsV1, ScriptWithExtensionsProperty};
 use icu::properties::script::ScriptWithExt;
-use icu::properties::Script;
+use icu::properties::{CodePointMapData, PropertyParser};
 use icu_provider::prelude::*;
-use std::collections::HashSet;
-use std::convert::TryFrom;
+use std::collections::{HashMap, HashSet};
 use zerovec::{VarZeroVec, ZeroSlice, ZeroVec};
 
 // implement data provider
-impl DataProvider<ScriptWithExtensionsPropertyV1Marker> for SourceDataProvider {
+impl DataProvider<PropertyScriptWithExtensionsV1> for SourceDataProvider {
     fn load(
         &self,
         req: DataRequest,
-    ) -> Result<DataResponse<ScriptWithExtensionsPropertyV1Marker>, DataError> {
-        self.check_req::<ScriptWithExtensionsPropertyV1Marker>(req)?;
-        let scx_data = self
-            .icuexport()?
-            .read_and_parse_toml::<super::uprops_serde::script_extensions::Main>(&format!(
-                "uprops/{}/scx.toml",
-                self.trie_type(),
-            ))?
-            .script_extensions
-            .first()
-            .ok_or_else(|| DataError::custom("Could not parse Script_Extensions data from TOML"))?;
+    ) -> Result<DataResponse<PropertyScriptWithExtensionsV1>, DataError> {
+        self.check_req::<PropertyScriptWithExtensionsV1>(req)?;
 
-        let cpt_data = &scx_data.code_point_trie;
-        let scx_array_data = &scx_data.script_code_array;
+        self.validate_property_name(
+            str::from_utf8(Script::NAME).unwrap(),
+            str::from_utf8(Script::SHORT_NAME).unwrap(),
+        )?;
 
-        let trie = CodePointTrie::<ScriptWithExt>::try_from(cpt_data).map_err(|e| {
-            DataError::custom("Could not parse CodePointTrie TOML").with_display_context(&e)
-        })?;
+        #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+        return Err(DataError::custom(
+            "icu_provider_source must be built with use_icu4c or use_wasm to build properties data",
+        )
+        .with_req(PropertyScriptWithExtensionsV1::INFO, req));
 
-        // Convert the input from Vec<Vec<u16>> to Vec<ZeroVec<Script>> so that
-        // we can go through the VarZeroVec construction process for a desired result
-        // type of VZV<ZeroSlice<Script>>
-        let ule_scx_array_data: Vec<ZeroVec<Script>> = scx_array_data
-            .iter()
-            .map(|v| v.iter().map(|i| Script(*i)).collect::<ZeroVec<Script>>())
-            .collect::<Vec<ZeroVec<Script>>>();
-        let scx_vzv: VarZeroVec<ZeroSlice<Script>> =
-            VarZeroVec::from(ule_scx_array_data.as_slice());
+        #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+        {
+            let data = if let Some(t) = self
+                .rscd()?
+                .cpt_cache
+                .get(str::from_utf8(Script::SHORT_NAME).unwrap())
+                .and_then(|t| t.downcast_ref::<ScriptWithExtensionsProperty>().cloned())
+            {
+                t
+            } else {
+                let script_parser = PropertyParser::<Script>::try_new_unstable(&self)?;
+                let script = CodePointMapData::try_new_unstable(self)?;
 
-        let data_struct = ScriptWithExtensionsPropertyV1 {
-            trie,
-            extensions: scx_vzv,
-        };
+                let mut script_sets = vec![];
+                let mut script_sets_lookup = HashMap::new();
 
-        Ok(DataResponse {
-            metadata: Default::default(),
-            payload: DataPayload::from_owned(data_struct),
-        })
+                let mut char_with_extensions = HashMap::new();
+
+                for line in self.rscd()?.parse_ucd_lines("ucd/ScriptExtensions.txt")? {
+                    let Some(line) = line.skip_missing_rule() else {
+                        continue;
+                    };
+                    let mut fields = line.fields();
+                    let cp_range = fields.next().unwrap();
+                    let values = fields.next().unwrap();
+                    let mut value = values
+                        .split_ascii_whitespace()
+                        .filter_map(|s| script_parser.as_borrowed().get_strict(s))
+                        .collect::<Vec<_>>();
+                    // Sort in stable order
+                    value.sort_by_key(|s| s.to_u32());
+
+                    let cp_range = super::ucd_helpers::parse_range(cp_range);
+
+                    for cp in cp_range {
+                        let mut value = value.clone();
+
+                        let script = script.as_borrowed().get32(cp);
+                        if !matches!(script, Script::Inherited | Script::Common) {
+                            value.insert(0, script);
+                        }
+
+                        if !script_sets_lookup.contains_key(&value) {
+                            script_sets_lookup.insert(value.clone(), script_sets.len());
+                            script_sets.push(value.clone());
+                        }
+
+                        char_with_extensions.insert(
+                            cp,
+                            ScriptWithExt::new(script, script_sets_lookup[&value] as u16),
+                        );
+                    }
+                }
+
+                let mut builder = icu_codepointtrie_builder::CodePointTrieBuilder::new(
+                    ScriptWithExt::single(Script::Unknown),
+                    ScriptWithExt::single(Script::Unknown),
+                    icu::collections::codepointtrie::TrieType::Small,
+                );
+
+                for cp in 0..(char::MAX as u32) {
+                    builder.set_value(
+                        cp,
+                        char_with_extensions.get(&cp).copied().unwrap_or_else(|| {
+                            ScriptWithExt::single(script.as_borrowed().get32(cp))
+                        }),
+                    );
+                }
+
+                let extensions: VarZeroVec<ZeroSlice<Script>> = VarZeroVec::from(
+                    script_sets
+                        .into_iter()
+                        .map(|v| v.into_iter().collect::<ZeroVec<_>>())
+                        .collect::<Vec<ZeroVec<_>>>()
+                        .as_slice(),
+                );
+
+                let trie = builder.build();
+
+                let data = ScriptWithExtensionsProperty { trie, extensions };
+
+                self.rscd()?.cpt_cache.insert(
+                    str::from_utf8(Script::SHORT_NAME).unwrap(),
+                    Box::new(data.clone()),
+                );
+
+                data
+            };
+
+            Ok(DataResponse {
+                metadata: Default::default(),
+                payload: DataPayload::from_owned(data),
+            })
+        }
     }
 }
 
-impl crate::IterableDataProviderCached<ScriptWithExtensionsPropertyV1Marker>
-    for SourceDataProvider
-{
+impl crate::IterableDataProviderCached<PropertyScriptWithExtensionsV1> for SourceDataProvider {
     fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
         Ok(HashSet::from_iter([Default::default()]))
     }
@@ -76,79 +143,83 @@ mod tests {
     fn test_script_val_from_script_extensions() {
         let provider = SourceDataProvider::new_testing();
 
-        let swe = icu::properties::script::load_script_with_extensions_unstable(&provider).unwrap();
+        let swe =
+            icu::properties::script::ScriptWithExtensions::try_new_unstable(&provider).unwrap();
         let swe = swe.as_borrowed();
 
-        assert_eq!(swe.get_script_val('𐓐' as u32), Script::Osage); // U+104D0 OSAGE CAPITAL LETTER KHA
-        assert_eq!(swe.get_script_val('🥳' as u32), Script::Common); // U+1F973 FACE WITH PARTY HORN AND PARTY HAT
-        assert_eq!(swe.get_script_val(0x200D), Script::Inherited); // ZERO WIDTH JOINER
-        assert_eq!(swe.get_script_val('௫' as u32), Script::Tamil); // U+0BEB TAMIL DIGIT FIVE
-        assert_eq!(swe.get_script_val(0x11303), Script::Grantha); // GRANTHA SIGN VISARGA
-        assert_eq!(swe.get_script_val(0x30A0), Script::Common); // U+30A0 KATAKANA-HIRAGANA DOUBLE HYPHEN
+        assert_eq!(swe.get_script_val('𐓐'), Script::Osage); // U+104D0 OSAGE CAPITAL LETTER KHA
+        assert_eq!(swe.get_script_val('🥳'), Script::Common); // U+1F973 FACE WITH PARTY HORN AND PARTY HAT
+        assert_eq!(swe.get_script_val32(0x200D), Script::Inherited); // ZERO WIDTH JOINER
+        assert_eq!(swe.get_script_val('௫'), Script::Tamil); // U+0BEB TAMIL DIGIT FIVE
+        assert_eq!(swe.get_script_val32(0x11303), Script::Grantha); // GRANTHA SIGN VISARGA
+        assert_eq!(swe.get_script_val32(0x30A0), Script::Common); // U+30A0 KATAKANA-HIRAGANA DOUBLE HYPHEN
     }
 
     #[test]
     fn test_scx_array_from_script_extensions() {
         let provider = SourceDataProvider::new_testing();
 
-        let swe = icu::properties::script::load_script_with_extensions_unstable(&provider).unwrap();
+        let swe =
+            icu::properties::script::ScriptWithExtensions::try_new_unstable(&provider).unwrap();
         let swe = swe.as_borrowed();
 
         assert_eq!(
-            swe.get_script_extensions_val('𐓐' as u32) /* U+104D0 OSAGE CAPITAL LETTER KHA */
+            swe.get_script_extensions_val('𐓐') /* U+104D0 OSAGE CAPITAL LETTER KHA */
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Osage]
         );
         assert_eq!(
-            swe.get_script_extensions_val('🥳' as u32) /* U+1F973 FACE WITH PARTY HORN AND PARTY HAT */
+            swe.get_script_extensions_val('🥳') /* U+1F973 FACE WITH PARTY HORN AND PARTY HAT */
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Common]
         );
         assert_eq!(
-            swe.get_script_extensions_val(0x200D) // ZERO WIDTH JOINER
+            swe.get_script_extensions_val32(0x200D) // ZERO WIDTH JOINER
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Inherited]
         );
         assert_eq!(
-            swe.get_script_extensions_val('௫' as u32) // U+0BEB TAMIL DIGIT FIVE
+            swe.get_script_extensions_val('௫') // U+0BEB TAMIL DIGIT FIVE
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Tamil, Script::Grantha]
         );
         assert_eq!(
-            swe.get_script_extensions_val(0x11303) // GRANTHA SIGN VISARGA
+            swe.get_script_extensions_val32(0x11303) // GRANTHA SIGN VISARGA
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Tamil, Script::Grantha]
         );
         assert_eq!(
-            swe.get_script_extensions_val(0x30A0) // KATAKANA-HIRAGANA DOUBLE HYPHEN
+            swe.get_script_extensions_val32(0x30A0) // KATAKANA-HIRAGANA DOUBLE HYPHEN
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Hiragana, Script::Katakana]
         );
 
         assert_eq!(
-            swe.get_script_extensions_val(0x200D) // ZERO WIDTH JOINER
+            swe.get_script_extensions_val32(0x200D) // ZERO WIDTH JOINER
                 .iter()
                 .next(),
             Some(Script::Inherited)
         );
 
-        assert!(swe
-            .get_script_extensions_val(0x11303) // GRANTHA SIGN VISARGA
-            .contains(&Script::Grantha));
+        assert!(
+            swe.get_script_extensions_val32(0x11303) // GRANTHA SIGN VISARGA
+                .contains(&Script::Grantha)
+        );
 
-        assert!(!swe
-            .get_script_extensions_val(0x11303) // GRANTHA SIGN VISARGA
-            .contains(&Script::Common));
+        assert!(
+            !swe.get_script_extensions_val32(0x11303) // GRANTHA SIGN VISARGA
+                .contains(&Script::Common)
+        );
 
         // // Invalid code point
         assert_eq!(
-            swe.get_script_extensions_val(0x11_0000) // CODE_POINT_MAX + 1 is invalid
+            swe.get_script_extensions_val32(0x11_0000) // CODE_POINT_MAX + 1 is invalid
                 .iter()
                 .collect::<Vec<_>>(),
             [Script::Unknown]
@@ -159,81 +230,79 @@ mod tests {
     fn test_has_script() {
         let provider = SourceDataProvider::new_testing();
 
-        let swe = icu::properties::script::load_script_with_extensions_unstable(&provider).unwrap();
+        let swe =
+            icu::properties::script::ScriptWithExtensions::try_new_unstable(&provider).unwrap();
         let swe = swe.as_borrowed();
 
-        assert!(swe.has_script('𐓐' as u32, Script::Osage));
-        assert!(!swe.has_script('𐓐' as u32, Script::Common));
-        assert!(!swe.has_script('𐓐' as u32, Script::Inherited));
+        assert!(swe.has_script('𐓐', Script::Osage));
+        assert!(!swe.has_script('𐓐', Script::Common));
+        assert!(!swe.has_script('𐓐', Script::Inherited));
 
-        assert!(swe.has_script('🥳' as u32, Script::Common));
-        assert!(!swe.has_script('🥳' as u32, Script::Inherited));
+        assert!(swe.has_script('🥳', Script::Common));
+        assert!(!swe.has_script('🥳', Script::Inherited));
 
-        assert!(!swe.has_script(0x200D, Script::Common));
-        assert!(swe.has_script(0x200D, Script::Inherited));
+        assert!(!swe.has_script32(0x200D, Script::Common));
+        assert!(swe.has_script32(0x200D, Script::Inherited));
 
-        assert!(swe.has_script('௫' as u32, Script::Tamil));
-        assert!(swe.has_script('௫' as u32, Script::Grantha));
-        assert!(!swe.has_script('௫' as u32, Script::Common));
-        assert!(!swe.has_script('௫' as u32, Script::Inherited));
+        assert!(swe.has_script('௫', Script::Tamil));
+        assert!(swe.has_script('௫', Script::Grantha));
+        assert!(!swe.has_script('௫', Script::Common));
+        assert!(!swe.has_script('௫', Script::Inherited));
 
-        assert!(swe.has_script(0x11303, Script::Tamil));
-        assert!(swe.has_script(0x11303, Script::Grantha));
-        assert!(!swe.has_script(0x11303, Script::Common));
-        assert!(!swe.has_script(0x11303, Script::Inherited));
+        assert!(swe.has_script32(0x11303, Script::Tamil));
+        assert!(swe.has_script32(0x11303, Script::Grantha));
+        assert!(!swe.has_script32(0x11303, Script::Common));
+        assert!(!swe.has_script32(0x11303, Script::Inherited));
 
-        assert!(swe.has_script(0x30A0, Script::Hiragana));
-        assert!(swe.has_script(0x30A0, Script::Katakana));
-        assert!(!swe.has_script(0x30A0, Script::Common));
-        assert!(!swe.has_script(0x30A0, Script::Inherited));
+        assert!(swe.has_script32(0x30A0, Script::Hiragana));
+        assert!(swe.has_script32(0x30A0, Script::Katakana));
+        assert!(!swe.has_script32(0x30A0, Script::Common));
+        assert!(!swe.has_script32(0x30A0, Script::Inherited));
 
         // U+0964 DEVANAGARI DANDA
-        assert!(!swe.has_script(0x0964, Script::Common));
-        assert!(swe.has_script(0x0964, Script::Devanagari));
-        assert!(swe.has_script(0x0964, Script::Bengali));
+        assert!(!swe.has_script32(0x0964, Script::Common));
+        assert!(swe.has_script32(0x0964, Script::Devanagari));
+        assert!(swe.has_script32(0x0964, Script::Bengali));
 
         // TestHasScript() test cases from ICU4J
 
         // U+063F ARABIC LETTER FARSI YEH WITH THREE DOTS ABOVE
-        assert!(!swe.has_script(0x063F, Script::Common));
-        assert!(swe.has_script(0x063F, Script::Arabic)); // main Script value
-        assert!(!swe.has_script(0x063F, Script::Syriac));
-        assert!(!swe.has_script(0x063F, Script::Thaana));
+        assert!(!swe.has_script32(0x063F, Script::Common));
+        assert!(swe.has_script32(0x063F, Script::Arabic)); // main Script value
+        assert!(!swe.has_script32(0x063F, Script::Syriac));
+        assert!(!swe.has_script32(0x063F, Script::Thaana));
 
         // U+0640 ARABIC TATWEEL
-        assert!(!swe.has_script(0x0640, Script::Common)); // main Script value
-        assert!(swe.has_script(0x0640, Script::Arabic));
-        assert!(swe.has_script(0x0640, Script::Syriac));
-        assert!(!swe.has_script(0x0640, Script::Thaana));
+        assert!(!swe.has_script32(0x0640, Script::Common)); // main Script value
+        assert!(swe.has_script32(0x0640, Script::Arabic));
+        assert!(swe.has_script32(0x0640, Script::Syriac));
+        assert!(!swe.has_script32(0x0640, Script::Thaana));
 
         // U+0650 ARABIC KASRA
-        assert!(!swe.has_script(0x0650, Script::Inherited)); // main Script value
-        assert!(swe.has_script(0x0650, Script::Arabic));
-        assert!(swe.has_script(0x0650, Script::Syriac));
-        assert!(!swe.has_script(0x0650, Script::Thaana));
+        assert!(!swe.has_script32(0x0650, Script::Inherited)); // main Script value
+        assert!(swe.has_script32(0x0650, Script::Arabic));
+        assert!(swe.has_script32(0x0650, Script::Syriac));
+        assert!(!swe.has_script32(0x0650, Script::Thaana));
 
         // U+0660 ARABIC-INDIC DIGIT ZERO
-        assert!(!swe.has_script(0x0660, Script::Common));
-        assert!(swe.has_script(0x0660, Script::Arabic)); // main Script value
-        assert!(!swe.has_script(0x0660, Script::Syriac));
-        assert!(swe.has_script(0x0660, Script::Thaana));
+        assert!(!swe.has_script32(0x0660, Script::Common));
+        assert!(swe.has_script32(0x0660, Script::Arabic)); // main Script value
+        assert!(!swe.has_script32(0x0660, Script::Syriac));
+        assert!(swe.has_script32(0x0660, Script::Thaana));
 
         // U+FDF2 ARABIC LIGATURE ALLAH ISOLATED FORM
-        assert!(!swe.has_script(0xFDF2, Script::Common));
-        assert!(swe.has_script(0xFDF2, Script::Arabic)); // main Script value
-        assert!(!swe.has_script(0xFDF2, Script::Syriac));
-        assert!(swe.has_script(0xFDF2, Script::Thaana));
-
-        // The ICU4J comment for this test says:
-        // An unguarded implementation might go into an infinite loop.
-        assert!(!swe.has_script(0x0640, Script(0xAFFE)));
+        assert!(!swe.has_script32(0xFDF2, Script::Common));
+        assert!(swe.has_script32(0xFDF2, Script::Arabic)); // main Script value
+        assert!(!swe.has_script32(0xFDF2, Script::Syriac));
+        assert!(swe.has_script32(0xFDF2, Script::Thaana));
     }
 
     #[test]
     fn test_get_script_extensions_set() {
         let provider = SourceDataProvider::new_testing();
 
-        let swe = icu::properties::script::load_script_with_extensions_unstable(&provider).unwrap();
+        let swe =
+            icu::properties::script::ScriptWithExtensions::try_new_unstable(&provider).unwrap();
         let swe = swe.as_borrowed();
 
         let grantha = swe.get_script_extensions_set(Script::Grantha);

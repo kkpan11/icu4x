@@ -8,16 +8,17 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
-#[cfg(feature = "networking")]
 use std::fs::File;
-#[cfg(feature = "networking")]
 use std::io::BufWriter;
 use std::io::Cursor;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::RwLock;
 use zip::ZipArchive;
+
+pub(crate) type Cache<T> = OnceLock<Result<T, DataError>>;
 
 pub(crate) struct SerdeCache {
     pub(crate) root: AbstractFs,
@@ -26,9 +27,10 @@ pub(crate) struct SerdeCache {
 
 impl Debug for SerdeCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // skip formatting the cache
+        let _ = &self.cache;
         f.debug_struct("SerdeCache")
             .field("root", &self.root)
-            // skip formatting the cache
             .finish()
     }
 }
@@ -55,7 +57,7 @@ impl SerdeCache {
                 path.to_string(),
                 Box::new(
                     parser(&self.root.read_to_buf(path)?)
-                        .map_err(|e| e.with_path_context(std::path::Path::new(path)))?,
+                        .map_err(|e| e.with_path_context(Path::new(path)))?,
                 ),
             ),
         }
@@ -78,8 +80,11 @@ impl SerdeCache {
         for<'de> S: serde::Deserialize<'de> + 'static + Send + Sync,
     {
         self.read_and_parse(path, |bytes| {
-            toml::from_slice(bytes)
-                .map_err(|e| DataError::custom("TOML deserialize").with_display_context(&e))
+            toml::from_str(
+                std::str::from_utf8(bytes)
+                    .map_err(|e| DataError::custom("TOML UTF8").with_display_context(&e))?,
+            )
+            .map_err(|e| DataError::custom("TOML deserialize").with_display_context(&e))
         })
     }
 
@@ -97,10 +102,48 @@ pub(crate) struct ZipData {
     file_list: HashSet<String>,
 }
 
+impl ZipData {
+    fn try_new(bytes: Vec<u8>) -> Result<Self, DataError> {
+        let archive = ZipArchive::new(Cursor::new(bytes))
+            .map_err(|e| DataError::custom("Invalid ZIP file").with_display_context(&e))?;
+
+        let file_list = archive.file_names().map(String::from).collect();
+        Ok(Self { archive, file_list })
+    }
+}
+
+pub(crate) struct TarArchive {
+    archive: Vec<u8>,
+    file_list: HashSet<String>,
+}
+
+impl TarArchive {
+    fn try_new(bytes: Vec<u8>) -> Result<Self, DataError> {
+        use std::io::Read;
+        let mut archive = Vec::new();
+        flate2::read::GzDecoder::new(Cursor::new(bytes)).read_to_end(&mut archive)?;
+        let file_list = tar::Archive::new(Cursor::new(&archive))
+            .entries_with_seek()
+            .map(|e| {
+                e.into_iter()
+                    .filter_map(|e| Some(e.ok()?.path().ok()?.as_os_str().to_str()?.to_string()))
+            })?
+            .collect::<HashSet<_>>();
+        Ok(TarArchive { archive, file_list })
+    }
+}
+
 pub(crate) enum AbstractFs {
     Fs(PathBuf),
     Zip(RwLock<Result<ZipData, String>>),
+    Tar(RwLock<Result<TarArchive, String>>),
+    #[cfg(feature = "networking")]
+    Http(String),
     Memory(BTreeMap<&'static str, &'static [u8]>),
+    Overlay {
+        overlay: Box<AbstractFs>,
+        base: Box<AbstractFs>,
+    },
 }
 
 impl Debug for AbstractFs {
@@ -116,20 +159,70 @@ impl AbstractFs {
             .is_dir()
         {
             Ok(Self::Fs(root.to_path_buf()))
+        } else if root.extension().is_some_and(|ext| ext == "zip") {
+            Ok(Self::Zip(RwLock::new(Ok(ZipData::try_new(
+                std::fs::read(root)?,
+            )?))))
+        } else if root.extension().is_some_and(|ext| ext == "gz") {
+            Ok(Self::Tar(RwLock::new(Ok(TarArchive::try_new(
+                std::fs::read(root)?,
+            )?))))
         } else {
-            let archive = ZipArchive::new(Cursor::new(std::fs::read(root)?)).map_err(|e| {
-                DataError::custom("Invalid ZIP file")
-                    .with_display_context(&e)
-                    .with_path_context(root)
-            })?;
-            let file_list = archive.file_names().map(String::from).collect();
-            Ok(Self::Zip(RwLock::new(Ok(ZipData { archive, file_list }))))
+            Err(DataError::custom("unsupported archive type").with_display_context(&root.display()))
         }
     }
 
     #[cfg(feature = "networking")]
-    pub fn new_from_url(path: String) -> Self {
+    pub fn new_zip_from_url(path: String) -> Self {
         Self::Zip(RwLock::new(Err(path)))
+    }
+
+    #[cfg(feature = "networking")]
+    pub fn new_tar_from_url(path: String) -> Self {
+        Self::Tar(RwLock::new(Err(path)))
+    }
+
+    #[cfg(feature = "networking")]
+    pub fn new_from_url(path: String) -> Self {
+        // We store the path without trailing / and add them ourselves
+        Self::Http(path.trim_end_matches('/').to_string())
+    }
+
+    #[cfg(feature = "networking")]
+    fn download(resource: &String) -> Result<PathBuf, DataError> {
+        let root = std::env::var_os("ICU4X_SOURCE_CACHE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("icu4x-source-cache/"))
+            .join(resource.rsplit("//").next().unwrap());
+        if root.exists() {
+            return Ok(root);
+        }
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one_download_at_a_time = LOCK.lock().unwrap();
+        if root.exists() {
+            return Ok(root);
+        }
+        log::info!("Downloading {resource}");
+        std::fs::create_dir_all(root.parent().unwrap())?;
+        let mut retry = 5;
+        let mut response = loop {
+            match ureq::get(resource).call() {
+                Ok(r) => break r.into_body().into_reader(),
+                Err(e) if retry > 0 => {
+                    log::warn!("Download error {e:?}, retrying...");
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    retry -= 1;
+                }
+                Err(e) => return Err(DataError::custom("Download").with_display_context(&e)),
+            }
+        };
+        // Cannot write directly to the final path because we don't want other threads to read the partial file
+        std::io::copy(
+            &mut response,
+            &mut BufWriter::new(File::create(root.with_extension("tmp"))?),
+        )?;
+        std::fs::rename(root.with_extension("tmp"), &root)?;
+        Ok(root)
     }
 
     fn init(&self) -> Result<(), DataError> {
@@ -145,37 +238,31 @@ impl AbstractFs {
                 return Ok(());
             };
 
-            let root = std::env::var_os("ICU4X_SOURCE_CACHE")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::temp_dir().join("icu4x-source-cache/"))
-                .join(resource.rsplit("//").next().unwrap());
+            let root = Self::download(resource)?;
 
-            if !root.exists() {
-                log::info!("Downloading {resource}");
-                std::fs::create_dir_all(root.parent().unwrap())?;
-                std::io::copy(
-                    &mut ureq::get(resource)
-                        .call()
-                        .map_err(|e| DataError::custom("Download").with_display_context(&e))?
-                        .into_reader(),
-                    &mut BufWriter::new(File::create(&root)?),
-                )?;
+            *lock =
+                Ok(ZipData::try_new(std::fs::read(&root)?)
+                    .map_err(|e| e.with_path_context(&root))?);
+        } else if let Self::Tar(lock) = self {
+            if lock.read().expect("poison").is_ok() {
+                return Ok(());
             }
+            let mut lock = lock.write().expect("poison");
+            let resource = if let Err(resource) = &*lock {
+                resource
+            } else {
+                return Ok(());
+            };
 
-            let archive = ZipArchive::new(Cursor::new(std::fs::read(&root)?)).map_err(|e| {
-                DataError::custom("Invalid ZIP file")
-                    .with_display_context(&e)
-                    .with_path_context(&root)
-            })?;
+            let root = Self::download(resource)?;
 
-            let file_list = archive.file_names().map(String::from).collect();
-
-            *lock = Ok(ZipData { archive, file_list });
+            *lock = Ok(TarArchive::try_new(std::fs::read(&root)?)
+                .map_err(|e| e.with_path_context(&root))?);
         }
         Ok(())
     }
 
-    fn read_to_buf(&self, path: &str) -> Result<Vec<u8>, DataError> {
+    pub fn read_to_buf(&self, path: &str) -> Result<Vec<u8>, DataError> {
         self.init()?;
         match self {
             Self::Fs(root) => {
@@ -184,7 +271,7 @@ impl AbstractFs {
                     .map_err(|e| DataError::from(e).with_path_context(&root.join(path)))
             }
             Self::Zip(zip) => {
-                log::debug!("Reading: <zip>/{}", path);
+                log::debug!("Reading: <zip>/{path}");
                 let mut buf = Vec::new();
                 zip.write()
                     .expect("poison")
@@ -202,9 +289,40 @@ impl AbstractFs {
                     .read_to_end(&mut buf)?;
                 Ok(buf)
             }
-            Self::Memory(map) => map.get(path).copied().map(Vec::from).ok_or_else(|| {
-                DataError::custom("Not found in icu4x-datagen's data/").with_display_context(path)
-            }),
+            Self::Tar(tar) => {
+                log::debug!("Reading: <tar>/{path}");
+                tar::Archive::new(Cursor::new(
+                    &tar.read().expect("poison").as_ref().unwrap().archive,
+                )) // init called
+                .entries_with_seek()
+                .and_then(|e| {
+                    for e in e {
+                        let mut e = e?;
+                        if e.path()?.as_os_str() == path {
+                            let mut vec = vec![];
+                            e.read_to_end(&mut vec)?;
+                            return Ok(vec);
+                        }
+                    }
+                    Err(std::io::ErrorKind::NotFound.into())
+                })
+                .map_err(|e| {
+                    DataErrorKind::Io(e.kind())
+                        .into_error()
+                        .with_display_context(&e)
+                        .with_display_context(path)
+                })
+            }
+            #[cfg(feature = "networking")]
+            Self::Http(url) => Ok(std::fs::read(Self::download(&format!("{url}/{path}"))?)?),
+            Self::Memory(map) => map
+                .get(path)
+                .copied()
+                .map(Vec::from)
+                .ok_or_else(|| DataError::custom("Not found in icu4x-datagen's data/")),
+            Self::Overlay { overlay, base } => overlay
+                .read_to_buf(path)
+                .or_else(|_| base.read_to_buf(path)),
         }
     }
 
@@ -216,7 +334,7 @@ impl AbstractFs {
         Ok(s)
     }
 
-    fn list(&self, path: &str) -> Result<impl Iterator<Item = String>, DataError> {
+    pub(crate) fn list(&self, path: &str) -> Result<impl Iterator<Item = String>, DataError> {
         self.init()?;
         Ok(match self {
             Self::Fs(root) => std::fs::read_dir(root.join(path))
@@ -237,6 +355,25 @@ impl AbstractFs {
                 .map(String::from)
                 .collect::<HashSet<_>>()
                 .into_iter(),
+            Self::Tar(tar) => tar
+                .read()
+                .expect("poison")
+                .as_ref()
+                .ok()
+                .unwrap() // init called
+                .file_list
+                .iter()
+                .filter_map(|p| p.strip_prefix(path))
+                .filter_map(|suffix| suffix.split('/').find(|s| !s.is_empty()))
+                .map(String::from)
+                .collect::<HashSet<_>>()
+                .into_iter(),
+            #[cfg(feature = "networking")]
+            Self::Http(url) => {
+                return Err(
+                    DataError::custom("Cannot list HTTP directories").with_display_context(url)
+                );
+            }
             Self::Memory(map) => map
                 .keys()
                 .copied()
@@ -245,10 +382,15 @@ impl AbstractFs {
                 .map(String::from)
                 .collect::<HashSet<_>>()
                 .into_iter(),
+            Self::Overlay { overlay, base } => overlay
+                .list(path)?
+                .chain(base.list(path)?)
+                .collect::<HashSet<_>>()
+                .into_iter(),
         })
     }
 
-    fn file_exists(&self, path: &str) -> Result<bool, DataError> {
+    pub fn file_exists(&self, path: &str) -> Result<bool, DataError> {
         self.init()?;
         Ok(match self {
             Self::Fs(root) => root.join(path).is_file(),
@@ -260,7 +402,297 @@ impl AbstractFs {
                 .unwrap() // init called
                 .file_list
                 .contains(path),
+            Self::Tar(tar) => tar
+                .read()
+                .expect("poison")
+                .as_ref()
+                .ok()
+                .unwrap() // init called
+                .file_list
+                .contains(path),
+            #[cfg(feature = "networking")]
+            Self::Http(url) => Self::download(&format!("{url}/{path}")).is_ok(),
             Self::Memory(map) => map.contains_key(path),
+            Self::Overlay { overlay, base } => {
+                overlay.file_exists(path)? || base.file_exists(path)?
+            }
         })
     }
 }
+
+#[derive(Debug)]
+pub(crate) struct TzdbCache {
+    pub(crate) root: AbstractFs,
+    pub(crate) transitions: OnceLock<Result<Tzdb, DataError>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct Tzdb {
+    // The main TZDB as defined by main.zi (i.e. `cat africa antarctica asia ...`)
+    pub(crate) main: parse_zoneinfo::table::Table,
+
+    // The TZDB defined by the rearguard.zi file, if present.
+    // This file requires running `make` in the tzdata directory, which is not
+    // generally possible. However, it is present in testdata.
+    pub(crate) rearguard: Option<parse_zoneinfo::table::Table>,
+    // The TZDB defined by the vanguard.zi file, if present.
+    // This file requires running `make` in the tzdata directory, which is not
+    // generally possible. However, it is present in testdata.
+    pub(crate) vanguard: Option<parse_zoneinfo::table::Table>,
+}
+
+impl TzdbCache {
+    pub(crate) fn new(root: AbstractFs) -> Self {
+        Self {
+            root,
+            transitions: Default::default(),
+        }
+    }
+
+    pub(crate) fn parsed(&self) -> Result<&Tzdb, DataError> {
+        self.transitions
+            .get_or_init(|| {
+                fn parse<S: AsRef<str>, I: Iterator<Item = S>>(
+                    lines: I,
+                ) -> parse_zoneinfo::table::Table {
+                    use parse_zoneinfo::line::Line;
+                    use parse_zoneinfo::table::TableBuilder;
+
+                    let mut table = TableBuilder::new();
+
+                    for line in lines {
+                        match Line::new(line.as_ref()).unwrap() {
+                            Line::Zone(zone) => table.add_zone_line(zone).unwrap(),
+                            Line::Continuation(cont) => table.add_continuation_line(cont).unwrap(),
+                            Line::Rule(rule) => table.add_rule_line(rule).unwrap(),
+                            Line::Link(link) => table.add_link_line(link).unwrap(),
+                            Line::Space => {}
+                        }
+                    }
+
+                    table.build()
+                }
+
+                fn try_ziguard(
+                    dataform: &str,
+                    script: &Path,
+                    lines: &Path,
+                ) -> Option<parse_zoneinfo::table::Table> {
+                    let output = std::process::Command::new("awk")
+                        .args(["-v", dataform, "-f"])
+                        .arg(script)
+                        .arg(lines)
+                        .stderr(std::process::Stdio::inherit())
+                        .output()
+                        .ok()?;
+                    if !output.status.success() {
+                        return None;
+                    }
+                    Some(parse(str::from_utf8(&output.stdout).ok()?.lines()))
+                }
+
+                let ziguard_path = std::env::temp_dir().join("ziguard.awk");
+                let lines_path = std::env::temp_dir().join("lines");
+                let mut lines_file = BufWriter::new(File::create(&lines_path)?);
+
+                let lines = [
+                    "africa",
+                    "antarctica",
+                    "asia",
+                    "australasia",
+                    "europe",
+                    "northamerica",
+                    "southamerica",
+                    "etcetera",
+                    "factory",
+                    "backward",
+                ]
+                .into_iter()
+                .try_fold(Vec::new(), |mut lines, file| {
+                    let file = self.root.read_to_string(file)?;
+                    use std::io::Write;
+                    writeln!(lines_file, "{file}")?;
+                    lines.extend(file.lines().map(ToOwned::to_owned));
+                    Ok::<_, DataError>(lines)
+                })?;
+
+                std::fs::write(&ziguard_path, self.root.read_to_buf("ziguard.awk")?)?;
+                drop(lines_file);
+
+                Ok(Tzdb {
+                    main: parse(lines.iter()),
+                    rearguard: try_ziguard("DATAFORM=rearguard", &ziguard_path, &lines_path),
+                    vanguard: try_ziguard("DATAFORM=vanguard", &ziguard_path, &lines_path),
+                })
+            })
+            .as_ref()
+            .map_err(|&e| e)
+    }
+}
+
+// A cache representing https://unicode.org/Public/{version}/
+#[derive(Debug)]
+pub(crate) struct RscdCache {
+    root: AbstractFs,
+    // The `ucd/UCD.zip` file. Requests matching `ucd/[^Unihan]` will be resolved through
+    // the ZIP file instead of downloading individual files.
+    ucd_zip: OnceLock<Option<AbstractFs>>,
+    // The `ucd/Unihan.zip` file. Requests matching `ucd/Unihan/` will be resolved through
+    // the ZIP file instead of downloading individual files.
+    unihan_zip: OnceLock<Option<AbstractFs>>,
+    // The `security/uts39-data-X.0.0.zip` file. Requests matching `security/` will be
+    // resolved through the ZIP file instead of downloading individual files.
+    uts_39_zip: OnceLock<Option<AbstractFs>>,
+    // Cached file contents. It's all text files, so we cache them as strings.
+    file_cache: FrozenMap<String, String>,
+    // Cache of enumerated properties CPTs, indexed by short property name.
+    //
+    // CPT building is a big bottleneck, so we don't want to build the same one twice.
+    #[allow(dead_code)]
+    pub(crate) cpt_cache: FrozenMap<&'static str, Box<dyn Any + Send + Sync>>,
+
+    #[cfg(feature = "unstable")]
+    #[allow(dead_code)]
+    pub(crate) segmenter_cache: crate::segmenter::NeoSegmenters,
+}
+
+impl RscdCache {
+    pub fn new(root: AbstractFs) -> Self {
+        #[cfg(feature = "unstable")]
+        let root = AbstractFs::Overlay {
+            // Overlay from https://unicode.org/review/pri555/.
+            overlay: Box::new(include_files!(
+                "../data/segmenter/pri555/";
+                "ucd/auxiliary/GraphemeClusterBreakStates.txt",
+                "ucd/auxiliary/GraphemeClusterBreakSymbols.txt",
+                "ucd/auxiliary/GraphemeClusterBreakTransitions.txt",
+                "ucd/auxiliary/LineBreakStates.txt",
+                "ucd/auxiliary/LineBreakSymbols.txt",
+                "ucd/auxiliary/LineBreakTransitions.txt",
+                "ucd/auxiliary/SentenceBreakStates.txt",
+                "ucd/auxiliary/SentenceBreakSymbols.txt",
+                "ucd/auxiliary/SentenceBreakTransitions.txt",
+                "ucd/auxiliary/WordBreakStates.txt",
+                "ucd/auxiliary/WordBreakSymbols.txt",
+                "ucd/auxiliary/WordBreakTransitions.txt",
+            )),
+            base: Box::new(root),
+        };
+        Self {
+            root,
+            ucd_zip: Default::default(),
+            unihan_zip: Default::default(),
+            uts_39_zip: Default::default(),
+            file_cache: Default::default(),
+            cpt_cache: Default::default(),
+            #[cfg(feature = "unstable")]
+            segmenter_cache: Default::default(),
+        }
+    }
+
+    fn ucd_zip(&self) -> Option<&AbstractFs> {
+        self.ucd_zip
+            .get_or_init(|| {
+                let zip = ZipData::try_new(self.root.read_to_buf("ucd/UCD.zip").ok()?).ok()?;
+                Some(AbstractFs::Zip(RwLock::new(Ok(zip))))
+            })
+            .as_ref()
+    }
+
+    fn unihan_zip(&self) -> Option<&AbstractFs> {
+        self.unihan_zip
+            .get_or_init(|| {
+                let zip = ZipData::try_new(self.root.read_to_buf("ucd/Unihan.zip").ok()?).ok()?;
+                Some(AbstractFs::Zip(RwLock::new(Ok(zip))))
+            })
+            .as_ref()
+    }
+
+    fn uts_39_zip(&self) -> Option<&AbstractFs> {
+        self.uts_39_zip
+            .get_or_init(|| {
+                let readme = self.root.read_to_string("security/ReadMe.txt").ok()?;
+                let version = readme.split_once("for version ")?.1.split_once(' ')?.0;
+                let zip = ZipData::try_new(
+                    self.root
+                        .read_to_buf(&format!("security/uts39-data-{version}.zip"))
+                        .ok()?,
+                )
+                .ok()?;
+                Some(AbstractFs::Zip(RwLock::new(Ok(zip))))
+            })
+            .as_ref()
+    }
+
+    #[allow(dead_code)]
+    pub fn file_exists(&self, file: &str) -> Result<bool, DataError> {
+        if self.file_cache.get(file).is_some() {
+            return Ok(true);
+        }
+
+        if let Some(unihan_path) = file.strip_prefix("ucd/Unihan/")
+            && let Some(unihan_zip) = self.unihan_zip()
+            && unihan_zip.file_exists(unihan_path)?
+        {
+            Ok(true)
+        } else if let Some(ucd_path) = file.strip_prefix("ucd/")
+            && let Some(ucd_zip) = self.ucd_zip()
+            && ucd_zip.file_exists(ucd_path)?
+        {
+            Ok(true)
+        } else if let Some(security_path) = file.strip_prefix("security/")
+            && let Some(uts_39_zip) = self.uts_39_zip()
+            && uts_39_zip.file_exists(security_path)?
+        {
+            Ok(true)
+        } else {
+            Ok(self.root.file_exists(file)?)
+        }
+    }
+
+    #[allow(dead_code)] // only used with CodePointTrieBuilder, which is feature-gated
+    pub fn read_to_string(&self, file: &str) -> Result<&str, DataError> {
+        if let Some(x) = self.file_cache.get(file) {
+            return Ok(x);
+        }
+
+        if let Some(unihan_path) = file.strip_prefix("ucd/Unihan/")
+            && let Some(unihan_zip) = self.unihan_zip()
+            && unihan_zip.file_exists(unihan_path)?
+        {
+            Ok(self
+                .file_cache
+                .insert(file.to_string(), unihan_zip.read_to_string(unihan_path)?))
+        } else if let Some(ucd_path) = file.strip_prefix("ucd/")
+            && let Some(ucd_zip) = self.ucd_zip()
+            && ucd_zip.file_exists(ucd_path)?
+        {
+            Ok(self
+                .file_cache
+                .insert(file.to_string(), ucd_zip.read_to_string(ucd_path)?))
+        } else if let Some(security_path) = file.strip_prefix("security/")
+            && let Some(uts_39_zip) = self.uts_39_zip()
+            && uts_39_zip.file_exists(security_path)?
+        {
+            Ok(self
+                .file_cache
+                .insert(file.to_string(), uts_39_zip.read_to_string(security_path)?))
+        } else {
+            Ok(self
+                .file_cache
+                .insert(file.to_string(), self.root.read_to_string(file)?))
+        }
+    }
+}
+
+macro_rules! include_files {
+    ($base:literal; $($file:literal),* $(,)?) => {
+        #[allow(clippy::large_stack_arrays)]
+        crate::source::AbstractFs::Memory([
+            $(
+                ($file, include_bytes!(concat!($base, $file)).as_slice()),
+            )*
+        ].into_iter().collect())
+    };
+}
+pub(crate) use include_files;

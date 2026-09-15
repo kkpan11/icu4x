@@ -1,0 +1,42 @@
+{
+  "defaults": {
+    "3": "Central Africa Time",
+    "4": "East Africa Time",
+    "5": "South Africa Standard Time",
+    "6": "West Africa Time",
+    "31": "Casey Time",
+    "32": "Chamorro Standard Time",
+    "42": "Dumont d’Urville Time",
+    "53": "Greenwich Mean Time",
+    "54": "Galapagos Time",
+    "57": "Gilbert Islands Time",
+    "61": "Gulf Standard Time",
+    "63": "Hawaii Time",
+    "67": "India Standard Time",
+    "68": "Indian Ocean Time",
+    "69": "Indochina Time",
+    "70": "Central Indonesia Time",
+    "71": "Eastern Indonesia Time",
+    "72": "Western Indonesia Time",
+    "79": "Kazakhstan Time",
+    "80": "East Kazakhstan Time",
+    "81": "West Kazakhstan Time",
+    "86": "Line Islands Time",
+    "89": "Malaysia Time",
+    "91": "Marquesas Time",
+    "92": "Marshall Islands Time",
+    "94": "Mawson Time",
+    "111": "Papua New Guinea Time",
+    "115": "Phoenix Islands Time",
+    "121": "Rothera Time",
+    "123": "American Samoa Time",
+    "125": "Singapore Standard Time",
+    "127": "South Georgia Time",
+    "129": "Syowa Time",
+    "146": "Vostok Time",
+    "151": "Yukon Time"
+  },
+  "overrides": {
+    "utc": "Coordinated Universal Time"
+  }
+}

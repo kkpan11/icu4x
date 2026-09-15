@@ -12,12 +12,12 @@
 
 
 typedef struct CodePointRangeIteratorResult {
-  uint32_t start;
-  uint32_t end;
+  char32_t start;
+  char32_t end;
   bool done;
 } CodePointRangeIteratorResult;
 
-
+typedef struct CodePointRangeIteratorResult_option {union { CodePointRangeIteratorResult ok; }; bool is_ok; } CodePointRangeIteratorResult_option;
 
 
 

@@ -3,47 +3,28 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use crate::grapheme::*;
-use crate::indices::Utf16Indices;
+use crate::indices::*;
 use crate::provider::*;
-use core::str::CharIndices;
+use crate::scaffold::{PotentiallyIllFormedUtf8, RuleBreakType, Utf8, Utf16};
 use icu_collections::char16trie::{Char16Trie, TrieResult};
 
-/// A trait for dictionary based iterator
-trait DictionaryType<'l, 's> {
-    /// The iterator over characters.
-    type IterAttr: Iterator<Item = (usize, Self::CharType)> + Clone;
-
-    /// The character type.
-    type CharType: Copy + Into<u32>;
-
-    fn to_char(c: Self::CharType) -> char;
-    fn char_len(c: Self::CharType) -> usize;
-}
-
-struct DictionaryBreakIterator<
-    'l,
-    's,
-    Y: DictionaryType<'l, 's> + ?Sized,
-    X: Iterator<Item = usize> + ?Sized,
-> {
-    trie: Char16Trie<'l>,
-    iter: Y::IterAttr,
+/// Lifetimes:
+/// - `'data` = lifetime of the data
+/// - `'s` = lifetime of the string being segmented
+#[derive(Debug)]
+pub(super) struct DictionaryBreakIterator<'data, 's, R: RuleBreakType> {
+    trie: Char16Trie<'data>,
+    iter: R::IterAttr<'s>,
     len: usize,
-    grapheme_iter: X,
+    grapheme_iter: GraphemeClusterBreakIterator<'data, 's, R>,
     // TODO transform value for byte trie
 }
 
 /// Implement the [`Iterator`] trait over the segmenter break opportunities of the given string.
 /// Please see the [module-level documentation](crate) for its usages.
 ///
-/// Lifetimes:
-/// - `'l` = lifetime of the segmenter object from which this iterator was created
-/// - `'s` = lifetime of the string being segmented
-///
 /// [`Iterator`]: core::iter::Iterator
-impl<'l, 's, Y: DictionaryType<'l, 's> + ?Sized, X: Iterator<Item = usize> + ?Sized> Iterator
-    for DictionaryBreakIterator<'l, 's, Y, X>
-{
+impl<Y: RuleBreakType> Iterator for DictionaryBreakIterator<'_, '_, Y> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -54,8 +35,7 @@ impl<'l, 's, Y: DictionaryType<'l, 's> + ?Sized, X: Iterator<Item = usize> + ?Si
         let mut last_grapheme_offset = 0;
 
         while let Some(next) = self.iter.next() {
-            let ch = Y::to_char(next.1);
-            match trie_iter.next(ch) {
+            match trie_iter.next32(next.1.into()) {
                 TrieResult::FinalValue(_) => {
                     return Some(next.0 + Y::char_len(next.1));
                 }
@@ -75,13 +55,14 @@ impl<'l, 's, Y: DictionaryType<'l, 's> + ?Sized, X: Iterator<Item = usize> + ?Si
                     }
 
                     intermediate_length = next.0 + Y::char_len(next.1);
-                    previous_match = Some(self.iter.clone());
+                    previous_match = Some((self.iter.clone(), self.grapheme_iter.clone_internal()));
                 }
                 TrieResult::NoMatch => {
                     if intermediate_length > 0 {
-                        if let Some(previous_match) = previous_match {
+                        if let Some((prev_iter, prev_grapheme_iter)) = previous_match {
                             // Rewind previous match point
-                            self.iter = previous_match;
+                            self.iter = prev_iter;
+                            self.grapheme_iter = prev_grapheme_iter;
                         }
                         return Some(intermediate_length);
                     }
@@ -106,54 +87,28 @@ impl<'l, 's, Y: DictionaryType<'l, 's> + ?Sized, X: Iterator<Item = usize> + ?Si
     }
 }
 
-impl<'l, 's> DictionaryType<'l, 's> for u32 {
-    type IterAttr = Utf16Indices<'s>;
-    type CharType = u32;
-
-    fn to_char(c: u32) -> char {
-        char::from_u32(c).unwrap_or(char::REPLACEMENT_CHARACTER)
-    }
-
-    fn char_len(c: u32) -> usize {
-        if c >= 0x10000 {
-            2
-        } else {
-            1
-        }
-    }
+#[derive(Copy, Clone)]
+pub(super) struct DictionarySegmenter<'data> {
+    dict: &'data UCharDictionaryBreakData<'data>,
+    grapheme: GraphemeClusterSegmenterBorrowed<'data>,
 }
 
-impl<'l, 's> DictionaryType<'l, 's> for char {
-    type IterAttr = CharIndices<'s>;
-    type CharType = char;
-
-    fn to_char(c: char) -> char {
-        c
-    }
-
-    fn char_len(c: char) -> usize {
-        c.len_utf8()
-    }
-}
-
-pub(super) struct DictionarySegmenter<'l> {
-    dict: &'l UCharDictionaryBreakDataV1<'l>,
-    grapheme: &'l RuleBreakDataV2<'l>,
-}
-
-impl<'l> DictionarySegmenter<'l> {
+impl<'data> DictionarySegmenter<'data> {
     pub(super) fn new(
-        dict: &'l UCharDictionaryBreakDataV1<'l>,
-        grapheme: &'l RuleBreakDataV2<'l>,
+        dict: &'data UCharDictionaryBreakData<'data>,
+        grapheme: GraphemeClusterSegmenterBorrowed<'data>,
     ) -> Self {
         // TODO: no way to verify trie data
         Self { dict, grapheme }
     }
 
     /// Create a dictionary based break iterator for an `str` (a UTF-8 string).
-    pub(super) fn segment_str(&'l self, input: &'l str) -> impl Iterator<Item = usize> + 'l {
-        let grapheme_iter = GraphemeClusterSegmenter::new_and_segment_str(input, self.grapheme);
-        DictionaryBreakIterator::<char, GraphemeClusterBreakIteratorUtf8> {
+    pub(super) fn segment_str<'s>(
+        self,
+        input: &'s str,
+    ) -> DictionaryBreakIterator<'data, 's, Utf8> {
+        let grapheme_iter = self.grapheme.segment_str(input);
+        DictionaryBreakIterator {
             trie: Char16Trie::new(self.dict.trie_data.clone()),
             iter: input.char_indices(),
             len: input.len(),
@@ -161,10 +116,27 @@ impl<'l> DictionarySegmenter<'l> {
         }
     }
 
+    /// Create a dictionary based break iterator for a UTF-8 string.
+    pub(super) fn segment_utf8<'s>(
+        self,
+        input: &'s [u8],
+    ) -> DictionaryBreakIterator<'data, 's, PotentiallyIllFormedUtf8> {
+        let grapheme_iter = self.grapheme.segment_utf8(input);
+        DictionaryBreakIterator {
+            trie: Char16Trie::new(self.dict.trie_data.clone()),
+            iter: Utf8CharIndices::new(input),
+            len: input.len(),
+            grapheme_iter,
+        }
+    }
+
     /// Create a dictionary based break iterator for a UTF-16 string.
-    pub(super) fn segment_utf16(&'l self, input: &'l [u16]) -> impl Iterator<Item = usize> + 'l {
-        let grapheme_iter = GraphemeClusterSegmenter::new_and_segment_utf16(input, self.grapheme);
-        DictionaryBreakIterator::<u32, GraphemeClusterBreakIteratorUtf16> {
+    pub(super) fn segment_utf16<'s>(
+        self,
+        input: &'s [u16],
+    ) -> DictionaryBreakIterator<'data, 's, Utf16> {
+        let grapheme_iter = self.grapheme.segment_utf16(input);
+        DictionaryBreakIterator {
             trie: Char16Trie::new(self.dict.trie_data.clone()),
             iter: Utf16Indices::new(input),
             len: input.len(),
@@ -177,25 +149,67 @@ impl<'l> DictionarySegmenter<'l> {
 #[cfg(feature = "serde")]
 mod tests {
     use super::*;
-    use crate::{LineSegmenter, WordSegmenter};
+    use crate::GraphemeClusterSegmenter;
+    use crate::complex::ComplexPayloadsBorrowed;
     use icu_provider::prelude::*;
+
+    use super::super::check_complex;
 
     #[test]
     fn burmese_dictionary_test() {
-        let segmenter = LineSegmenter::new_dictionary();
-        // From css/css-text/word-break/word-break-normal-my-000.html
-        let s = "မြန်မာစာမြန်မာစာမြန်မာစာ";
-        let result: Vec<usize> = segmenter.segment_str(s).collect();
-        assert_eq!(result, vec![0, 18, 24, 42, 48, 66, 72]);
+        let mut segmenter = ComplexPayloadsBorrowed::new();
+        segmenter.with_southeast_asian_dictionaries();
+        let segmenter = segmenter.select(ComplexScript::Myanmar).unwrap();
 
-        let s_utf16: Vec<u16> = s.encode_utf16().collect();
-        let result: Vec<usize> = segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(result, vec![0, 6, 8, 14, 16, 22, 24]);
+        // From css/css-text/word-break/word-break-normal-my-000.html
+        check_complex(
+            "မြန်မာစာမြန်မာစာမြန်မာစာ",
+            &["မြန်မာ", "စာ", "မြန်မာ", "စာ", "မြန်မာ", "စာ"],
+            segmenter,
+        );
     }
 
     #[test]
     fn cj_dictionary_test() {
-        let response: DataResponse<DictionaryForWordOnlyAutoV1Marker> = crate::provider::Baked
+        let mut segmenter = ComplexPayloadsBorrowed::new();
+        segmenter.with_japanese_dictionary();
+        let segmenter = segmenter.select(ComplexScript::ChineseOrJapanese).unwrap();
+
+        // Match case
+        check_complex("龟山岛龟山岛", &["龟山岛", "龟山岛"], segmenter);
+
+        // Match case, then no match case
+        check_complex("エディターエディ", &["エディター", "エディ"], segmenter);
+    }
+
+    #[test]
+    fn khmer_dictionary_test() {
+        let mut segmenter = ComplexPayloadsBorrowed::new();
+        segmenter.with_southeast_asian_dictionaries();
+        let segmenter = segmenter.select(ComplexScript::Khmer).unwrap();
+
+        check_complex(
+            "ភាសាខ្មែរភាសាខ្មែរភាសាខ្មែរ",
+            &["ភាសាខ្មែរ", "ភាសាខ្មែរ", "ភាសាខ្មែរ"],
+            segmenter,
+        );
+    }
+
+    #[test]
+    fn lao_dictionary_test() {
+        let mut segmenter = ComplexPayloadsBorrowed::new();
+        segmenter.with_southeast_asian_dictionaries();
+        let segmenter = segmenter.select(ComplexScript::Lao).unwrap();
+        check_complex(
+            "ພາສາລາວພາສາລາວພາສາລາວ",
+            &["ພາສາ", "ລາວ", "ພາສາ", "ລາວ", "ພາສາ", "ລາວ"],
+            segmenter,
+        );
+    }
+
+    #[test]
+    fn test_dictionary_grapheme_rewind() {
+        let response: DataResponse<SegmenterDictionaryAutoV1> = Baked
             .load(DataRequest {
                 id: DataIdentifierBorrowed::for_marker_attributes(
                     DataMarkerAttributes::from_str_or_panic("cjdict"),
@@ -203,66 +217,23 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        let word_segmenter = WordSegmenter::new_dictionary();
-        let dict_segmenter = DictionarySegmenter::new(
-            response.payload.get(),
-            crate::provider::Baked::SINGLETON_GRAPHEME_CLUSTER_BREAK_DATA_V2_MARKER,
-        );
+        let dict_segmenter =
+            DictionarySegmenter::new(response.payload.get(), GraphemeClusterSegmenter::new());
 
-        // Match case
-        let s = "龟山岛龟山岛";
+        // Test that grapheme_iter is correctly rewound when trie traversal backtracks.
+        // In "エディターエディター":
+        // 1. "エディター" (15 bytes) is matched as an Intermediate dictionary word at byte 15.
+        // 2. Trie traversal continues exploring whether the compound prefix "エディターエディ..."
+        //    forms a longer dictionary word, advancing grapheme_iter past byte 15 in the process.
+        // 3. When trie traversal eventually hits NoMatch, self.iter rewinds to the last match
+        //    at byte 15.
+        // 4. Without rewinding grapheme_iter alongside self.iter, on the next call to next()
+        //    (starting from byte 15), grapheme_iter is already positioned ahead of byte 15.
+        //    When the second word's prefix "エディ" hits an Intermediate match at byte 24,
+        //    the grapheme boundary check fails because grapheme_iter skips past 24, causing
+        //    incorrect segmentation.
+        let s = "エディターエディター";
         let result: Vec<usize> = dict_segmenter.segment_str(s).collect();
-        assert_eq!(result, vec![9, 18]);
-
-        let result: Vec<usize> = word_segmenter.segment_str(s).collect();
-        assert_eq!(result, vec![0, 9, 18]);
-
-        let s_utf16: Vec<u16> = s.encode_utf16().collect();
-        let result: Vec<usize> = dict_segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(result, vec![3, 6]);
-
-        let result: Vec<usize> = word_segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(result, vec![0, 3, 6]);
-
-        // Match case, then no match case
-        let s = "エディターエディ";
-        let result: Vec<usize> = dict_segmenter.segment_str(s).collect();
-        assert_eq!(result, vec![15, 24]);
-
-        // TODO(#3236): Why is WordSegmenter not returning the middle segment?
-        let result: Vec<usize> = word_segmenter.segment_str(s).collect();
-        assert_eq!(result, vec![0, 24]);
-
-        let s_utf16: Vec<u16> = s.encode_utf16().collect();
-        let result: Vec<usize> = dict_segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(result, vec![5, 8]);
-
-        // TODO(#3236): Why is WordSegmenter not returning the middle segment?
-        let result: Vec<usize> = word_segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(result, vec![0, 8]);
-    }
-
-    #[test]
-    fn khmer_dictionary_test() {
-        let segmenter = LineSegmenter::new_dictionary();
-        let s = "ភាសាខ្មែរភាសាខ្មែរភាសាខ្មែរ";
-        let result: Vec<usize> = segmenter.segment_str(s).collect();
-        assert_eq!(result, vec![0, 27, 54, 81]);
-
-        let s_utf16: Vec<u16> = s.encode_utf16().collect();
-        let result: Vec<usize> = segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(result, vec![0, 9, 18, 27]);
-    }
-
-    #[test]
-    fn lao_dictionary_test() {
-        let segmenter = LineSegmenter::new_dictionary();
-        let s = "ພາສາລາວພາສາລາວພາສາລາວ";
-        let r: Vec<usize> = segmenter.segment_str(s).collect();
-        assert_eq!(r, vec![0, 12, 21, 33, 42, 54, 63]);
-
-        let s_utf16: Vec<u16> = s.encode_utf16().collect();
-        let r: Vec<usize> = segmenter.segment_utf16(&s_utf16).collect();
-        assert_eq!(r, vec![0, 4, 7, 11, 14, 18, 21]);
+        assert_eq!(result, vec![15, 30]);
     }
 }

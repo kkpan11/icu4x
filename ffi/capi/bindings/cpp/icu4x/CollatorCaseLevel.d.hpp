@@ -1,46 +1,52 @@
-#ifndef icu4x_CollatorCaseLevel_D_HPP
-#define icu4x_CollatorCaseLevel_D_HPP
+#ifndef ICU4X_CollatorCaseLevel_D_HPP
+#define ICU4X_CollatorCaseLevel_D_HPP
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <memory>
+#include <functional>
 #include <optional>
-#include "../diplomat_runtime.hpp"
+#include <cstdlib>
+#include "diplomat_runtime.hpp"
 
 
 namespace icu4x {
 namespace capi {
     enum CollatorCaseLevel {
-      CollatorCaseLevel_Auto = 0,
-      CollatorCaseLevel_Off = 1,
-      CollatorCaseLevel_On = 2,
+      CollatorCaseLevel_Off = 0,
+      CollatorCaseLevel_On = 1,
     };
+
+    typedef struct CollatorCaseLevel_option {union { CollatorCaseLevel ok; }; bool is_ok; } CollatorCaseLevel_option;
 } // namespace capi
 } // namespace
 
 namespace icu4x {
+/**
+ * See the [Rust documentation for `CaseLevel`](https://docs.rs/icu/2.3.1/icu/collator/options/enum.CaseLevel.html) for more information.
+ */
 class CollatorCaseLevel {
 public:
-  enum Value {
-    Auto = 0,
-    Off = 1,
-    On = 2,
-  };
+    enum Value {
+        Off = 0,
+        On = 1,
+    };
 
-  CollatorCaseLevel() = default;
-  // Implicit conversions between enum and ::Value
-  constexpr CollatorCaseLevel(Value v) : value(v) {}
-  constexpr operator Value() const { return value; }
-  // Prevent usage as boolean value
-  explicit operator bool() const = delete;
+    CollatorCaseLevel(): value(Value::Off) {}
 
-  inline icu4x::capi::CollatorCaseLevel AsFFI() const;
-  inline static icu4x::CollatorCaseLevel FromFFI(icu4x::capi::CollatorCaseLevel c_enum);
+    // Implicit conversions between enum and ::Value
+    constexpr CollatorCaseLevel(Value v) : value(v) {}
+    constexpr operator Value() const { return value; }
+    // Prevent usage as boolean value
+    explicit operator bool() const = delete;
+
+    inline icu4x::capi::CollatorCaseLevel AsFFI() const;
+    inline static icu4x::CollatorCaseLevel FromFFI(icu4x::capi::CollatorCaseLevel c_enum);
 private:
     Value value;
 };
 
 } // namespace
-#endif // icu4x_CollatorCaseLevel_D_HPP
+#endif // ICU4X_CollatorCaseLevel_D_HPP

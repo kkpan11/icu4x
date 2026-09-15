@@ -66,7 +66,7 @@ const P_FAST_MAX: u8 = 95;
 const Q_FAST_MAX: u8 = 95;
 
 /// The maximum allowable value of `p`. This could be raised if found to be necessary.
-/// Values exceeding P_FAST_MAX could use a different `p` algorithm by modifying [`f1`].
+/// Values exceeding `P_FAST_MAX` could use a different `p` algorithm by modifying [`f1`].
 #[cfg(feature = "alloc")] // used in the builder code
 const P_REAL_MAX: u8 = P_FAST_MAX;
 
@@ -238,8 +238,9 @@ where
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()
     }
+
     #[cfg(all(feature = "alloc", test))]
-    pub fn check(&self) -> Result<(), (&'static str, u8)> {
+    pub(crate) fn check(&self) -> Result<(), (&'static str, u8)> {
         use alloc::vec;
         let len = self.num_items();
         let mut seen = vec![false; len];
@@ -262,9 +263,10 @@ where
 impl PerfectByteHashMap<[u8]> {
     /// Creates an instance from pre-existing bytes. See [`Self::as_bytes`].
     #[inline]
+    #[allow(unsafe_code)] // transparent newtype casts are documented
     pub fn from_bytes(bytes: &[u8]) -> &Self {
         // Safety: Self is repr(transparent) over [u8]
-        unsafe { core::mem::transmute(bytes) }
+        unsafe { &*(bytes as *const [u8] as *const Self) }
     }
 }
 
@@ -288,9 +290,11 @@ mod tests {
     fn random_alphanums(seed: u64, len: usize) -> Vec<u8> {
         use rand::seq::SliceRandom;
         use rand::SeedableRng;
-        const BYTES: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+        let mut bytes: Vec<u8> =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".into();
         let mut rng = rand_pcg::Lcg64Xsh32::seed_from_u64(seed);
-        BYTES.choose_multiple(&mut rng, len).copied().collect()
+        bytes.partial_shuffle(&mut rng, len).0.into()
     }
 
     #[test]
@@ -474,8 +478,8 @@ mod tests {
         ];
         for cas in cases {
             let computed = PerfectByteHashMap::try_new(cas.keys.as_bytes()).expect(cas.keys);
-            assert_eq!(computed.as_bytes(), cas.expected, "{:?}", cas);
-            assert_eq!(computed.keys(), cas.reordered_keys.as_bytes(), "{:?}", cas);
+            assert_eq!(computed.as_bytes(), cas.expected, "{cas:?}");
+            assert_eq!(computed.keys(), cas.reordered_keys.as_bytes(), "{cas:?}");
             computed.check().expect(cas.keys);
         }
     }

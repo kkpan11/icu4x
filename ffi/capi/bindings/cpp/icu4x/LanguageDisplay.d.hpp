@@ -1,13 +1,15 @@
-#ifndef icu4x_LanguageDisplay_D_HPP
-#define icu4x_LanguageDisplay_D_HPP
+#ifndef ICU4X_LanguageDisplay_D_HPP
+#define ICU4X_LanguageDisplay_D_HPP
 
 #include <stdio.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <memory>
+#include <functional>
 #include <optional>
-#include "../diplomat_runtime.hpp"
+#include <cstdlib>
+#include "diplomat_runtime.hpp"
 
 
 namespace icu4x {
@@ -16,29 +18,37 @@ namespace capi {
       LanguageDisplay_Dialect = 0,
       LanguageDisplay_Standard = 1,
     };
+
+    typedef struct LanguageDisplay_option {union { LanguageDisplay ok; }; bool is_ok; } LanguageDisplay_option;
 } // namespace capi
 } // namespace
 
 namespace icu4x {
+/**
+ * See the [Rust documentation for `LanguageDisplay`](https://docs.rs/icu/2.3.1/icu/experimental/displaynames/enum.LanguageDisplay.html) for more information.
+ *
+ * 🚧 This API is unstable and may experience breaking changes outside major releases.
+ */
 class LanguageDisplay {
 public:
-  enum Value {
-    Dialect = 0,
-    Standard = 1,
-  };
+    enum Value {
+        Dialect = 0,
+        Standard = 1,
+    };
 
-  LanguageDisplay() = default;
-  // Implicit conversions between enum and ::Value
-  constexpr LanguageDisplay(Value v) : value(v) {}
-  constexpr operator Value() const { return value; }
-  // Prevent usage as boolean value
-  explicit operator bool() const = delete;
+    LanguageDisplay(): value(Value::Dialect) {}
 
-  inline icu4x::capi::LanguageDisplay AsFFI() const;
-  inline static icu4x::LanguageDisplay FromFFI(icu4x::capi::LanguageDisplay c_enum);
+    // Implicit conversions between enum and ::Value
+    constexpr LanguageDisplay(Value v) : value(v) {}
+    constexpr operator Value() const { return value; }
+    // Prevent usage as boolean value
+    explicit operator bool() const = delete;
+
+    inline icu4x::capi::LanguageDisplay AsFFI() const;
+    inline static icu4x::LanguageDisplay FromFFI(icu4x::capi::LanguageDisplay c_enum);
 private:
     Value value;
 };
 
 } // namespace
-#endif // icu4x_LanguageDisplay_D_HPP
+#endif // ICU4X_LanguageDisplay_D_HPP

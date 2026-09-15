@@ -7,7 +7,7 @@
 // described in LICENSE.
 
 // https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
-#![cfg_attr(not(any(test, feature = "std")), no_std)]
+#![cfg_attr(not(any(test, doc)), no_std)]
 #![cfg_attr(
     not(test),
     deny(
@@ -15,9 +15,6 @@
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::panic,
-        clippy::exhaustive_structs,
-        clippy::exhaustive_enums,
-        missing_debug_implementations,
     )
 )]
 #![warn(missing_docs)]
@@ -40,21 +37,20 @@
 //!
 //! ```
 //! use core::cmp::Ordering;
-//! use icu::collator::*;
+//! use icu::collator::{options::*, *};
 //! use icu::locale::locale;
 //!
-//! let locale_es = locale!("es-u-co-trad").into();
-//! let mut options = CollatorOptions::new();
+//! let mut options = CollatorOptions::default();
 //! options.strength = Some(Strength::Primary);
-//! let collator_es: Collator = Collator::try_new(&locale_es, options).unwrap();
+//! let collator_es =
+//!     Collator::try_new(locale!("es-u-co-trad").into(), options).unwrap();
 //!
 //! // "pollo" > "polvo" in traditional Spanish
 //! assert_eq!(collator_es.compare("pollo", "polvo"), Ordering::Greater);
 //!
-//! let locale_en = locale!("en").into();
-//! let mut options = CollatorOptions::new();
+//! let mut options = CollatorOptions::default();
 //! options.strength = Some(Strength::Primary);
-//! let collator_en: Collator = Collator::try_new(&locale_en, options).unwrap();
+//! let collator_en = Collator::try_new(locale!("en").into(), options).unwrap();
 //!
 //! // "pollo" < "polvo" according to English rules
 //! assert_eq!(collator_en.compare("pollo", "polvo"), Ordering::Less);
@@ -67,18 +63,55 @@
 //!
 //! ## Strength
 //!
-//! The degree of sensitivity in how to determine that strings are distinct.
+//! The collation strength indicates how many levels to compare. The primary
+//! level considers base letters, i.e. 'a' and 'b' are unequal but 'E' and 'é'
+//! are equal, with higher levels dealing with distinctions such as accents
+//! and case.
+//!
+//! If an lower level isn't equal, the lower level is decisive.
+//! If the comparison result is equal on one level,
+//! but the collator's strength input value is higher than that,
+//! then the collator comparison iteratively proceeds to the next higher level.
+//!
+//! Note that lowering the strength value given to the collator means that more user-perceptible
+//!  differences will compare as equal. This may make sense when sorting more complex structures
+//! where the string to be compared is just one field, and ties between strings
+//! that differ only in case, accent, or similar are resolved by comparing some
+//! secondary field in the larger structure to be sorted.
+//!
+//! Therefore, if the sort is just a string sort without some other field for
+//! resolving ties, lowering the strength means that factors that don't make
+//! sense to the user (such as the order of items prior to sorting with a stable
+//! sort algorithm or the internal details of a sorting algorithm that doesn't
+//! provide the stability property) affect the relative order of strings that
+//! do have user-perceptible differences particularly in accents or case.
+//!
+//! Lowering the strength is less of a perfomance optimization than it may seem
+//! directly from the above description. As described above, in the case
+//! of identical strings to be compared, the algorithm has to work though all
+//! the levels, from primary up to the provided strength value given to collator, without an early exit. However, this
+//! collator implements an identical prefix optimization, which examines the
+//! code units of the strings to be compared to skip the identical prefix before
+//! starting the actual collation algorithm. When the strings to be compared
+//! are identical on the byte level, they are found to be equal without the
+//! actual collation algorithm running at all! Therefore, the strength setting
+//! only has an effect (whether order effect or performance effect) for
+//! comparisons where the strings to be compared are not equal on the byte level
+//! but are equal on the primary level/strength. The common cases are that
+//! a comparison is decided on the primary level or the strings are byte
+//! equal, which narrows the performance effect of lowering the strength
+//! setting.
 //!
 //! ```
 //! use core::cmp::Ordering;
-//! use icu::collator::*;
+//! use icu::collator::{options::*, *};
 //!
 //! // Primary Level
 //!
-//! let mut options_l1 = CollatorOptions::new();
+//! let mut options_l1 = CollatorOptions::default();
 //! options_l1.strength = Some(Strength::Primary);
-//! let collator_l1: Collator =
-//!     Collator::try_new(&Default::default(), options_l1).unwrap();
+//! let collator_l1 =
+//!     Collator::try_new(Default::default(), options_l1).unwrap();
 //!
 //! assert_eq!(collator_l1.compare("a", "b"), Ordering::Less); // primary
 //! assert_eq!(collator_l1.compare("as", "às"), Ordering::Equal); // secondary
@@ -89,10 +122,10 @@
 //!
 //! // Secondary Level
 //!
-//! let mut options_l2 = CollatorOptions::new();
+//! let mut options_l2 = CollatorOptions::default();
 //! options_l2.strength = Some(Strength::Secondary);
-//! let collator_l2: Collator =
-//!     Collator::try_new(&Default::default(), options_l2).unwrap();
+//! let collator_l2 =
+//!     Collator::try_new(Default::default(), options_l2).unwrap();
 //!
 //! assert_eq!(collator_l2.compare("a", "b"), Ordering::Less); // primary
 //! assert_eq!(collator_l2.compare("as", "às"), Ordering::Less); // secondary
@@ -103,10 +136,10 @@
 //!
 //! // Tertiary Level
 //!
-//! let mut options_l3 = CollatorOptions::new();
+//! let mut options_l3 = CollatorOptions::default();
 //! options_l3.strength = Some(Strength::Tertiary);
-//! let collator_l3: Collator =
-//!     Collator::try_new(&Default::default(), options_l3).unwrap();
+//! let collator_l3 =
+//!     Collator::try_new(Default::default(), options_l3).unwrap();
 //!
 //! assert_eq!(collator_l3.compare("a", "b"), Ordering::Less); // primary
 //! assert_eq!(collator_l3.compare("as", "às"), Ordering::Less); // secondary
@@ -129,16 +162,16 @@
 //!
 //! ```
 //! use core::cmp::Ordering;
-//! use icu::collator::*;
+//! use icu::collator::{*, options::*};
 //!
 //! // If alternate handling is set to `NonIgnorable`, then differences among
 //! // these characters are of the same importance as differences among letters.
 //!
-//! let mut options_3n = CollatorOptions::new();
+//! let mut options_3n = CollatorOptions::default();
 //! options_3n.strength = Some(Strength::Tertiary);
 //! options_3n.alternate_handling = Some(AlternateHandling::NonIgnorable);
-//! let collator_3n: Collator =
-//!     Collator::try_new(&Default::default(), options_3n).unwrap();
+//! let collator_3n =
+//!     Collator::try_new(Default::default(), options_3n).unwrap();
 //!
 //! assert_eq!(collator_3n.compare("di Silva", "Di Silva"), Ordering::Less);
 //! assert_eq!(collator_3n.compare("Di Silva", "diSilva"), Ordering::Less);
@@ -149,22 +182,22 @@
 //! // importance. The Shifted value is often used in combination with Strength
 //! // set to Quaternary.
 //!
-//! let mut options_3s = CollatorOptions::new();
+//! let mut options_3s = CollatorOptions::default();
 //! options_3s.strength = Some(Strength::Tertiary);
 //! options_3s.alternate_handling = Some(AlternateHandling::Shifted);
-//! let collator_3s: Collator =
-//!     Collator::try_new(&Default::default(), options_3s).unwrap();
+//! let collator_3s =
+//!     Collator::try_new(Default::default(), options_3s).unwrap();
 //!
 //! assert_eq!(collator_3s.compare("di Silva", "diSilva"), Ordering::Equal);
 //! assert_eq!(collator_3s.compare("diSilva", "Di Silva"), Ordering::Less);
 //! assert_eq!(collator_3s.compare("Di Silva", "U.S.A."), Ordering::Less);
 //! assert_eq!(collator_3s.compare("U.S.A.", "USA"), Ordering::Equal);
 //!
-//! let mut options_4s = CollatorOptions::new();
+//! let mut options_4s = CollatorOptions::default();
 //! options_4s.strength = Some(Strength::Quaternary);
 //! options_4s.alternate_handling = Some(AlternateHandling::Shifted);
-//! let collator_4s: Collator =
-//!     Collator::try_new(&Default::default(), options_4s).unwrap();
+//! let collator_4s =
+//!     Collator::try_new(Default::default(), options_4s).unwrap();
 //!
 //! assert_eq!(collator_4s.compare("di Silva", "diSilva"), Ordering::Less);
 //! assert_eq!(collator_4s.compare("diSilva", "Di Silva"), Ordering::Less);
@@ -179,15 +212,15 @@
 //!
 //! ```
 //! use core::cmp::Ordering;
-//! use icu::collator::*;
+//! use icu::collator::{*, options::*};
 //!
 //! // Primary
 //!
-//! let mut options = CollatorOptions::new();
+//! let mut options = CollatorOptions::default();
 //! options.strength = Some(Strength::Primary);
 //! options.case_level = Some(CaseLevel::Off);
 //! let primary =
-//!   Collator::try_new(&Default::default(),
+//!   Collator::try_new(Default::default(),
 //!                     options).unwrap();
 //!
 //! assert_eq!(primary.compare("ⓓⓔⓐⓛ", "DEAL"), Ordering::Equal);
@@ -199,7 +232,7 @@
 //! options.strength = Some(Strength::Primary);
 //! options.case_level = Some(CaseLevel::On);
 //! let primary_and_case =
-//!   Collator::try_new(&Default::default(),
+//!   Collator::try_new(Default::default(),
 //!                     options).unwrap();
 //!
 //! assert_eq!(primary_and_case.compare("ⓓⓔⓐⓛ", "DEAL"), Ordering::Less);
@@ -211,7 +244,7 @@
 //! options.strength = Some(Strength::Secondary);
 //! options.case_level = Some(CaseLevel::On);
 //! let secondary_and_case =
-//!   Collator::try_new(&Default::default(),
+//!   Collator::try_new(Default::default(),
 //!                     options).unwrap();
 //!
 //! assert_eq!(secondary_and_case.compare("ⓓⓔⓐⓛ", "DEAL"), Ordering::Less);
@@ -223,7 +256,7 @@
 //! options.strength = Some(Strength::Tertiary);
 //! options.case_level = Some(CaseLevel::Off);
 //! let tertiary =
-//!   Collator::try_new(&Default::default(),
+//!   Collator::try_new(Default::default(),
 //!                     options).unwrap();
 //!
 //! assert_eq!(tertiary.compare("ⓓⓔⓐⓛ", "DEAL"), Ordering::Less);
@@ -231,14 +264,52 @@
 //! assert_eq!(tertiary.compare("dejavu", "déjavu"), Ordering::Less);
 //! ```
 //!
-//! ## Case First
-//!
-//! Whether to swap the ordering of uppercase and lowercase.
 //!
 //! ## Backward second level
 //!
 //! Compare the second level in backward order. The default is `false` (off), except for Canadian
 //! French.
+//!
+//! ## Examples of `CollatorPreferences`
+//!
+//! The [`CollatorPreferences`] struct configures specific custom behavior for the `Collator`, like
+//! [`CollatorOptions`]. However, unlike `CollatorOptions`, this set of preferences can also be set
+//! implicitly by the locale. See docs for [`CollatorPreferences`] for more details.
+//! Some basic descriptions and examples are below.
+//!
+//! ## Case First
+//!
+//! Whether to swap the ordering of uppercase and lowercase.
+//!
+//! ```
+//! use core::cmp::Ordering;
+//! use icu::collator::preferences::*;
+//! use icu::collator::{options::*, *};
+//!
+//! // Use the locale's default.
+//!
+//! let mut prefs_no_case = CollatorPreferences::default();
+//! prefs_no_case.case_first = Some(CollationCaseFirst::False);
+//! let collator_no_case =
+//!     Collator::try_new(prefs_no_case, Default::default()).unwrap();
+//! assert_eq!(collator_no_case.compare("ab", "AB"), Ordering::Less);
+//!
+//! // Lowercase is less
+//!
+//! let mut prefs_lower_less = CollatorPreferences::default();
+//! prefs_lower_less.case_first = Some(CollationCaseFirst::Lower);
+//! let collator_lower_less =
+//!     Collator::try_new(prefs_lower_less, Default::default()).unwrap();
+//! assert_eq!(collator_lower_less.compare("ab", "AB"), Ordering::Less);
+//!
+//! // Uppercase is less
+//!
+//! let mut prefs_upper_greater = CollatorPreferences::default();
+//! prefs_upper_greater.case_first = Some(CollationCaseFirst::Upper);
+//! let collator_upper_greater =
+//!     Collator::try_new(prefs_upper_greater, Default::default()).unwrap();
+//! assert_eq!(collator_upper_greater.compare("AB", "ab"), Ordering::Less);
+//! ```
 //!
 //! ## Numeric
 //!
@@ -248,24 +319,29 @@
 //!
 //! ```
 //! use core::cmp::Ordering;
-//! use icu::collator::*;
+//! use icu::collator::preferences::*;
+//! use icu::collator::{options::*, *};
 //!
 //! // Numerical sorting off
 //!
-//! let mut options_num_off = CollatorOptions::new();
-//! options_num_off.numeric = Some(Numeric::Off);
-//! let collator_num_off: Collator =
-//!     Collator::try_new(&Default::default(), options_num_off).unwrap();
+//! let mut prefs_num_off = CollatorPreferences::default();
+//! prefs_num_off.numeric_ordering = Some(CollationNumericOrdering::False);
+//! let collator_num_off =
+//!     Collator::try_new(prefs_num_off, Default::default()).unwrap();
 //! assert_eq!(collator_num_off.compare("a10b", "a2b"), Ordering::Less);
 //!
 //! // Numerical sorting on
 //!
-//! let mut options_num_on = CollatorOptions::new();
-//! options_num_on.numeric = Some(Numeric::On);
-//! let collator_num_on: Collator =
-//!     Collator::try_new(&Default::default(), options_num_on).unwrap();
+//! let mut prefs_num_on = CollatorPreferences::default();
+//! prefs_num_on.numeric_ordering = Some(CollationNumericOrdering::True);
+//! let collator_num_on =
+//!     Collator::try_new(prefs_num_on, Default::default()).unwrap();
 //! assert_eq!(collator_num_on.compare("a10b", "a2b"), Ordering::Greater);
 //! ```
+//!
+//! [`CollatorOptions`]: options::CollatorOptions
+
+extern crate alloc;
 
 mod comparison;
 #[cfg(doc)]
@@ -277,18 +353,25 @@ pub mod docs;
 // name of that struct without coordination.
 mod elements;
 
-mod options;
+pub mod options;
 pub mod provider;
 
-extern crate alloc;
-
 pub use comparison::Collator;
-pub use options::AlternateHandling;
-pub use options::BackwardSecondLevel;
-pub use options::CaseFirst;
-pub use options::CaseLevel;
-pub use options::CollatorOptions;
-pub use options::MaxVariable;
-pub use options::Numeric;
-pub use options::ResolvedCollatorOptions;
-pub use options::Strength;
+pub use comparison::CollatorBorrowed;
+pub use comparison::CollatorPreferences;
+
+#[cfg(feature = "unstable")]
+pub use comparison::CollationKeySink;
+
+/// Locale preferences used by this crate
+pub mod preferences {
+    /// **This is a reexport of a type in [`icu::locale`](icu_locale_core::preferences::extensions::unicode::keywords)**.
+    #[doc = "\n"] // prevent autoformatting
+    pub use icu_locale_core::preferences::extensions::unicode::keywords::CollationCaseFirst;
+    /// **This is a reexport of a type in [`icu::locale`](icu_locale_core::preferences::extensions::unicode::keywords)**.
+    #[doc = "\n"] // prevent autoformatting
+    pub use icu_locale_core::preferences::extensions::unicode::keywords::CollationNumericOrdering;
+    /// **This is a reexport of a type in [`icu::locale`](icu_locale_core::preferences::extensions::unicode::keywords)**.
+    #[doc = "\n"] // prevent autoformatting
+    pub use icu_locale_core::preferences::extensions::unicode::keywords::CollationType;
+}

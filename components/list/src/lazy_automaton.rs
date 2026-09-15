@@ -2,8 +2,8 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use regex_automata::dfa::sparse::DFA;
 use regex_automata::dfa::Automaton;
+use regex_automata::dfa::sparse::DFA;
 use regex_automata::util::{primitives::StateID, start::Config as StartConfig};
 use writeable::Writeable;
 
@@ -56,8 +56,8 @@ impl<T: AsRef<[u8]>> LazyAutomaton for DFA<T> {
 #[test]
 fn test() {
     use crate::provider::SerdeDFA;
-    use alloc::borrow::Cow;
     use regex_automata::Input;
+    use std::borrow::Cow;
 
     let matcher = SerdeDFA::new(Cow::Borrowed("^11(000)*$")).unwrap();
 
@@ -77,7 +77,7 @@ fn test() {
 
     struct ExitEarlyTest;
 
-    impl writeable::Writeable for ExitEarlyTest {
+    impl Writeable for ExitEarlyTest {
         fn write_to<W: core::fmt::Write + ?Sized>(&self, sink: &mut W) -> core::fmt::Result {
             sink.write_str("12")?;
             unreachable!()

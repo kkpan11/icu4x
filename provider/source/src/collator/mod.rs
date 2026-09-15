@@ -8,328 +8,385 @@
 use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
 use icu::collator::provider::*;
-use icu::collections::codepointtrie::CodePointTrie;
-use icu::locale::extensions::unicode::{key, value};
-use icu::locale::provider::CollationFallbackSupplementV1Marker;
-use icu::locale::provider::LocaleFallbackSupplementV1;
-use icu::locale::subtags::language;
-use icu::locale::subtags::Language;
-use icu::locale::subtags::Region;
-use icu::locale::subtags::Script;
-use icu::locale::LanguageIdentifier;
+use icu::locale::{
+    data_locale,
+    subtags::{language, script},
+};
 use icu_provider::prelude::*;
 use std::collections::HashSet;
-use std::convert::TryFrom;
-use writeable::Writeable;
-use zerovec::ule::UnvalidatedStr;
 use zerovec::ZeroVec;
 
 mod collator_serde;
 
-impl DataProvider<CollationFallbackSupplementV1Marker> for SourceDataProvider {
-    fn load(
-        &self,
-        req: DataRequest,
-    ) -> Result<DataResponse<CollationFallbackSupplementV1Marker>, DataError> {
-        self.check_req::<CollationFallbackSupplementV1Marker>(req)?;
-
-        let parent_locales = &self
-            .cldr()?
-            .core()
-            .read_and_parse::<crate::cldr_serde::parent_locales::Resource>(
-                "supplemental/parentLocales.json",
-            )?
-            .supplemental
-            .parent_locales;
-
-        let additional = if parent_locales
-            .rules
-            .collations
-            .as_ref()
-            .map(|c| &c.non_likely_scripts)
-            != Some(&String::from("root"))
-        {
-            let collation_locales = self
-                .icuexport()?
-                .list(&format!("collation/{}", self.collation_han_database()))?
-                .filter_map(|s| Some(file_name_to_locale(s.rsplit_once('_')?.0)?.language()))
-                .collect::<HashSet<_>>();
-
-            parent_locales
-                .parent_locale
-                .iter()
-                .filter(|(k, _)| collation_locales.contains(&k.language))
-                .filter(|(from, to)| {
-                    // Script gets removed while language changes. For collation we want to insert the script-removal as its
-                    // own step.
-                    from.script.is_some() && to.script.is_none() && from.language != to.language
-                })
-                .map(|(from, _)| (from.to_string(), (from.language, None, from.region)))
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        let parents = additional
-            .iter()
-            .map(|(k, v)| (UnvalidatedStr::from_str(k), *v))
-            .chain(parent_locales.collations.iter().map(|(from, to)| {
-                (
-                    <&UnvalidatedStr>::from(from.as_str()),
-                    <(Language, Option<Script>, Option<Region>)>::from(to),
-                )
-            }))
-            .collect();
-
-        let data = LocaleFallbackSupplementV1 {
-            parents,
-            unicode_extension_defaults: [
-                (
-                    key!("co"),
-                    <&UnvalidatedStr>::from("zh"),
-                    <&UnvalidatedStr>::from("pinyin"),
-                ),
-                (
-                    key!("co"),
-                    <&UnvalidatedStr>::from("zh-Hant"),
-                    <&UnvalidatedStr>::from("stroke"),
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        };
-        Ok(DataResponse {
-            metadata: Default::default(),
-            payload: DataPayload::from_owned(data),
-        })
-    }
-}
-
-impl crate::IterableDataProviderCached<CollationFallbackSupplementV1Marker> for SourceDataProvider {
-    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        Ok(HashSet::from_iter([Default::default()]))
-    }
-}
-
-fn locale_to_file_name(locale: &DataLocale) -> String {
-    let mut s = if locale.get_langid() == LanguageIdentifier::UND {
+#[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+fn id_to_file_name(id: DataIdentifierBorrowed) -> String {
+    let mut s = if id.locale.is_unknown() {
         "root".to_owned()
     } else {
-        locale
-            .get_langid()
-            .write_to_string()
+        id.locale
+            .to_string()
             .replace('-', "_")
             .replace("posix", "POSIX")
     };
-    if let Some(extension) = &locale.get_unicode_ext(&key!("co")) {
-        s.push('_');
-        s.push_str(match extension.to_string().as_str() {
-            "trad" => "traditional",
-            "phonebk" => "phonebook",
-            "dict" => "dictionary",
-            "gb2312" => "gb2312han",
-            extension => extension,
-        });
-    } else if locale.get_langid().language == language!("zh") {
-        // "zh" uses "_pinyin" as the default
-        s.push_str("_pinyin");
-    } else {
-        // Everyting else uses "_standard"
-        s.push_str("_standard");
+
+    // und_Hant -> zh_stroke
+    // und_Hans -> zh_pinyin
+    // und_Hani/x -> zh_x
+
+    if s == "und_Hant" {
+        return "zh_stroke".into();
+    } else if s == "und_Hans" {
+        return "zh_pinyin".into();
+    } else if s == "und_Hani" {
+        s = "zh".into();
     }
+
+    s.push('_');
+    s.push_str(match id.marker_attributes.as_str() {
+        "" => "standard",
+        "trad" => "traditional",
+        "phonebk" => "phonebook",
+        "dict" => "dictionary",
+        extension => extension,
+    });
     s
 }
 
-fn file_name_to_locale(file_name: &str) -> Option<DataLocale> {
-    let (language, variant) = file_name.rsplit_once('_').unwrap();
-    let mut locale = if language == "root" {
-        DataLocale::default()
-    } else {
-        language.parse().ok()?
-    };
-
-    // See above for the two special cases.
-    if language == "zh" {
-        if variant == "pinyin" {
-            return Some(locale);
-        }
-    } else if variant == "standard" {
-        return Some(locale);
+fn file_name_to_ids(file_name: &str) -> Vec<DataIdentifierCow<'static>> {
+    let (mut language, mut variant) = file_name.rsplit_once('_').unwrap();
+    if language == "root" {
+        language = "und";
     }
 
-    locale.set_unicode_ext(
-        key!("co"),
-        match variant {
-            "traditional" => value!("trad"),
-            "phonebook" => value!("phonebk"),
-            "dictionary" => value!("dict"),
-            "gb2312han" => value!("gb2312"),
-            _ => variant.parse().unwrap(),
-        },
-    );
+    let mut r = vec![];
 
-    Some(locale)
+    let Ok(mut locale) = DataLocale::try_from_str(&language.replace('_', "-")) else {
+        return Default::default();
+    };
+
+    if language == "zh" {
+        locale.language = language!("und");
+        locale.script = Some(script!("Hani"));
+        if variant == "pinyin" {
+            // Pinyin is stored in both und-Hans and und-Hani/pinyin
+            r.push(DataIdentifierCow::from_borrowed_and_owned(
+                Default::default(),
+                data_locale!("und-Hans"),
+            ));
+        } else if variant == "stroke" {
+            // Stroke is stored in both und-Hans and und-Hani/stroke
+            r.push(DataIdentifierCow::from_borrowed_and_owned(
+                Default::default(),
+                data_locale!("und-Hant"),
+            ));
+        }
+    } else if variant == "standard" {
+        variant = "";
+    }
+
+    let marker_attributes = match variant {
+        "traditional" => DataMarkerAttributes::from_str_or_panic("trad").to_owned(),
+        "phonebook" => DataMarkerAttributes::from_str_or_panic("phonebk").to_owned(),
+        "dictionary" => DataMarkerAttributes::from_str_or_panic("dict").to_owned(),
+        v => match DataMarkerAttributes::try_from_str(v) {
+            Ok(s) => s.to_owned(),
+            _ => return r,
+        },
+    };
+
+    r.push(DataIdentifierCow::from_owned(marker_attributes, locale));
+    r
+}
+
+impl SourceDataProvider {
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn load_toml<T>(&self, id: DataIdentifierBorrowed, suffix: &str) -> Result<&T, DataError>
+    where
+        for<'de> T: serde::Deserialize<'de> + 'static + Send + Sync,
+    {
+        self.icuexport()?
+            .read_and_parse_toml(&format!(
+                "collation/{}/{}{}.toml",
+                self.collation_root_han(),
+                id_to_file_name(id),
+                suffix
+            ))
+            .map_err(|e| match e.kind {
+                DataErrorKind::Io(std::io::ErrorKind::NotFound) => {
+                    DataErrorKind::IdentifierNotFound.into_error()
+                }
+                _ => e,
+            })
+    }
+
+    fn list_ids(&self, suffix: &str) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+        Ok(self
+            .icuexport()?
+            .list(&format!("collation/{}", self.collation_root_han()))?
+            // Root data should not be listed for tailorings
+            .filter(|p| !p.ends_with("root_standard_data.toml"))
+            .filter_map(|mut file_name| {
+                file_name.truncate(file_name.len() - ".toml".len());
+                file_name.ends_with(suffix).then(|| {
+                    file_name.truncate(file_name.len() - suffix.len());
+                    file_name
+                })
+            })
+            .flat_map(|s| file_name_to_ids(&s))
+            .collect())
+    }
 }
 
 macro_rules! collation_provider {
-    ($(($marker:ident, $serde_struct:ident, $suffix:literal, $conversion:expr)),+, $toml_data:ident) => {
+    ($(($marker:ident, $serde_struct:ident),)+) => {
         $(
             impl DataProvider<$marker> for SourceDataProvider {
                 fn load(&self, req: DataRequest) -> Result<DataResponse<$marker>, DataError> {
-                    self.check_req::<$marker>(req)?;
-                    let $toml_data: &collator_serde::$serde_struct = self
-                        .icuexport()?
-                        .read_and_parse_toml(&format!(
-                            "collation/{}/{}{}.toml",
-                            self.collation_han_database(),
-                            locale_to_file_name(&req.id.locale),
-                            $suffix
-                        ))
-                        .map_err(|e| match e.kind {
-                            DataErrorKind::Io(std::io::ErrorKind::NotFound) => {
-                                DataErrorKind::IdentifierNotFound.with_req($marker::INFO, req)
-                            }
-                            _ => e,
-                        })?;
+                    #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+                    return Err(DataError::custom(
+                        "icu_provider_source must be built with use_icu4c or use_wasm to build collation data",
+                    )
+                    .with_req($marker::INFO, req));
+                    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+                    {
+                        self.check_req::<$marker>(req)?;
 
-                    Ok(DataResponse {
-                        metadata: Default::default(),
-                        // The struct conversion is macro-based instead of
-                        // using a method on the Serde struct, because the
-                        // method approach caused lifetime issues that I
-                        // didn't know how to solve.
-                        payload: DataPayload::from_owned($conversion),
-                    })
+                        let has_tailoring = self.list_ids("_data")?
+                            .contains(&DataIdentifierCow::from_borrowed_and_owned(&req.id.marker_attributes, *req.id.locale));
+
+                        Ok(DataResponse {
+                            metadata: Default::default(),
+                            payload: DataPayload::from_owned(self.load_toml::<collator_serde::$serde_struct>(req.id, <collator_serde::$serde_struct>::suffix()).and_then(|s| s.convert(has_tailoring)).map_err(|e| e.with_req(<$marker>::INFO, req))?),
+                        })
+                    }
                 }
             }
 
             impl IterableDataProviderCached<$marker> for SourceDataProvider {
                 fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-                    Ok(self
-                        .icuexport()?
-                        .list(&format!(
-                            "collation/{}",
-                            self.collation_han_database()
-                        ))?
-                        .filter_map(|mut file_name| {
-                            file_name.truncate(file_name.len() - ".toml".len());
-                            file_name.ends_with($suffix).then(|| {
-                                file_name.truncate(file_name.len() - $suffix.len());
-                                file_name
-                            })
-                        })
-                        .filter_map(|s| file_name_to_locale(&s))
-                        .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
-                        .collect())
+                    self.list_ids(<collator_serde::$serde_struct>::suffix())
                 }
             }
         )+
+
+        #[test]
+        fn test_all_fallback_overrides_handled() {
+            let provider = SourceDataProvider::new_testing();
+            let fallback_provider = icu_provider_adapters::fallback::LocaleFallbackProvider::new(
+                &provider,
+                icu::locale::LocaleFallbacker::try_new_unstable(&provider).unwrap(),
+            );
+
+            let required_overrides = &provider
+                .cldr()
+                .unwrap()
+                .core()
+                .read_and_parse::<super::cldr_serde::parent_locales::Resource>(
+                    "supplemental/parentLocales.json",
+                )
+                .unwrap()
+                .supplemental
+                .parent_locales
+                .collations;
+
+            for (locale, parent) in required_overrides {
+                let locale = locale.into();
+                let parent = parent.into();
+
+                $(
+                    if !$marker::INFO.is_singleton {
+                        for attribute in IterableDataProvider::<$marker>::iter_ids(&provider)
+                            .unwrap()
+                            .into_iter()
+                            .filter(|id| id.locale == locale)
+                            .map(|id| id.marker_attributes)
+                            .collect::<HashSet<_>>()
+                        {
+                            let locale = DataIdentifierBorrowed::for_marker_attributes_and_locale(&*attribute, &locale);
+                            let parent = DataIdentifierBorrowed::for_marker_attributes_and_locale(&*attribute, &parent);
+                            assert_eq!(
+                                DataProvider::<$marker>::load(&fallback_provider, DataRequest { id: locale, ..Default::default() })
+                                    .as_ref()
+                                    .map(|response| response.payload.get()),
+                                DataProvider::<$marker>::load(&fallback_provider, DataRequest { id: parent, ..Default::default() })
+                                    .as_ref()
+                                    .map(|response| response.payload.get()),
+                                "{locale:?} should match {parent:?} for {:?}", $marker::INFO
+                            );
+                        }
+                    }
+                )+
+            }
+        }
     };
 }
 
 collation_provider!(
-    (
-        CollationDataV1Marker,
-        CollationData,
-        "_data",
-        icu::collator::provider::CollationDataV1 {
-            trie: CodePointTrie::<u32>::try_from(&toml_data.trie)
-                .map_err(|e| DataError::custom("trie conversion").with_display_context(&e))?,
-            contexts: ZeroVec::alloc_from_slice(&toml_data.contexts),
-            ce32s: ZeroVec::alloc_from_slice(&toml_data.ce32s),
-            ces: toml_data.ces.iter().map(|i| *i as u64).collect(),
-        }
-    ),
-    (
-        CollationDiacriticsV1Marker,
-        CollationDiacritics,
-        "_dia",
-        icu::collator::provider::CollationDiacriticsV1 {
-            secondaries: ZeroVec::alloc_from_slice(&toml_data.secondaries),
-        }
-    ),
-    (
-        CollationJamoV1Marker,
-        CollationJamo,
-        "_jamo",
-        icu::collator::provider::CollationJamoV1 {
-            ce32s: ZeroVec::alloc_from_slice(&toml_data.ce32s),
-        }
-    ),
-    (
-        CollationMetadataV1Marker,
-        CollationMetadata,
-        "_meta",
-        icu::collator::provider::CollationMetadataV1 {
-            bits: toml_data.bits,
-        }
-    ),
-    (
-        CollationReorderingV1Marker,
-        CollationReordering,
-        "_reord",
-        icu::collator::provider::CollationReorderingV1 {
-            min_high_no_reorder: toml_data.min_high_no_reorder,
-            reorder_table: ZeroVec::alloc_from_slice(&toml_data.reorder_table),
-            reorder_ranges: ZeroVec::alloc_from_slice(&toml_data.reorder_ranges),
-        }
-    ),
-    (
-        CollationSpecialPrimariesV1Marker,
-        CollationSpecialPrimaries,
-        "_prim",
-        icu::collator::provider::CollationSpecialPrimariesV1 {
-            last_primaries: ZeroVec::alloc_from_slice(&toml_data.last_primaries),
-            numeric_primary: toml_data.numeric_primary,
-        }
-    ),
-    toml_data
+    (CollationDiacriticsV1, CollationDiacritics),
+    (CollationJamoV1, CollationJamo),
+    (CollationMetadataV1, CollationMetadata),
+    (CollationReorderingV1, CollationReordering),
+    (CollationSpecialPrimariesV1, CollationSpecialPrimaries),
+    (CollationRootV1, CollationData),
+    (CollationTailoringV1, CollationData),
 );
 
-#[test]
-
-fn test_zh_non_baked() {
-    use core::cmp::Ordering;
-    use icu::collator::{Collator, CollatorOptions};
-    use icu::locale::fallback::LocaleFallbacker;
-    use icu_provider_adapters::fallback::LocaleFallbackProvider;
-
-    let provider = LocaleFallbackProvider::new(
-        SourceDataProvider::new_testing(),
-        LocaleFallbacker::new_without_data(),
-    );
-
-    // Note: ㄅ is Bopomofo.
-    {
-        let locale = "zh-u-co-gb2312".parse().unwrap();
-        let collator =
-            Collator::try_new_unstable(&provider, &locale, CollatorOptions::new()).unwrap();
-        assert_eq!(collator.compare("艾", "a"), Ordering::Greater);
-        assert_eq!(collator.compare("佰", "a"), Ordering::Greater);
-        assert_eq!(collator.compare("ㄅ", "a"), Ordering::Greater);
-        assert_eq!(collator.compare("ㄅ", "ж"), Ordering::Greater);
-
-        // TODO(#5136): broken, these should be equal
-        assert_ne!(collator.compare("艾", "佰"), Ordering::Less);
-        // In GB2312 proper, Bopomofo comes before Han, but the
-        // collation leaves Bopomofo unreordered, so it comes after.
-        assert_ne!(collator.compare("艾", "ㄅ"), Ordering::Less);
-        assert_ne!(collator.compare("佰", "ㄅ"), Ordering::Less);
-        assert_ne!(collator.compare("不", "把"), Ordering::Greater);
+impl collator_serde::CollationData {
+    fn suffix() -> &'static str {
+        "_data"
     }
-    {
-        let locale = "zh-u-co-big5han".parse().unwrap();
-        let collator =
-            Collator::try_new_unstable(&provider, &locale, CollatorOptions::new()).unwrap();
-        assert_eq!(collator.compare("艾", "a"), Ordering::Greater);
-        assert_eq!(collator.compare("佰", "a"), Ordering::Greater);
-        assert_eq!(collator.compare("ㄅ", "a"), Ordering::Greater);
-        assert_eq!(collator.compare("不", "把"), Ordering::Less);
 
-        // TODO(#5136): broken, these should be equal
-        assert_ne!(collator.compare("ㄅ", "ж"), Ordering::Less);
-        assert_ne!(collator.compare("艾", "佰"), Ordering::Less);
-        assert_ne!(collator.compare("艾", "ㄅ"), Ordering::Less);
-        assert_ne!(collator.compare("佰", "ㄅ"), Ordering::Less);
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn convert(&self, _has_tailoring: bool) -> Result<CollationData<'static>, DataError> {
+        use icu::collections::codepointtrie::CodePointTrie;
+        use icu_codepointtrie_builder::CodePointTrieBuilder;
+
+        let trie = CodePointTrie::<u32>::try_from(&self.trie)
+            .map_err(|e| DataError::custom("trie conversion").with_display_context(&e))?;
+
+        let mut builder = CodePointTrieBuilder::new(
+            trie.get('\u{10FFFF}'),
+            trie.get32(u32::MAX),
+            icu::collections::codepointtrie::TrieType::Small,
+        );
+
+        for i in 0..0xAC00 {
+            builder.set_value(i, trie.get32(i));
+        }
+        for _ in 0xAC00..0xD7A4 {
+            // Use the default value for Hangul syllables. We are not
+            // relying on the collation data to catch Hangul syllables.
+            // Furthermore, having non-default values in this range is
+            // bad for tailorings whose characters of interest are
+            // below the fast-access boundary for the small trie type.
+        }
+        for i in 0xD7A4..=(char::MAX as u32) {
+            builder.set_value(i, trie.get32(i));
+        }
+
+        Ok(CollationData {
+            trie: builder.build(),
+            contexts: ZeroVec::alloc_from_slice(&self.contexts),
+            ce32s: ZeroVec::alloc_from_slice(&self.ce32s),
+            ces: self.ces.iter().map(|i| *i as u64).collect(),
+        })
+    }
+}
+
+impl collator_serde::CollationDiacritics {
+    fn suffix() -> &'static str {
+        "_dia"
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn convert(&self, _has_tailoring: bool) -> Result<CollationDiacritics<'static>, DataError> {
+        Ok(CollationDiacritics {
+            secondaries: ZeroVec::alloc_from_slice(&self.secondaries),
+        })
+    }
+}
+
+impl collator_serde::CollationJamo {
+    fn suffix() -> &'static str {
+        "_jamo"
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn convert(&self, _has_tailoring: bool) -> Result<CollationJamo<'static>, DataError> {
+        Ok(CollationJamo {
+            ce32s: ZeroVec::alloc_from_slice(&self.ce32s),
+        })
+    }
+}
+
+impl collator_serde::CollationMetadata {
+    fn suffix() -> &'static str {
+        "_meta"
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn convert(&self, has_tailoring: bool) -> Result<CollationMetadata, DataError> {
+        if has_tailoring {
+            // ICU seems to not be setting the tailoring bit correctly.
+            Ok(CollationMetadata {
+                bits: self.bits | 1 << 3,
+            })
+        } else {
+            Ok(CollationMetadata { bits: self.bits })
+        }
+    }
+}
+
+impl collator_serde::CollationReordering {
+    fn suffix() -> &'static str {
+        "_reord"
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn convert(&self, _has_tailoring: bool) -> Result<CollationReordering<'static>, DataError> {
+        Ok(CollationReordering {
+            min_high_no_reorder: self.min_high_no_reorder,
+            reorder_table: ZeroVec::alloc_from_slice(&self.reorder_table),
+            reorder_ranges: ZeroVec::alloc_from_slice(&self.reorder_ranges),
+        })
+    }
+}
+
+impl collator_serde::CollationSpecialPrimaries {
+    fn suffix() -> &'static str {
+        "_prim"
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    fn convert(
+        &self,
+        _has_tailoring: bool,
+    ) -> Result<CollationSpecialPrimaries<'static>, DataError> {
+        // Note, at least for icu4x/2025-05-01/77.x, both `implicithan` and `unihan` have the same `compressible_bytes`.
+        let compressible_bytes = self.compressible_bytes.as_deref().unwrap_or(&[
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, true, true, true, true, true, true, true, true, true, true, true, true, true,
+            true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+            true, true, true, true, true, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, false, false, false, false, false, false, true, false,
+        ]);
+
+        assert_eq!(compressible_bytes.len(), 256);
+
+        let mut packed_compressible_bytes = [0u16; 16];
+        for (i, &is_compressible) in compressible_bytes.iter().enumerate() {
+            if is_compressible {
+                let arr_index = i >> 4;
+                let mask = 1 << (i & 0b1111);
+                packed_compressible_bytes[arr_index] |= mask;
+            }
+        }
+
+        Ok(CollationSpecialPrimaries {
+            last_primaries: self.last_primaries.iter().copied().collect(),
+            numeric_primary: self.numeric_primary,
+            compressible_bytes: packed_compressible_bytes.into_iter().collect(),
+        })
     }
 }

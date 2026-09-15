@@ -25,7 +25,7 @@ This minimize method returns a new Locale that is the result of running the
 use icu::locale::Locale;
 use icu::locale::{LocaleCanonicalizer, TransformResult};
 
-let lc = LocaleCanonicalizer::new();
+let lc = LocaleCanonicalizer::new_extended();
 
 let mut locale: Locale = "ja-Latn-fonipa-hepburn-heploc"
     .parse()
@@ -35,38 +35,38 @@ assert_eq!(locale, "ja-Latn-alalc97-fonipa".parse::<Locale>().unwrap());
 ```
 
 ```rust
-use icu::locale::{locale, LocaleExpander, TransformResult};
+use icu::locale::{LocaleExpander, TransformResult, locale};
 
-let lc = LocaleExpander::new();
+let lc = LocaleExpander::new_common();
 
 let mut locale = locale!("zh-CN");
-assert_eq!(lc.maximize(&mut locale), TransformResult::Modified);
+assert_eq!(lc.maximize(&mut locale.id), TransformResult::Modified);
 assert_eq!(locale, locale!("zh-Hans-CN"));
 
 let mut locale = locale!("zh-Hant-TW");
-assert_eq!(lc.maximize(&mut locale), TransformResult::Unmodified);
+assert_eq!(lc.maximize(&mut locale.id), TransformResult::Unmodified);
 assert_eq!(locale, locale!("zh-Hant-TW"));
 ```
 
 ```rust
-use icu::locale::{locale, LocaleExpander, TransformResult};
+use icu::locale::{LocaleExpander, TransformResult, locale};
 use writeable::assert_writeable_eq;
 
-let lc = LocaleExpander::new();
+let lc = LocaleExpander::new_common();
 
 let mut locale = locale!("zh-Hans-CN");
-assert_eq!(lc.minimize(&mut locale), TransformResult::Modified);
+assert_eq!(lc.minimize(&mut locale.id), TransformResult::Modified);
 assert_eq!(locale, locale!("zh"));
 
 let mut locale = locale!("zh");
-assert_eq!(lc.minimize(&mut locale), TransformResult::Unmodified);
+assert_eq!(lc.minimize(&mut locale.id), TransformResult::Unmodified);
 assert_eq!(locale, locale!("zh"));
 ```
 
 [`ICU4X`]: ../icu/index.html
-[`CLDR`]: http://cldr.unicode.org/
+[`CLDR`]: https://cldr.unicode.org/
 [`UTS #35: Unicode LDML 3. Likely Subtags`]: https://www.unicode.org/reports/tr35/#Likely_Subtags.
-[`UTS #35: Unicode LDML 3. LocaleId Canonicalization`]: http://unicode.org/reports/tr35/#LocaleId_Canonicalization,
+[`UTS #35: Unicode LDML 3. LocaleId Canonicalization`]: https://unicode.org/reports/tr35/#LocaleId_Canonicalization,
 
 <!-- cargo-rdme end -->
 

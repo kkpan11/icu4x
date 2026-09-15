@@ -15,13 +15,11 @@
 //!
 //! Read more about data providers: [`icu_provider`]
 
-use crate::ListLength;
-use alloc::borrow::Cow;
 use icu_provider::prelude::*;
-use icu_provider::DynamicDataMarker;
 
 mod serde_dfa;
 pub use serde_dfa::SerdeDFA;
+use zerovec::VarZeroCow;
 
 #[cfg(feature = "compiled_data")]
 #[derive(Debug)]
@@ -40,21 +38,40 @@ const _: () = {
     use icu_list_data::*;
     pub mod icu {
         pub use crate as list;
-        pub use icu_list_data::icu_locale as locale;
     }
     make_provider!(Baked);
-    impl_and_list_v2_marker!(Baked);
-    impl_or_list_v2_marker!(Baked);
-    impl_unit_list_v2_marker!(Baked);
+    impl_list_and_v1!(Baked);
+    impl_list_or_v1!(Baked);
+    impl_list_unit_v1!(Baked);
 };
 
 #[cfg(feature = "datagen")]
 /// The latest minimum set of markers required by this component.
-pub const MARKERS: &[DataMarkerInfo] = &[
-    AndListV2Marker::INFO,
-    OrListV2Marker::INFO,
-    UnitListV2Marker::INFO,
-];
+pub const MARKERS: &[DataMarkerInfo] = &[ListAndV1::INFO, ListOrV1::INFO, ListUnitV1::INFO];
+
+data_marker!(
+    /// Marker for and lists
+    ListAndV1,
+    "list/and/v1",
+    ListFormatterPatterns<'static>,
+);
+data_marker!(
+    /// Marker for or lists
+    ListOrV1,
+    "list/or/v1",
+    ListFormatterPatterns<'static>,
+);
+data_marker!(
+    /// Marker for unit lists
+    ListUnitV1,
+    "list/unit/v1",
+    ListFormatterPatterns<'static>,
+);
+
+icu_provider::data_struct!(
+    ListFormatterPatterns<'_>,
+    #[cfg(feature = "datagen")]
+);
 
 /// Symbols and metadata required for [`ListFormatter`](crate::ListFormatter).
 ///
@@ -63,70 +80,39 @@ pub const MARKERS: &[DataMarkerInfo] = &[
 /// including in SemVer minor releases. While the serde representation of data structs is guaranteed
 /// to be stable, their Rust representation might not be. Use with caution.
 /// </div>
-#[icu_provider::data_struct(
-    AndListV2Marker = "list/and@2",
-    OrListV2Marker = "list/or@2",
-    UnitListV2Marker = "list/unit@2"
-)]
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(serde::Serialize, databake::Bake),
-    databake(path = icu_list::provider),
-)]
-pub struct ListFormatterPatternsV2<'data>(
-    #[cfg_attr(feature = "datagen", serde(with = "deduplicating_array"))]
-    /// The patterns in the order start, middle, end, pair, short_start, short_middle,
-    /// short_end, short_pair, narrow_start, narrow_middle, narrow_end, narrow_pair,
-    pub [ConditionalListJoinerPattern<'data>; 12],
-);
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for ListFormatterPatternsV2<'de> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        #[cfg(not(feature = "serde_human"))]
-        if deserializer.is_human_readable() {
-            use serde::de::Error;
-            return Err(D::Error::custom(
-                    "Deserializing human-readable ListFormatter data requires the 'serde_human' feature",
-                ));
-        }
-
-        Ok(ListFormatterPatternsV2(deduplicating_array::deserialize(
-            deserializer,
-        )?))
-    }
+#[derive(Clone, Debug, PartialEq, yoke::Yokeable, zerofrom::ZeroFrom)]
+#[cfg_attr(feature = "datagen", derive(serde::Serialize, databake::Bake))]
+#[cfg_attr(feature = "datagen", databake(path = icu_list::provider))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize))]
+pub struct ListFormatterPatterns<'data> {
+    /// The start pattern
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub start: ListJoinerPattern<'data>,
+    /// The middle pattern. It doesn't need to be a pattern because it has to start with `{0}`
+    /// and end with `{1}`, so we just store the string in between.
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub middle: VarZeroCow<'data, str>,
+    /// The end pattern
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub end: ConditionalListJoinerPattern<'data>,
+    /// The pair pattern, if it's different from the end pattern.
+    #[cfg_attr(feature = "serde", serde(borrow))]
+    pub pair: Option<ConditionalListJoinerPattern<'data>>,
 }
 
-pub(crate) struct ErasedListV2Marker;
-
-impl DynamicDataMarker for ErasedListV2Marker {
-    type Yokeable = ListFormatterPatternsV2<'static>;
-}
-
-impl<'data> ListFormatterPatternsV2<'data> {
-    pub(crate) fn start(&self, style: ListLength) -> &ConditionalListJoinerPattern<'data> {
-        #![allow(clippy::indexing_slicing)] // style as usize < 3
-        &self.0[4 * (style as usize)]
-    }
-
-    pub(crate) fn middle(&self, style: ListLength) -> &ConditionalListJoinerPattern<'data> {
-        #![allow(clippy::indexing_slicing)] // style as usize < 3
-        &self.0[4 * (style as usize) + 1]
-    }
-
-    pub(crate) fn end(&self, style: ListLength) -> &ConditionalListJoinerPattern<'data> {
-        #![allow(clippy::indexing_slicing)] // style as usize < 3
-        &self.0[4 * (style as usize) + 2]
-    }
-
-    pub(crate) fn pair(&self, style: ListLength) -> &ConditionalListJoinerPattern<'data> {
-        #![allow(clippy::indexing_slicing)] // style as usize < 3
-        &self.0[4 * (style as usize) + 3]
-    }
+impl ListFormatterPatterns<'_> {
+    /// The marker attributes for narrow lists
+    pub const NARROW: &'static DataMarkerAttributes = DataMarkerAttributes::from_str_or_panic("N");
+    #[doc(hidden)]
+    pub const NARROW_STR: &'static str = Self::NARROW.as_str();
+    /// The marker attributes for short lists
+    pub const SHORT: &'static DataMarkerAttributes = DataMarkerAttributes::from_str_or_panic("S");
+    #[doc(hidden)]
+    pub const SHORT_STR: &'static str = Self::SHORT.as_str();
+    /// The marker attributes for wide lists
+    pub const WIDE: &'static DataMarkerAttributes = DataMarkerAttributes::from_str_or_panic("W");
+    #[doc(hidden)]
+    pub const WIDE_STR: &'static str = Self::WIDE.as_str();
 }
 
 /// A pattern that can behave conditionally on the next element.
@@ -137,11 +123,8 @@ impl<'data> ListFormatterPatternsV2<'data> {
 /// to be stable, their Rust representation might not be. Use with caution.
 /// </div>
 #[derive(Clone, Debug, PartialEq, yoke::Yokeable, zerofrom::ZeroFrom)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(serde::Serialize, databake::Bake),
-    databake(path = icu_list::provider),
-)]
+#[cfg_attr(feature = "datagen", derive(serde::Serialize, databake::Bake))]
+#[cfg_attr(feature = "datagen", databake(path = icu_list::provider))]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize))]
 pub struct ConditionalListJoinerPattern<'data> {
     /// The default pattern
@@ -163,11 +146,8 @@ pub struct ConditionalListJoinerPattern<'data> {
 /// to be stable, their Rust representation might not be. Use with caution.
 /// </div>
 #[derive(Clone, Debug, PartialEq, yoke::Yokeable, zerofrom::ZeroFrom)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(serde::Serialize, databake::Bake),
-    databake(path = icu_list::provider),
-)]
+#[cfg_attr(feature = "datagen", derive(serde::Serialize, databake::Bake))]
+#[cfg_attr(feature = "datagen", databake(path = icu_list::provider))]
 pub struct SpecialCasePattern<'data> {
     /// The condition on the following element
     pub condition: SerdeDFA<'data>,
@@ -218,14 +198,14 @@ impl<'data> SpecialCasePattern<'data> {
 #[cfg_attr(feature = "datagen", derive(serde::Serialize))]
 pub struct ListJoinerPattern<'data> {
     /// The pattern string without the placeholders
-    pub(crate) string: Cow<'data, str>,
-    /// The index of the first placeholder. Always <= index_1.
+    pub(crate) string: VarZeroCow<'data, str>,
+    /// The index of the first placeholder. Always `<= index_1`.
     // Always 0 for CLDR data, so we don't need to serialize it.
     // In-memory we have free space for it as index_1 doesn't
     // fill a word.
     #[cfg_attr(feature = "datagen", serde(skip))]
     pub(crate) index_0: u8,
-    /// The index of the second placeholder. Always < string.len().
+    /// The index of the second placeholder. Always `< string.len()`.
     pub(crate) index_1: u8,
 }
 
@@ -238,7 +218,7 @@ impl<'de: 'data, 'data> serde::Deserialize<'de> for ListJoinerPattern<'data> {
         #[derive(serde::Deserialize)]
         struct Dummy<'data> {
             #[cfg_attr(feature = "serde", serde(borrow))]
-            string: Cow<'data, str>,
+            string: VarZeroCow<'data, str>,
             index_1: u8,
         }
         let Dummy { string, index_1 } = Dummy::deserialize(deserializer)?;
@@ -261,10 +241,9 @@ impl<'a> ListJoinerPattern<'a> {
     ///
     /// # Panics
     /// If `string[..index_1]` panics.
-    pub const fn from_parts(string: &'a str, index_1: u8) -> Self {
-        assert!(string.len() <= 255 && index_1 <= string.len() as u8);
+    pub const fn from_parts(string: VarZeroCow<'a, str>, index_1: u8) -> Self {
         Self {
-            string: Cow::Borrowed(string),
+            string,
             index_0: 0,
             index_1,
         }
@@ -275,7 +254,7 @@ impl<'a> ListJoinerPattern<'a> {
 impl databake::Bake for ListJoinerPattern<'_> {
     fn bake(&self, env: &databake::CrateEnv) -> databake::TokenStream {
         env.insert("icu_list");
-        let string = (&*self.string).bake(env);
+        let string = self.string.bake(env);
         let index_1 = self.index_1.bake(env);
         databake::quote! {
             icu_list::provider::ListJoinerPattern::from_parts(#string, #index_1)
@@ -296,7 +275,10 @@ fn databake() {
     databake::test_bake!(
         ListJoinerPattern,
         const,
-        crate::provider::ListJoinerPattern::from_parts(", ", 2u8),
+        crate::provider::ListJoinerPattern::from_parts(
+            unsafe { zerovec::VarZeroCow::from_bytes_unchecked(b", ") },
+            2u8
+        ),
         icu_list
     );
 }

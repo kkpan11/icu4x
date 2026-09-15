@@ -2,22 +2,25 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+#[cfg(feature = "alloc")]
 use alloc::borrow::Cow;
+#[cfg(feature = "alloc")]
 use alloc::borrow::ToOwned;
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
 use alloc::string::String;
+#[cfg(feature = "alloc")]
 use core::cmp::Ordering;
 use core::default::Default;
 use core::fmt;
 use core::fmt::Debug;
 use core::hash::Hash;
 use core::ops::Deref;
-use core::str::FromStr;
-use icu_locale_core::extensions::unicode as unicode_ext;
-use icu_locale_core::subtags::{Language, Region, Script, Variants};
-use icu_locale_core::{LanguageIdentifier, Locale, ParseError};
-use writeable::{LengthHint, Writeable};
+#[cfg(feature = "alloc")]
 use zerovec::ule::VarULE;
+
+pub use icu_locale_core::DataLocale;
 
 /// The request type passed into all data provider implementations.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,18 +95,24 @@ impl<'a> DataIdentifierBorrowed<'a> {
     }
 
     /// Converts this [`DataIdentifierBorrowed`] into a [`DataIdentifierCow<'static>`].
-    pub fn into_owned(&self) -> DataIdentifierCow<'static> {
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    #[cfg(feature = "alloc")]
+    pub fn into_owned(self) -> DataIdentifierCow<'static> {
         DataIdentifierCow {
             marker_attributes: Cow::Owned(self.marker_attributes.to_owned()),
-            locale: Cow::Owned(self.locale.clone()),
+            locale: *self.locale,
         }
     }
 
     /// Borrows this [`DataIdentifierBorrowed`] as a [`DataIdentifierCow<'a>`].
-    pub fn as_cow(&self) -> DataIdentifierCow<'a> {
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    #[cfg(feature = "alloc")]
+    pub fn as_cow(self) -> DataIdentifierCow<'a> {
         DataIdentifierCow {
             marker_attributes: Cow::Borrowed(self.marker_attributes),
-            locale: Cow::Borrowed(self.locale),
+            locale: *self.locale,
         }
     }
 }
@@ -111,34 +120,38 @@ impl<'a> DataIdentifierBorrowed<'a> {
 /// A data identifier identifies a particular version of data, such as "English".
 ///
 /// It is a wrapper around a [`DataLocale`] and a [`DataMarkerAttributes`].
+///
+/// ✨ *Enabled with the `alloc` Cargo feature.*
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 #[non_exhaustive]
+#[cfg(feature = "alloc")]
 pub struct DataIdentifierCow<'a> {
     /// Marker-specific request attributes
     pub marker_attributes: Cow<'a, DataMarkerAttributes>,
     /// The CLDR locale
-    pub locale: Cow<'a, DataLocale>,
+    pub locale: DataLocale,
 }
 
+#[cfg(feature = "alloc")]
 impl PartialOrd for DataIdentifierCow<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
+#[cfg(feature = "alloc")]
 impl Ord for DataIdentifierCow<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.marker_attributes
-            .as_str()
-            .cmp(other.marker_attributes.as_str())
-            .then_with(|| self.locale.langid.total_cmp(&other.locale.langid))
-            .then_with(|| self.locale.keywords.cmp(&other.locale.keywords))
+            .cmp(&other.marker_attributes)
+            .then_with(|| self.locale.total_cmp(&other.locale))
     }
 }
 
+#[cfg(feature = "alloc")]
 impl fmt::Display for DataIdentifierCow<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Display::fmt(&*self.locale, f)?;
+        fmt::Display::fmt(&self.locale, f)?;
         if !self.marker_attributes.is_empty() {
             write!(f, "/{}", self.marker_attributes.as_str())?;
         }
@@ -146,6 +159,7 @@ impl fmt::Display for DataIdentifierCow<'_> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<'a> DataIdentifierCow<'a> {
     /// Borrows this [`DataIdentifierCow`] as a [`DataIdentifierBorrowed<'a>`].
     pub fn as_borrowed(&'a self) -> DataIdentifierBorrowed<'a> {
@@ -159,7 +173,7 @@ impl<'a> DataIdentifierCow<'a> {
     pub fn from_locale(locale: DataLocale) -> Self {
         Self {
             marker_attributes: Cow::Borrowed(DataMarkerAttributes::empty()),
-            locale: Cow::Owned(locale),
+            locale,
         }
     }
 
@@ -167,7 +181,7 @@ impl<'a> DataIdentifierCow<'a> {
     pub fn from_marker_attributes(marker_attributes: &'a DataMarkerAttributes) -> Self {
         Self {
             marker_attributes: Cow::Borrowed(marker_attributes),
-            locale: Cow::Borrowed(Default::default()),
+            locale: Default::default(),
         }
     }
 
@@ -175,7 +189,7 @@ impl<'a> DataIdentifierCow<'a> {
     pub fn from_marker_attributes_owned(marker_attributes: Box<DataMarkerAttributes>) -> Self {
         Self {
             marker_attributes: Cow::Owned(marker_attributes),
-            locale: Cow::Borrowed(Default::default()),
+            locale: Default::default(),
         }
     }
 
@@ -183,7 +197,7 @@ impl<'a> DataIdentifierCow<'a> {
     pub fn from_owned(marker_attributes: Box<DataMarkerAttributes>, locale: DataLocale) -> Self {
         Self {
             marker_attributes: Cow::Owned(marker_attributes),
-            locale: Cow::Owned(locale),
+            locale,
         }
     }
 
@@ -194,501 +208,23 @@ impl<'a> DataIdentifierCow<'a> {
     ) -> Self {
         Self {
             marker_attributes: Cow::Borrowed(marker_attributes),
-            locale: Cow::Owned(locale),
+            locale,
         }
     }
 
     /// Returns whether this id is equal to the default.
-    pub fn is_default(&self) -> bool {
-        self.marker_attributes.is_empty() && self.locale.is_und()
+    pub fn is_unknown(&self) -> bool {
+        self.marker_attributes.is_empty() && self.locale.is_unknown()
     }
 }
 
+#[cfg(feature = "alloc")]
 impl Default for DataIdentifierCow<'_> {
     fn default() -> Self {
         Self {
             marker_attributes: Cow::Borrowed(Default::default()),
-            locale: Cow::Borrowed(Default::default()),
+            locale: Default::default(),
         }
-    }
-}
-
-/// A locale type optimized for use in fallbacking and the ICU4X data pipeline.
-///
-/// [`DataLocale`] contains less functionality than [`Locale`] but more than
-/// [`LanguageIdentifier`] for better size and performance while still meeting
-/// the needs of the ICU4X data pipeline.
-///
-/// # Examples
-///
-/// Convert a [`Locale`] to a [`DataLocale`] and back:
-///
-/// ```
-/// use icu_locale_core::locale;
-/// use icu_provider::DataLocale;
-///
-/// let locale = locale!("en-u-ca-buddhist");
-/// let data_locale = DataLocale::from(locale);
-/// let locale = data_locale.into_locale();
-///
-/// assert_eq!(locale, locale!("en-u-ca-buddhist"));
-/// ```
-///
-/// You can alternatively create a [`DataLocale`] from a borrowed [`Locale`], which is more
-/// efficient than cloning the [`Locale`], but less efficient than converting an owned
-/// [`Locale`]:
-///
-/// ```
-/// use icu_locale_core::locale;
-/// use icu_provider::DataLocale;
-///
-/// let locale1 = locale!("en-u-ca-buddhist");
-/// let data_locale = DataLocale::from(&locale1);
-/// let locale2 = data_locale.into_locale();
-///
-/// assert_eq!(locale1, locale2);
-/// ```
-///
-/// If you are sure that you have no Unicode keywords, start with [`LanguageIdentifier`]:
-///
-/// ```
-/// use icu_locale_core::langid;
-/// use icu_provider::DataLocale;
-///
-/// let langid = langid!("es-CA-valencia");
-/// let data_locale = DataLocale::from(langid);
-/// let langid = data_locale.get_langid();
-///
-/// assert_eq!(langid, langid!("es-CA-valencia"));
-/// ```
-///
-/// [`DataLocale`] only supports `-u` keywords, to reflect the current state of CLDR data
-/// lookup and fallback. This may change in the future.
-///
-/// ```
-/// use icu_locale_core::{locale, Locale};
-/// use icu_provider::DataLocale;
-///
-/// let locale = "hi-t-en-h0-hybrid-u-attr-ca-buddhist"
-///     .parse::<Locale>()
-///     .unwrap();
-/// let data_locale = DataLocale::from(locale);
-///
-/// assert_eq!(data_locale.into_locale(), locale!("hi-u-ca-buddhist"));
-/// ```
-#[derive(PartialEq, Clone, Default, Eq, Hash)]
-pub struct DataLocale {
-    langid: LanguageIdentifier,
-    keywords: unicode_ext::Keywords,
-}
-
-impl<'a> Default for &'a DataLocale {
-    fn default() -> Self {
-        static DEFAULT: DataLocale = DataLocale {
-            langid: LanguageIdentifier::UND,
-            keywords: unicode_ext::Keywords::new(),
-        };
-        &DEFAULT
-    }
-}
-
-impl fmt::Debug for DataLocale {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "DataLocale{{{self}}}")
-    }
-}
-
-impl Writeable for DataLocale {
-    fn write_to<W: core::fmt::Write + ?Sized>(&self, sink: &mut W) -> core::fmt::Result {
-        self.langid.write_to(sink)?;
-        if !self.keywords.is_empty() {
-            sink.write_str("-u-")?;
-            self.keywords.write_to(sink)?;
-        }
-        Ok(())
-    }
-
-    fn writeable_length_hint(&self) -> LengthHint {
-        let mut length_hint = self.langid.writeable_length_hint();
-        if !self.keywords.is_empty() {
-            length_hint += self.keywords.writeable_length_hint() + 3;
-        }
-        length_hint
-    }
-
-    fn write_to_string(&self) -> alloc::borrow::Cow<str> {
-        if self.keywords.is_empty() {
-            return self.langid.write_to_string();
-        }
-        let mut string =
-            alloc::string::String::with_capacity(self.writeable_length_hint().capacity());
-        let _ = self.write_to(&mut string);
-        alloc::borrow::Cow::Owned(string)
-    }
-}
-
-writeable::impl_display_with_writeable!(DataLocale);
-
-impl From<LanguageIdentifier> for DataLocale {
-    fn from(langid: LanguageIdentifier) -> Self {
-        Self {
-            langid,
-            keywords: unicode_ext::Keywords::new(),
-        }
-    }
-}
-
-impl From<Locale> for DataLocale {
-    fn from(locale: Locale) -> Self {
-        Self {
-            langid: locale.id,
-            keywords: locale.extensions.unicode.keywords,
-        }
-    }
-}
-
-impl From<&LanguageIdentifier> for DataLocale {
-    fn from(langid: &LanguageIdentifier) -> Self {
-        Self {
-            langid: langid.clone(),
-            keywords: unicode_ext::Keywords::new(),
-        }
-    }
-}
-
-impl From<&Locale> for DataLocale {
-    fn from(locale: &Locale) -> Self {
-        Self {
-            langid: locale.id.clone(),
-            keywords: locale.extensions.unicode.keywords.clone(),
-        }
-    }
-}
-
-impl FromStr for DataLocale {
-    type Err = ParseError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Locale::from_str(s).map(DataLocale::from)
-    }
-}
-
-impl DataLocale {
-    /// Compare this [`DataLocale`] with BCP-47 bytes.
-    ///
-    /// The return value is equivalent to what would happen if you first converted this
-    /// [`DataLocale`] to a BCP-47 string and then performed a byte comparison.
-    ///
-    /// This function is case-sensitive and results in a *total order*, so it is appropriate for
-    /// binary search. The only argument producing [`Ordering::Equal`] is `self.to_string()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use icu_provider::DataLocale;
-    /// use std::cmp::Ordering;
-    ///
-    /// let bcp47_strings: &[&str] = &[
-    ///     "ca",
-    ///     "ca-ES",
-    ///     "ca-ES-u-ca-buddhist",
-    ///     "ca-ES-valencia",
-    ///     "cat",
-    ///     "pl-Latn-PL",
-    ///     "und",
-    ///     "und-fonipa",
-    ///     "und-u-ca-hebrew",
-    ///     "und-u-ca-japanese",
-    ///     "zh",
-    /// ];
-    ///
-    /// for ab in bcp47_strings.windows(2) {
-    ///     let a = ab[0];
-    ///     let b = ab[1];
-    ///     assert_eq!(a.cmp(b), Ordering::Less, "strings: {} < {}", a, b);
-    ///     let a_loc: DataLocale = a.parse().unwrap();
-    ///     assert_eq!(
-    ///         a_loc.strict_cmp(a.as_bytes()),
-    ///         Ordering::Equal,
-    ///         "strict_cmp: {} == {}",
-    ///         a_loc,
-    ///         a
-    ///     );
-    ///     assert_eq!(
-    ///         a_loc.strict_cmp(b.as_bytes()),
-    ///         Ordering::Less,
-    ///         "strict_cmp: {} < {}",
-    ///         a_loc,
-    ///         b
-    ///     );
-    ///     let b_loc: DataLocale = b.parse().unwrap();
-    ///     assert_eq!(
-    ///         b_loc.strict_cmp(b.as_bytes()),
-    ///         Ordering::Equal,
-    ///         "strict_cmp: {} == {}",
-    ///         b_loc,
-    ///         b
-    ///     );
-    ///     assert_eq!(
-    ///         b_loc.strict_cmp(a.as_bytes()),
-    ///         Ordering::Greater,
-    ///         "strict_cmp: {} > {}",
-    ///         b_loc,
-    ///         a
-    ///     );
-    /// }
-    /// ```
-    ///
-    /// Comparison against invalid strings:
-    ///
-    /// ```
-    /// use icu_provider::DataLocale;
-    ///
-    /// let invalid_strings: &[&str] = &[
-    ///     // Less than "ca-ES"
-    ///     "CA",
-    ///     "ar-x-gbp-FOO",
-    ///     // Greater than "ca-AR"
-    ///     "ca_ES",
-    ///     "ca-ES-x-gbp-FOO",
-    /// ];
-    ///
-    /// let data_locale = "ca-ES".parse::<DataLocale>().unwrap();
-    ///
-    /// for s in invalid_strings.iter() {
-    ///     let expected_ordering = "ca-AR".cmp(s);
-    ///     let actual_ordering = data_locale.strict_cmp(s.as_bytes());
-    ///     assert_eq!(expected_ordering, actual_ordering, "{}", s);
-    /// }
-    /// ```
-    pub fn strict_cmp(&self, other: &[u8]) -> Ordering {
-        self.writeable_cmp_bytes(other)
-    }
-}
-
-impl DataLocale {
-    /// Returns whether this [`DataLocale`] is `und` in the locale and extensions portion.
-    ///
-    /// This ignores auxiliary keys.
-    ///
-    /// See also:
-    ///
-    /// - [`DataLocale::is_langid_und()`]
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use icu_provider::DataLocale;
-    ///
-    /// assert!("und".parse::<DataLocale>().unwrap().is_und());
-    /// assert!(!"und-u-ca-buddhist".parse::<DataLocale>().unwrap().is_und());
-    /// assert!(!"ca-ES".parse::<DataLocale>().unwrap().is_und());
-    /// ```
-    pub fn is_und(&self) -> bool {
-        self.langid == LanguageIdentifier::UND && self.keywords.is_empty()
-    }
-
-    /// Returns whether the [`LanguageIdentifier`] associated with this request is `und`.
-    ///
-    /// This ignores extension keywords and auxiliary keys.
-    ///
-    /// See also:
-    /// - [`DataLocale::is_und()`]
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use icu_provider::DataLocale;
-    ///
-    /// assert!("und".parse::<DataLocale>().unwrap().is_langid_und());
-    /// assert!("und-u-ca-buddhist"
-    ///     .parse::<DataLocale>()
-    ///     .unwrap()
-    ///     .is_langid_und());
-    /// assert!(!"ca-ES".parse::<DataLocale>().unwrap().is_langid_und());
-    /// ```
-    pub fn is_langid_und(&self) -> bool {
-        self.langid == LanguageIdentifier::UND
-    }
-
-    /// Gets the [`LanguageIdentifier`] for this [`DataLocale`].
-    ///
-    /// This may allocate memory if there are variant subtags. If you need only the language,
-    /// script, and/or region subtag, use the specific getters for those subtags:
-    ///
-    /// - [`DataLocale::language()`]
-    /// - [`DataLocale::script()`]
-    /// - [`DataLocale::region()`]
-    ///
-    /// If you have ownership over the `DataLocale`, use [`DataLocale::into_locale()`]
-    /// and then access the `id` field.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use icu_locale_core::langid;
-    /// use icu_provider::prelude::*;
-    ///
-    /// assert_eq!(DataLocale::default().get_langid(), langid!("und"));
-    /// assert_eq!(DataLocale::from(langid!("ar-EG")).get_langid(), langid!("ar-EG"));
-    /// ```
-    pub fn get_langid(&self) -> LanguageIdentifier {
-        self.langid.clone()
-    }
-
-    /// Overrides the entire [`LanguageIdentifier`] portion of this [`DataLocale`].
-    #[inline]
-    pub fn set_langid(&mut self, lid: LanguageIdentifier) {
-        self.langid = lid;
-    }
-
-    /// Converts this [`DataLocale`] into a [`Locale`].
-    ///
-    /// See also [`DataLocale::get_langid()`].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use icu_locale_core::{
-    ///     langid, locale,
-    ///     subtags::{language, region},
-    /// };
-    /// use icu_provider::prelude::*;
-    ///
-    /// let locale: DataLocale = locale!("it-IT-u-ca-coptic").into();
-    ///
-    /// assert_eq!(locale.get_langid(), langid!("it-IT"));
-    /// assert_eq!(locale.language(), language!("it"));
-    /// assert_eq!(locale.script(), None);
-    /// assert_eq!(locale.region(), Some(region!("IT")));
-    ///
-    /// let locale = locale.into_locale();
-    /// assert_eq!(locale, locale!("it-IT-u-ca-coptic"));
-    /// ```
-    pub fn into_locale(self) -> Locale {
-        let mut loc = Locale {
-            id: self.langid,
-            ..Default::default()
-        };
-        loc.extensions.unicode.keywords = self.keywords;
-        loc
-    }
-
-    /// Returns the [`Language`] for this [`DataLocale`].
-    #[inline]
-    pub fn language(&self) -> Language {
-        self.langid.language
-    }
-
-    /// Returns the [`Language`] for this [`DataLocale`].
-    #[inline]
-    pub fn set_language(&mut self, language: Language) {
-        self.langid.language = language;
-    }
-
-    /// Returns the [`Script`] for this [`DataLocale`].
-    #[inline]
-    pub fn script(&self) -> Option<Script> {
-        self.langid.script
-    }
-
-    /// Sets the [`Script`] for this [`DataLocale`].
-    #[inline]
-    pub fn set_script(&mut self, script: Option<Script>) {
-        self.langid.script = script;
-    }
-
-    /// Returns the [`Region`] for this [`DataLocale`].
-    #[inline]
-    pub fn region(&self) -> Option<Region> {
-        self.langid.region
-    }
-
-    /// Sets the [`Region`] for this [`DataLocale`].
-    #[inline]
-    pub fn set_region(&mut self, region: Option<Region>) {
-        self.langid.region = region;
-    }
-
-    /// Returns whether there are any [`Variant`](icu_locale_core::subtags::Variant) subtags in this [`DataLocale`].
-    #[inline]
-    pub fn has_variants(&self) -> bool {
-        !self.langid.variants.is_empty()
-    }
-
-    /// Sets all [`Variants`] on this [`DataLocale`], overwriting any that were there previously.
-    #[inline]
-    pub fn set_variants(&mut self, variants: Variants) {
-        self.langid.variants = variants;
-    }
-
-    /// Removes all [`Variant`](icu_locale_core::subtags::Variant) subtags in this [`DataLocale`].
-    #[inline]
-    pub fn clear_variants(&mut self) -> Variants {
-        self.langid.variants.clear()
-    }
-
-    /// Gets the value of the specified Unicode extension keyword for this [`DataLocale`].
-    #[inline]
-    pub fn get_unicode_ext(&self, key: &unicode_ext::Key) -> Option<unicode_ext::Value> {
-        self.keywords.get(key).cloned()
-    }
-
-    /// Returns whether there are any Unicode extension keywords in this [`DataLocale`].
-    #[inline]
-    pub fn has_unicode_ext(&self) -> bool {
-        !self.keywords.is_empty()
-    }
-
-    /// Returns whether a specific Unicode extension keyword is present in this [`DataLocale`].
-    #[inline]
-    pub fn contains_unicode_ext(&self, key: &unicode_ext::Key) -> bool {
-        self.keywords.contains_key(key)
-    }
-
-    /// Returns whether this [`DataLocale`] contains a Unicode extension keyword
-    /// with the specified key and value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use icu_locale_core::extensions::unicode::{key, value};
-    /// use icu_provider::prelude::*;
-    ///
-    /// let locale: DataLocale = "it-IT-u-ca-coptic".parse().expect("Valid BCP-47");
-    ///
-    /// assert_eq!(locale.get_unicode_ext(&key!("hc")), None);
-    /// assert_eq!(locale.get_unicode_ext(&key!("ca")), Some(value!("coptic")));
-    /// assert!(locale.matches_unicode_ext(&key!("ca"), &value!("coptic"),));
-    /// ```
-    #[inline]
-    pub fn matches_unicode_ext(&self, key: &unicode_ext::Key, value: &unicode_ext::Value) -> bool {
-        self.keywords.get(key) == Some(value)
-    }
-
-    /// Sets the value for a specific Unicode extension keyword on this [`DataLocale`].
-    #[inline]
-    pub fn set_unicode_ext(
-        &mut self,
-        key: unicode_ext::Key,
-        value: unicode_ext::Value,
-    ) -> Option<unicode_ext::Value> {
-        self.keywords.set(key, value)
-    }
-
-    /// Removes a specific Unicode extension keyword from this [`DataLocale`], returning
-    /// the value if it was present.
-    #[inline]
-    pub fn remove_unicode_ext(&mut self, key: &unicode_ext::Key) -> Option<unicode_ext::Value> {
-        self.keywords.remove(key)
-    }
-
-    /// Retains a subset of keywords as specified by the predicate function.
-    #[inline]
-    pub fn retain_unicode_ext<F>(&mut self, predicate: F)
-    where
-        F: FnMut(&unicode_ext::Key) -> bool,
-    {
-        self.keywords.retain_by_key(predicate)
     }
 }
 
@@ -698,11 +234,11 @@ impl DataLocale {
 #[derive(PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[repr(transparent)]
 pub struct DataMarkerAttributes {
-    // Validated to be non-empty ASCII alphanumeric + hyphen + underscore
+    // Validated to be non-empty ASCII alphanumeric + hyphen + underscore + forward slash. Disallows leading, trailing, and double slashes.
     value: str,
 }
 
-impl<'a> Default for &'a DataMarkerAttributes {
+impl Default for &DataMarkerAttributes {
     fn default() -> Self {
         DataMarkerAttributes::empty()
     }
@@ -729,21 +265,40 @@ impl Debug for DataMarkerAttributes {
 pub struct AttributeParseError;
 
 impl DataMarkerAttributes {
+    /// Safety-usable invariant: validated bytes are ASCII only
     const fn validate(s: &[u8]) -> Result<(), AttributeParseError> {
+        if s.is_empty() {
+            return Ok(());
+        }
         let mut i = 0;
+        // Initialized to true in order to prevent leading slashes
+        let mut prev_was_slash = true;
         while i < s.len() {
-            #[allow(clippy::indexing_slicing)] // duh
-            if !matches!(s[i], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_') {
+            #[expect(clippy::indexing_slicing)] // duh
+            let c = s[i];
+            if !matches!(c, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'/') {
                 return Err(AttributeParseError);
             }
+            if c == b'/' {
+                if prev_was_slash {
+                    return Err(AttributeParseError);
+                }
+                prev_was_slash = true;
+            } else {
+                prev_was_slash = false;
+            }
             i += 1;
+        }
+        // If the last character was a slash, it's a trailing slash, which is disallowed.
+        if prev_was_slash {
+            return Err(AttributeParseError);
         }
         Ok(())
     }
 
     /// Creates a borrowed [`DataMarkerAttributes`] from a borrowed string.
     ///
-    /// Returns an error if the string contains characters other than `[a-zA-Z0-9_\-]`.
+    /// Returns an error if the string contains characters other than `[a-zA-Z0-9_\-/]`.
     pub const fn try_from_str(s: &str) -> Result<&Self, AttributeParseError> {
         Self::try_from_utf8(s.as_bytes())
     }
@@ -762,14 +317,14 @@ impl DataMarkerAttributes {
     ///
     /// # Errors
     ///
-    /// Returns an error if the byte slice contains code units other than `[a-zA-Z0-9_\-]`.
+    /// Returns an error if the byte slice contains code units other than `[a-zA-Z0-9_\-/]`.
     pub const fn try_from_utf8(code_units: &[u8]) -> Result<&Self, AttributeParseError> {
         let Ok(()) = Self::validate(code_units) else {
             return Err(AttributeParseError);
         };
 
         // SAFETY: `validate` requires a UTF-8 subset
-        let s = unsafe { core::str::from_utf8_unchecked(code_units) };
+        let s = unsafe { str::from_utf8_unchecked(code_units) };
 
         // SAFETY: `Self` has the same layout as `str`
         Ok(unsafe { &*(s as *const str as *const Self) })
@@ -777,20 +332,26 @@ impl DataMarkerAttributes {
 
     /// Creates an owned [`DataMarkerAttributes`] from an owned string.
     ///
-    /// Returns an error if the string contains characters other than `[a-zA-Z0-9_\-]`.
+    /// Returns an error if the string contains characters other than `[a-zA-Z0-9_\-/]`.
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    #[cfg(feature = "alloc")]
     pub fn try_from_string(s: String) -> Result<Box<Self>, AttributeParseError> {
         let Ok(()) = Self::validate(s.as_bytes()) else {
             return Err(AttributeParseError);
         };
 
-        // SAFETY: `Self` has the same layout as `str`
-        Ok(unsafe { core::mem::transmute::<Box<str>, Box<Self>>(s.into_boxed_str()) })
+        let boxed = s.into_boxed_str();
+        // Safety: Box::into_raw fulfils Box::from_raw's requirements, as DataMarkerAttributes is
+        // repr(transparent) over str, and its (non-safety) validity constraints were validated above
+        Ok(unsafe { Box::from_raw(Box::into_raw(boxed) as *mut Self) })
     }
 
     /// Creates a borrowed [`DataMarkerAttributes`] from a borrowed string.
     ///
-    /// Panics if the string contains characters other than `[a-zA-Z0-9_\-]`.
+    /// Panics if the string contains characters other than `[a-zA-Z0-9_\-/]`.
     pub const fn from_str_or_panic(s: &str) -> &Self {
+        #[allow(clippy::panic)] // documented
         let Ok(r) = Self::try_from_str(s) else {
             panic!("Invalid marker attribute syntax")
         };
@@ -809,83 +370,15 @@ impl DataMarkerAttributes {
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl ToOwned for DataMarkerAttributes {
     type Owned = Box<Self>;
     fn to_owned(&self) -> Self::Owned {
-        // SAFETY: `Self` has the same layout as `str`
-        unsafe { core::mem::transmute::<Box<str>, Box<Self>>(self.as_str().to_boxed()) }
-    }
-}
-
-#[test]
-fn test_data_locale_to_string() {
-    struct TestCase {
-        pub locale: &'static str,
-        pub expected: &'static str,
-    }
-
-    for cas in [
-        TestCase {
-            locale: "und",
-            expected: "und",
-        },
-        TestCase {
-            locale: "und-u-cu-gbp",
-            expected: "und-u-cu-gbp",
-        },
-        TestCase {
-            locale: "en-ZA-u-cu-gbp",
-            expected: "en-ZA-u-cu-gbp",
-        },
-    ] {
-        let locale = cas.locale.parse::<DataLocale>().unwrap();
-        writeable::assert_writeable_eq!(locale, cas.expected);
-    }
-}
-
-#[test]
-fn test_data_locale_from_string() {
-    #[derive(Debug)]
-    struct TestCase {
-        pub input: &'static str,
-        pub success: bool,
-    }
-
-    for cas in [
-        TestCase {
-            input: "und",
-            success: true,
-        },
-        TestCase {
-            input: "und-u-cu-gbp",
-            success: true,
-        },
-        TestCase {
-            input: "en-ZA-u-cu-gbp",
-            success: true,
-        },
-        TestCase {
-            input: "en...",
-            success: false,
-        },
-        TestCase {
-            input: "en-ZA-u-nu-arab",
-            success: true,
-        },
-    ] {
-        let data_locale = match (DataLocale::from_str(cas.input), cas.success) {
-            (Ok(l), true) => l,
-            (Err(_), false) => {
-                continue;
-            }
-            (Ok(_), false) => {
-                panic!("DataLocale parsed but it was supposed to fail: {cas:?}");
-            }
-            (Err(_), true) => {
-                panic!("DataLocale was supposed to parse but it failed: {cas:?}");
-            }
-        };
-        writeable::assert_writeable_eq!(data_locale, cas.input);
+        let boxed = self.as_str().to_boxed();
+        // Safety: Box::into_raw fulfils Box::from_raw's requirements, as DataMarkerAttributes is
+        // repr(transparent) over str, and `str` has strictly fewer validity constraints than DataMarkerAttributes
+        unsafe { Box::from_raw(Box::into_raw(boxed) as *mut Self) }
     }
 }
 
@@ -902,5 +395,44 @@ fn test_data_marker_attributes_from_utf8() {
     for bytes in bytes_vec {
         let marker = DataMarkerAttributes::try_from_utf8(bytes).unwrap();
         assert_eq!(marker.to_string().as_bytes(), bytes);
+    }
+}
+
+#[test]
+fn test_data_marker_attributes_syntax() {
+    let valid_cases = [
+        "long-meter",
+        "long",
+        "meter",
+        "short-meter-second",
+        "usd",
+        "nested/part",
+        "foo/bar/baz",
+        "",
+    ];
+
+    let invalid_cases = [
+        "/leading",
+        "trailing/",
+        "double//slash",
+        "invalid space",
+        "invalid$character",
+        "invalid\\backslash",
+    ];
+
+    for s in valid_cases {
+        assert!(
+            DataMarkerAttributes::try_from_str(s).is_ok(),
+            "Expected valid: {}",
+            s
+        );
+    }
+
+    for s in invalid_cases {
+        assert!(
+            DataMarkerAttributes::try_from_str(s).is_err(),
+            "Expected invalid: {}",
+            s
+        );
     }
 }

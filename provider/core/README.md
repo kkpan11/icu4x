@@ -35,26 +35,15 @@ representation of the [`DataMarker`] type.
 The [`DynamicDataProvider`] is still type-level parametrized by the type that it loads, and there are two
 implementations that should be called out
 
-- [`DynamicDataProvider<AnyMarker>`], and [`AnyProvider`] (a slightly optimized alternative) return data as `dyn Any` trait objects.
 - [`DynamicDataProvider<BufferMarker>`], a.k.a. [`BufferProvider`](buf::BufferProvider) returns data as `[u8]` buffers.
 
-#### AnyProvider
-
-These providers are able to return structured data cast into `dyn Any` trait objects. Users
-can call [`as_downcasting()`] to get an object implementing [`DataProvider`] by downcasting
-the trait objects.
-
-Examples of AnyProviders:
-
-- [`AnyPayloadProvider`] wraps a specific data struct and returns it.
-
-#### BufferProvider
+#### [`BufferProvider`](prelude::BufferProvider)
 
 These providers are able to return unstructured data typically represented as
 [`serde`]-serialized buffers. Users can call [`as_deserializing()`] to get an object
 implementing [`DataProvider`] by invoking Serde Deserialize.
 
-Examples of BufferProviders:
+Examples of [`BufferProvider`](prelude::BufferProvider)s:
 
 - [`FsDataProvider`] reads individual buffers from the filesystem.
 - [`BlobDataProvider`] reads buffers from a large in-memory blob.
@@ -78,14 +67,12 @@ associated with a marker type implementing [`DynamicDataMarker`].
 Data structs should generally have one lifetime argument: `'data`. This lifetime allows data
 structs to borrow zero-copy data.
 
-[`AnyPayloadProvider`]: https://docs.rs/icu_provider_adapters/latest/icu_provider_adapters/any_payload/struct.AnyPayloadProvider.html
+[`FixedProvider`]: https://docs.rs/icu_provider_adapters/latest/fixed/any_payload/struct.FixedProvider.html
 [`HelloWorldProvider`]: hello_world::HelloWorldProvider
-[`AnyProvider`]: any::AnyProvider
 [`Yokeable`]: yoke::Yokeable
 [`impl_dynamic_data_provider!`]: dynutil::impl_dynamic_data_provider
 [`icu_provider_adapters`]: https://docs.rs/icu_provider_adapters/latest/icu_provider_adapters/index.html
 [`SourceDataProvider`]: https://docs.rs/icu_provider_source/latest/icu_provider_source/struct.SourceDataProvider.html
-[`as_downcasting()`]: any::AsDowncastingAnyProvider::as_downcasting
 [`as_deserializing()`]: buf::AsDeserializingBufferProvider::as_deserializing
 [`FsDataProvider`]: https://docs.rs/icu_provider_fs/latest/icu_provider_fs/struct.FsDataProvider.html
 [`BlobDataProvider`]: https://docs.rs/icu_provider_blob/latest/icu_provider_blob/struct.BlobDataProvider.html

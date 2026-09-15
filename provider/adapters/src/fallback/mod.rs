@@ -4,12 +4,11 @@
 
 //! A data provider wrapper that performs locale fallback.
 
-use crate::helpers::result_is_err_missing_locale;
 #[doc(no_inline)]
-pub use icu_locale::LocaleFallbacker;
-use icu_provider::prelude::*;
+pub use icu_locale_fallback::LocaleFallbacker;
 use icu_provider::DryDataProvider;
 use icu_provider::DynamicDryDataProvider;
+use icu_provider::prelude::*;
 
 /// A data provider wrapper that performs locale fallback. This enables arbitrary locales to be
 /// handled at runtime.
@@ -17,39 +16,43 @@ use icu_provider::DynamicDryDataProvider;
 /// # Examples
 ///
 /// ```
-/// use icu_locale::langid;
-/// use icu_provider::prelude::*;
+/// use icu_locale::data_locale;
 /// use icu_provider::hello_world::*;
+/// use icu_provider::prelude::*;
 /// use icu_provider_adapters::fallback::LocaleFallbackProvider;
 ///
 /// let provider = HelloWorldProvider;
 ///
-/// let id = DataIdentifierCow::from_locale(langid!("ja-JP").into());
+/// let id = DataIdentifierCow::from_locale(data_locale!("ja-JP"));
 ///
 /// // The provider does not have data for "ja-JP":
-/// DataProvider::<HelloWorldV1Marker>::load(&provider, DataRequest {
-///     id: id.as_borrowed(),
-///     ..Default::default()
-/// }).expect_err("No fallback");
+/// DataProvider::<HelloWorldV1>::load(
+///     &provider,
+///     DataRequest {
+///         id: id.as_borrowed(),
+///         ..Default::default()
+///     },
+/// )
+/// .expect_err("No fallback");
 ///
 /// // But if we wrap the provider in a fallback provider...
-/// let provider = LocaleFallbackProvider::new(provider, icu_locale::LocaleFallbacker::new().static_to_owned());
+/// let provider = LocaleFallbackProvider::new(
+///     provider,
+///     icu_locale::fallback::LocaleFallbacker::new().static_to_owned(),
+/// );
 ///
 /// // ...then we can load "ja-JP" based on "ja" data
-/// let response =
-///   DataProvider::<HelloWorldV1Marker>::load(&provider, DataRequest {
-///     id: id.as_borrowed(),
-///     ..Default::default()
-/// }).expect("successful with vertical fallback");
+/// let response = DataProvider::<HelloWorldV1>::load(
+///     &provider,
+///     DataRequest {
+///         id: id.as_borrowed(),
+///         ..Default::default()
+///     },
+/// )
+/// .expect("successful with vertical fallback");
 ///
-/// assert_eq!(
-///     response.metadata.locale.unwrap(),
-///     langid!("ja").into(),
-/// );
-/// assert_eq!(
-///     response.payload.get().message,
-///     "こんにちは世界",
-/// );
+/// assert_eq!(response.metadata.locale.unwrap(), data_locale!("ja"),);
+/// assert_eq!(response.payload.get().message, "こんにちは世界",);
 /// ```
 #[derive(Clone, Debug)]
 pub struct LocaleFallbackProvider<P> {
@@ -66,22 +69,25 @@ impl<P> LocaleFallbackProvider<P> {
     /// # Examples
     ///
     /// ```
-    /// use icu_locale::langid;
-    /// use icu_locale::LocaleFallbacker;
+    /// use icu_locale::data_locale;
+    /// use icu_locale::fallback::LocaleFallbacker;
     /// use icu_provider::hello_world::*;
     /// use icu_provider::prelude::*;
     /// use icu_provider_adapters::fallback::LocaleFallbackProvider;
     ///
     /// let provider = HelloWorldProvider;
     ///
-    /// let id = DataIdentifierCow::from_locale(langid!("de-CH").into());
+    /// let id = DataIdentifierCow::from_locale(data_locale!("de-CH"));
     ///
     /// // There is no "de-CH" data in the `HelloWorldProvider`
-    /// DataProvider::<HelloWorldV1Marker>::load(&provider, DataRequest {
+    /// DataProvider::<HelloWorldV1>::load(
+    ///     &provider,
+    ///     DataRequest {
     ///         id: id.as_borrowed(),
     ///         ..Default::default()
-    ///     })
-    ///     .expect_err("No data for de-CH");
+    ///     },
+    /// )
+    /// .expect_err("No data for de-CH");
     ///
     /// // `HelloWorldProvider` does not contain fallback data,
     /// // but we can construct a fallbacker with `icu_locale`'s
@@ -92,7 +98,7 @@ impl<P> LocaleFallbackProvider<P> {
     /// );
     ///
     /// // Now we can load the "de-CH" data via fallback to "de".
-    /// let german_hello_world: DataResponse<HelloWorldV1Marker> = provider
+    /// let german_hello_world: DataResponse<HelloWorldV1> = provider
     ///     .load(DataRequest {
     ///         id: id.as_borrowed(),
     ///         ..Default::default()
@@ -128,8 +134,8 @@ impl<P> LocaleFallbackProvider<P> {
     ///
     /// Function arguments:
     ///
-    /// - F1 should perform a data load for a single DataRequest and return the result of it
-    /// - F2 should map from the provider-specific response type to DataResponseMetadata
+    /// - F1 should perform a data load for a single [`DataRequest`] and return the result of it
+    /// - F2 should map from the provider-specific response type to [`DataResponseMetadata`]
     fn run_fallback<F1, F2, R>(
         &self,
         marker: DataMarkerInfo,
@@ -147,7 +153,7 @@ impl<P> LocaleFallbackProvider<P> {
         let mut fallback_iterator = self
             .fallbacker
             .for_config(marker.fallback_config)
-            .fallback_for(base_req.id.locale.clone());
+            .fallback_for(*base_req.id.locale);
         let base_silent = core::mem::replace(&mut base_req.metadata.silent, true);
         loop {
             let result = f1(DataRequest {
@@ -157,40 +163,28 @@ impl<P> LocaleFallbackProvider<P> {
                 ),
                 ..base_req
             });
-            if !result_is_err_missing_locale(&result) {
-                return result
-                    .map(|mut res| {
-                        f2(&mut res).locale = Some(fallback_iterator.take());
-                        res
-                    })
+
+            match result.allow_identifier_not_found() {
+                Ok(Some(mut result)) => {
+                    f2(&mut result).locale = Some(fallback_iterator.take());
+                    return Ok(result);
+                }
+                Ok(None) => {
+                    // If we just checked und, break out of the loop.
+                    if fallback_iterator.get().is_unknown() {
+                        break;
+                    }
+                    fallback_iterator.step();
+                }
+                Err(e) => {
                     // Log the original request rather than the fallback request
-                    .map_err(|e| {
-                        base_req.metadata.silent = base_silent;
-                        e.with_req(marker, base_req)
-                    });
-            }
-            // If we just checked und, break out of the loop.
-            if fallback_iterator.get().is_und() {
-                break;
-            }
-            fallback_iterator.step();
+                    base_req.metadata.silent = base_silent;
+                    return Err(e.with_req(marker, base_req));
+                }
+            };
         }
         base_req.metadata.silent = base_silent;
         Err(DataErrorKind::IdentifierNotFound.with_req(marker, base_req))
-    }
-}
-
-impl<P> AnyProvider for LocaleFallbackProvider<P>
-where
-    P: AnyProvider,
-{
-    fn load_any(&self, marker: DataMarkerInfo, req: DataRequest) -> Result<AnyResponse, DataError> {
-        self.run_fallback(
-            marker,
-            req,
-            |req| self.inner.load_any(marker, req),
-            |res| &mut res.metadata,
-        )
     }
 }
 
@@ -262,16 +256,16 @@ fn dry_test() {
     use icu_provider::hello_world::*;
 
     struct TestProvider;
-    impl DataProvider<HelloWorldV1Marker> for TestProvider {
-        fn load(&self, _: DataRequest) -> Result<DataResponse<HelloWorldV1Marker>, DataError> {
+    impl DataProvider<HelloWorldV1> for TestProvider {
+        fn load(&self, _: DataRequest) -> Result<DataResponse<HelloWorldV1>, DataError> {
             panic!("pretend this is super expensive")
         }
     }
 
-    impl DryDataProvider<HelloWorldV1Marker> for TestProvider {
+    impl DryDataProvider<HelloWorldV1> for TestProvider {
         fn dry_load(&self, req: DataRequest) -> Result<DataResponseMetadata, DataError> {
             // We support all languages except English, and no regional variants. This is cheap to check.
-            if req.id.locale.region().is_some() || req.id.locale.language().as_str() == "en" {
+            if req.id.locale.region.is_some() || req.id.locale.language.as_str() == "en" {
                 Err(DataErrorKind::IdentifierNotFound.into_error())
             } else {
                 Ok(Default::default())

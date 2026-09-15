@@ -2,9 +2,6 @@
   "main": {
     "und": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "root"
       },
       "numbers": {
@@ -62,6 +59,10 @@
           "CAD": {
             "symbol": "CA$",
             "symbol-alt-narrow": "$"
+          },
+          "CHF": {
+            "symbol": "CHF",
+            "symbol-alt-narrow": "Fr."
           },
           "CLP": {
             "symbol-alt-narrow": "$"
@@ -262,6 +263,9 @@
           },
           "RWF": {
             "symbol-alt-narrow": "RF"
+          },
+          "SAR": {
+            "symbol-alt-variant": "⃁"
           },
           "SBD": {
             "symbol-alt-narrow": "$"

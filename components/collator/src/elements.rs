@@ -18,68 +18,135 @@
 //! This module also declares various constants that are also used
 //! by the `comparison` module.
 
-use core::char::REPLACEMENT_CHARACTER;
 use icu_collections::char16trie::TrieResult;
 use icu_collections::codepointtrie::CodePointTrie;
-use icu_normalizer::provider::DecompositionDataV1;
-use icu_normalizer::provider::DecompositionTablesV1;
-use icu_properties::CanonicalCombiningClass;
+use icu_normalizer::provider::DecompositionData;
+use icu_normalizer::provider::DecompositionTables;
+use icu_properties::props::CanonicalCombiningClass;
 use smallvec::SmallVec;
 use zerovec::ule::AsULE;
 use zerovec::ule::RawBytesULE;
-use zerovec::{zeroslice, ZeroSlice};
+use zerovec::{ZeroSlice, zeroslice};
 
-use crate::provider::CollationDataV1;
+use crate::provider::CollationData;
 
-/// Marker that a complex decomposition isn't round-trippable
-/// under re-composition.
-const NON_ROUND_TRIP_MARKER: u16 = 1;
+// Start `SmallVec` size constants.
+//
+// These are the on-stack buffer sizes. If the buffers need
+// to grow larger, they are spilled to the heap.
+//
+// TODO(#2005): Figure out good sizes for these.
 
-/// Marker value for U+FDFA in NFKD
-const FDFA_MARKER: u16 = 3;
+/// The number of full 64-bit collation units that get buffered
+/// in the primary comparison loop so that they can be examined
+/// by the subsequent comparison stregths.
+///
+/// Note 1: If a primary difference is found, the comparison
+/// returns early, so these buffers end up holding all the
+/// collation elements only if there is no primary difference.
+///
+/// Note 2: Unfortunately for now, a sentinel value signaling
+/// the end of input gets written into the buffer in addition
+/// to the real collation elements.
+///
+/// This should probably either be halved to 4 on the logic
+/// that especially in the presence of the identical prefix
+/// optimization, most comparisons return after a couple of
+/// primary comparisons or increased to 32 on the logic that
+/// such a buffer could better hold a file or human name that
+/// differs on secordary or higher level.
+pub(crate) const CE_BUFFER_SIZE: usize = 8;
 
-/// Marker for starters that decompose to themselves but may
-/// combine backwards under canonical composition.
-/// (Main trie only; not used in the supplementary trie.)
-const BACKWARD_COMBINING_STARTER_MARKER: u32 = 1;
+/// The number of extra full 64-bit collation units that have
+/// already been computed as part of an operation that yields
+/// multiple collation units at a time.
+const PENDING_CE_BUFFER_SIZE: usize = 6;
 
-// Magic marker trie value for characters whose decomposition
-// starts with a non-starter. The actual decomposition is
-// hard-coded.
-const SPECIAL_NON_STARTER_DECOMPOSITION_MARKER: u32 = 2;
+/// Either the identical prefix or the lookahead plus the next
+/// upcoming character.
+///
+/// The longest contraction suffix in CLDR 40 is 7 characters long.
+const UPCOMING_CHARACTER_BUFFER_SIZE: usize = 10;
 
-/// `u16` version of the previous marker value.
-const SPECIAL_NON_STARTER_DECOMPOSITION_MARKER_U16: u16 = 2;
+/// The contiguous sequence of combining characters.
+const COMBINING_CHARACTER_BUFFER_SIZE: usize = 7;
+
+/// The sequence of digits in the numeric mode.
+const DIGIT_BUFFER_SIZE: usize = 8;
+
+/// The number of combining characters that a contraction has
+/// matched.
+const PENDING_REMOVALS_SIZE: usize = 1;
+
+// End `SmallVec` constants
+
+/// Marker that the decomposition does not round trip via NFC.
+///
+/// See components/normalizer/trie-value-format.md
+pub(crate) const NON_ROUND_TRIP_MARKER: u32 = 1 << 30;
+
+/// Marker that the first character of the decomposition
+/// can combine backwards.
+///
+/// See components/normalizer/trie-value-format.md
+pub(crate) const BACKWARD_COMBINING_MARKER: u32 = 1 << 31;
+
+/// Mask for the bits have to be zero for this to be a BMP
+/// singleton decomposition, or value baked into the surrogate
+/// range.
+///
+/// See components/normalizer/trie-value-format.md
+pub(crate) const HIGH_ZEROS_MASK: u32 = 0x3FFF0000;
+
+/// Mask for the bits have to be zero for this to be a complex
+/// decomposition.
+///
+/// See components/normalizer/trie-value-format.md
+pub(crate) const LOW_ZEROS_MASK: u32 = 0xFFE0;
+
+/// Marker value for U+FDFA in NFKD. (Unified with
+/// `HANGUL_SYLLABLE_MARKER`, but they differ by
+/// `NON_ROUND_TRIP_MARKER`.)
+///
+/// See components/normalizer/trie-value-format.md
+const FDFA_MARKER: u16 = 1;
+
+/// Marker value for Hangul syllables. (Unified with `FDFA_MARKER`,
+/// but they differ by `NON_ROUND_TRIP_MARKER`.)
+///
+/// See components/normalizer/trie-value-format.md
+pub(crate) const HANGUL_SYLLABLE_MARKER: u32 = 1;
 
 /// Checks if a trie value carries a (non-zero) canonical
 /// combining class.
+///
+/// See components/normalizer/trie-value-format.md
 fn trie_value_has_ccc(trie_value: u32) -> bool {
-    (trie_value & 0xFFFFFF00) == 0xD800
+    (trie_value & 0x3FFFFE00) == 0xD800
 }
 
 /// Checks if the trie signifies a special non-starter decomposition.
+///
+/// See components/normalizer/trie-value-format.md
 fn trie_value_indicates_special_non_starter_decomposition(trie_value: u32) -> bool {
-    trie_value == SPECIAL_NON_STARTER_DECOMPOSITION_MARKER
+    (trie_value & 0x3FFFFF00) == 0xD900
 }
 
 /// Checks if a trie value signifies a character whose decomposition
 /// starts with a non-starter.
+///
+/// See components/normalizer/trie-value-format.md
 fn decomposition_starts_with_non_starter(trie_value: u32) -> bool {
     trie_value_has_ccc(trie_value)
-        || trie_value_indicates_special_non_starter_decomposition(trie_value)
 }
 
 /// Extracts a canonical combining class (possibly zero) from a trie value.
 ///
-/// # Panics
-///
-/// The trie value must not be one that signifies a special non-starter
-/// decomposition. (Debug-only)
+/// See components/normalizer/trie-value-format.md
 fn ccc_from_trie_value(trie_value: u32) -> CanonicalCombiningClass {
     if trie_value_has_ccc(trie_value) {
         CanonicalCombiningClass(trie_value as u8)
     } else {
-        debug_assert_ne!(trie_value, SPECIAL_NON_STARTER_DECOMPOSITION_MARKER);
         CanonicalCombiningClass::NotReordered
     }
 }
@@ -106,9 +173,10 @@ pub(crate) const QUATERNARY_MASK: u16 = 0xC0;
 
 // A CE32 is special if its low byte is this or greater.
 // Impossible case bits 11 mark special CE32s.
-// This value itself is used to indicate a fallback to the base collator.
+// This value itself is used to indicate a fallback to the root collation.
 const SPECIAL_CE32_LOW_BYTE: u8 = 0xC0;
-const FALLBACK_CE32: CollationElement32 = CollationElement32(SPECIAL_CE32_LOW_BYTE as u32);
+pub(crate) const FALLBACK_CE32: CollationElement32 =
+    CollationElement32(SPECIAL_CE32_LOW_BYTE as u32);
 const LONG_PRIMARY_CE32_LOW_BYTE: u8 = 0xC1; // SPECIAL_CE32_LOW_BYTE | LONG_PRIMARY_TAG
 const COMMON_SECONDARY_CE: u64 = 0x05000000;
 const COMMON_TERTIARY_CE: u64 = 0x0500;
@@ -116,11 +184,11 @@ const COMMON_SEC_AND_TER_CE: u64 = COMMON_SECONDARY_CE | COMMON_TERTIARY_CE;
 
 const UNASSIGNED_IMPLICIT_BYTE: u8 = 0xFE;
 
-/// Set if there is no match for the single (no-suffix) character itself.
-/// This is only possible if there is a prefix.
-/// In this case, discontiguous contraction matching cannot add combining marks
-/// starting from an empty suffix.
-/// The default CE32 is used anyway if there is no suffix match.
+// /// Set if there is no match for the single (no-suffix) character itself.
+// /// This is only possible if there is a prefix.
+// /// In this case, discontiguous contraction matching cannot add combining marks
+// /// starting from an empty suffix.
+// /// The default CE32 is used anyway if there is no suffix match.
 // const CONTRACT_SINGLE_CP_NO_MATCH: u32 = 0x100;
 
 /// Set if the first character of every contraction suffix has lccc!=0.
@@ -130,13 +198,14 @@ const CONTRACT_TRAILING_CCC: u32 = 0x400;
 /// Set if at least one contraction suffix contains a starter
 const CONTRACT_HAS_STARTER: u32 = 0x800;
 
-// const NO_CE32: CollationElement32 = CollationElement32::const_default();
+// const NO_CE32: CollationElement32 = CollationElement32::default();
 // constants named NO_CE* : End of input. Only used in runtime code, not stored in data.
-pub(crate) const NO_CE: CollationElement = CollationElement::const_default();
+pub(crate) const NO_CE: CollationElement = CollationElement::default();
 pub(crate) const NO_CE_PRIMARY: u32 = 1; // not a left-adjusted weight
-                                         // const NO_CE_NON_PRIMARY: NonPrimary = NonPrimary::const_default();
+// const NO_CE_NON_PRIMARY: NonPrimary = NonPrimary::default();
 pub(crate) const NO_CE_SECONDARY: u16 = 0x0100;
 pub(crate) const NO_CE_TERTIARY: u16 = 0x0100;
+pub(crate) const NO_CE_QUATERNARY: u16 = 0x0100;
 const NO_CE_VALUE: u64 =
     ((NO_CE_PRIMARY as u64) << 32) | ((NO_CE_SECONDARY as u64) << 16) | (NO_CE_TERTIARY as u64); // 0x101000100
 
@@ -149,11 +218,11 @@ pub(crate) const FFFD_CE32: CollationElement32 = CollationElement32(FFFD_CE32_VA
 
 pub(crate) const EMPTY_U16: &ZeroSlice<u16> = zeroslice![];
 const SINGLE_REPLACEMENT_CHARACTER_U16: &ZeroSlice<u16> =
-    zeroslice!(u16; <u16 as AsULE>::ULE::from_unsigned; [REPLACEMENT_CHARACTER as u16]);
+    zeroslice!(u16; <u16 as AsULE>::ULE::from_unsigned; [char::REPLACEMENT_CHARACTER as u16]);
 
 pub(crate) const EMPTY_CHAR: &ZeroSlice<char> = zeroslice![];
 const SINGLE_REPLACEMENT_CHARACTER_CHAR: &ZeroSlice<char> =
-    zeroslice!(char; <char as AsULE>::ULE::from_aligned; [REPLACEMENT_CHARACTER]);
+    zeroslice!(char; <char as AsULE>::ULE::from_aligned; [char::REPLACEMENT_CHARACTER]);
 
 /// If `opt` is `Some`, unwrap it. If `None`, panic if debug assertions
 /// are enabled and return `default` if debug assertions are not enabled.
@@ -173,8 +242,8 @@ pub(crate) fn unwrap_or_gigo<T>(opt: Option<T>, default: T) -> T {
 
 /// Convert a `u32` _obtained from data provider data_ to `char`.
 #[inline(always)]
-fn char_from_u32(u: u32) -> char {
-    unwrap_or_gigo(core::char::from_u32(u), REPLACEMENT_CHARACTER)
+pub(crate) fn char_from_u32(u: u32) -> char {
+    unwrap_or_gigo(char::from_u32(u), char::REPLACEMENT_CHARACTER)
 }
 
 /// Convert a `u16` _obtained from data provider data_ to `char`.
@@ -193,13 +262,13 @@ fn in_inclusive_range(c: char, start: char, end: char) -> bool {
 /// Bits  5..4: Reserved. May be used in the future to indicate lccc!=0 and tccc!=0.
 #[derive(Eq, PartialEq, Debug)]
 #[allow(dead_code)]
-#[repr(u8)]
+#[repr(u8)] // This repr is necessary for transmute safety
 pub(crate) enum Tag {
     /// Fall back to the base collator.
-    /// This is the tag value in SPECIAL_CE32_LOW_BYTE and FALLBACK_CE32.
+    /// This is the tag value in [`SPECIAL_CE32_LOW_BYTE`] and [`FALLBACK_CE32`].
     /// Bits 31..8: Unused, 0.
     Fallback = 0,
-    /// Long-primary CE with COMMON_SEC_AND_TER_CE.
+    /// Long-primary CE with [`COMMON_SEC_AND_TER_CE`].
     /// Bits 31..8: Three-byte primary.
     LongPrimary = 1,
     /// Long-secondary CE with zero primary.
@@ -207,7 +276,7 @@ pub(crate) enum Tag {
     /// Bits 15.. 8: Tertiary weight.
     LongSecondary = 2,
     /// Unused.
-    /// May be used in the future for single-byte secondary CEs (SHORT_SECONDARY_TAG),
+    /// May be used in the future for single-byte secondary CEs (`SHORT_SECONDARY_TAG`),
     /// storing the secondary in bits 31..24, the ccc in bits 23..16,
     /// and the tertiary in bits 15..8.
     Reserved3 = 3,
@@ -218,20 +287,20 @@ pub(crate) enum Tag {
     /// Unused by ICU4X, may get repurposed for jamo expansions is Korean search.
     LatinExpansion = 4,
     /// Points to one or more simple/long-primary/long-secondary 32-bit CE32s.
-    /// Bits 31..13: Index into uint32_t table.
+    /// Bits 31..13: Index into `uint32_t` table.
     /// Bits 12.. 8: Length=1..31.
     Expansion32 = 5,
     /// Points to one or more 64-bit CEs.
     /// Bits 31..13: Index into CE table.
     /// Bits 12.. 8: Length=1..31.
     Expansion = 6,
-    /// Builder data, used only in the CollationDataBuilder, not in runtime data.
+    /// Builder data, used only in the `CollationDataBuilder`, not in runtime data.
     ///
     /// If bit 8 is 0: Builder context, points to a list of context-sensitive mappings.
-    /// Bits 31..13: Index to the builder's list of ConditionalCE32 for this character.
+    /// Bits 31..13: Index to the builder's list of `ConditionalCE32` for this character.
     /// Bits 12.. 9: Unused, 0.
     ///
-    /// If bit 8 is 1 (IS_BUILDER_JAMO_CE32): Builder-only jamoCE32 value.
+    /// If bit 8 is 1 (`IS_BUILDER_JAMO_CE32`): Builder-only jamoCE32 value.
     /// The builder fetches the Jamo CE32 from the trie.
     /// Bits 31..13: Jamo code point.
     /// Bits 12.. 9: Unused, 0.
@@ -243,12 +312,12 @@ pub(crate) enum Tag {
     /// Points to contraction data.
     /// Bits 31..13: Index into prefix/contraction data.
     /// Bits 12..11: Unused, 0.
-    /// Bit      10: CONTRACT_TRAILING_CCC flag.
-    /// Bit       9: CONTRACT_NEXT_CCC flag.
-    /// Bit       8: CONTRACT_SINGLE_CP_NO_MATCH flag.
+    /// Bit      10: `CONTRACT_TRAILING_CCC` flag.
+    /// Bit       9: `CONTRACT_NEXT_CCC` flag.
+    /// Bit       8: `CONTRACT_SINGLE_CP_NO_MATCH` flag.
     Contraction = 9,
     /// Decimal digit.
-    /// Bits 31..13: Index into uint32_t table for non-numeric-collation CE32.
+    /// Bits 31..13: Index into `uint32_t` table for non-numeric-collation CE32.
     /// Bit      12: Unused, 0.
     /// Bits 11.. 8: Digit value 0..9.
     Digit = 10,
@@ -259,7 +328,7 @@ pub(crate) enum Tag {
     U0000 = 11,
     /// Tag for a Hangul syllable.
     /// Bits 31..9: Unused, 0.
-    /// Bit      8: HANGUL_NO_SPECIAL_JAMO flag.
+    /// Bit      8: `HANGUL_NO_SPECIAL_JAMO` flag.
     /// Not used by ICU4X, may get reused for compressing Hanja expansions.
     Hangul = 12,
     /// Tag for a lead surrogate code unit.
@@ -281,7 +350,7 @@ pub(crate) enum Tag {
     ///       6.. 0: Per-code point primary-weight increment.
     Offset = 14,
     /// Implicit CE tag. Compute an unassigned-implicit CE.
-    /// All bits are set (UNASSIGNED_CE32=0xffffffff).
+    /// All bits are set (`UNASSIGNED_CE32=0xffffffff`).
     Implicit = 15,
 }
 
@@ -324,12 +393,12 @@ impl CollationElement32 {
     }
 
     #[inline(always)]
-    fn low_byte(&self) -> u8 {
+    fn low_byte(self) -> u8 {
         self.0 as u8
     }
 
     #[inline(always)]
-    fn tag_checked(&self) -> Option<Tag> {
+    pub(crate) fn tag_checked(self) -> Option<Tag> {
         let t = self.low_byte();
         if t < SPECIAL_CE32_LOW_BYTE {
             None
@@ -347,11 +416,10 @@ impl CollationElement32 {
     ///
     /// Panics in debug mode if called on a non-special element.
     #[inline(always)]
-    pub(crate) fn tag(&self) -> Tag {
+    pub(crate) fn tag(self) -> Tag {
         debug_assert!(self.low_byte() >= SPECIAL_CE32_LOW_BYTE);
-        // By construction, the byte being transmuted to the enum is within
-        // the value space of the enum, so the transmute cannot be UB.
-        unsafe { core::mem::transmute(self.low_byte() & 0xF) }
+        // Safety: Tag has values 0 to 15, which are filtered for with the 0xF mask.
+        unsafe { core::mem::transmute::<u8, Tag>(self.low_byte() & 0xF) }
     }
 
     /// Expands to 64 bits if the expansion is to a single 64-bit collation
@@ -404,7 +472,7 @@ impl CollationElement32 {
     ///
     /// In debug builds if this element doesn't have a length.
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub fn len(self) -> usize {
         debug_assert!(self.tag() == Tag::Expansion32 || self.tag() == Tag::Expansion);
         ((self.0 >> 8) & 31) as usize
     }
@@ -415,7 +483,7 @@ impl CollationElement32 {
     ///
     /// In debug builds if this element doesn't have an index.
     #[inline(always)]
-    pub fn index(&self) -> usize {
+    pub fn index(self) -> usize {
         debug_assert!(
             self.tag() == Tag::Expansion32
                 || self.tag() == Tag::Expansion
@@ -428,23 +496,23 @@ impl CollationElement32 {
     }
 
     #[inline(always)]
-    pub fn digit(&self) -> u8 {
+    pub fn digit(self) -> u8 {
         debug_assert!(self.tag() == Tag::Digit);
         ((self.0 >> 8) & 0xF) as u8
     }
 
     #[inline(always)]
-    pub fn every_suffix_starts_with_combining(&self) -> bool {
+    pub fn every_suffix_starts_with_combining(self) -> bool {
         debug_assert!(self.tag() == Tag::Contraction);
         (self.0 & CONTRACT_NEXT_CCC) != 0
     }
     #[inline(always)]
-    pub fn at_least_one_suffix_contains_starter(&self) -> bool {
+    pub fn at_least_one_suffix_contains_starter(self) -> bool {
         debug_assert!(self.tag() == Tag::Contraction);
         (self.0 & CONTRACT_HAS_STARTER) != 0
     }
     #[inline(always)]
-    pub fn at_least_one_suffix_ends_with_non_starter(&self) -> bool {
+    pub fn at_least_one_suffix_ends_with_non_starter(self) -> bool {
         debug_assert!(self.tag() == Tag::Contraction);
         (self.0 & CONTRACT_TRAILING_CCC) != 0
     }
@@ -501,42 +569,42 @@ impl CollationElement {
     }
 
     #[inline(always)]
-    pub fn clone_with_non_primary_zeroed(&self) -> Self {
+    pub fn clone_with_non_primary_zeroed(self) -> Self {
         CollationElement(self.0 & 0xFFFFFFFF00000000)
     }
 
     /// Get the primary weight
     #[inline(always)]
-    pub fn primary(&self) -> u32 {
+    pub fn primary(self) -> u32 {
         (self.0 >> 32) as u32
     }
 
     /// Get the non-primary weights
     #[inline(always)]
-    pub fn non_primary(&self) -> NonPrimary {
+    pub fn non_primary(self) -> NonPrimary {
         NonPrimary::new(self.0 as u32)
     }
 
     /// Get the secondary weight
     #[inline(always)]
-    pub fn secondary(&self) -> u16 {
+    pub fn secondary(self) -> u16 {
         self.non_primary().secondary()
     }
     #[inline(always)]
-    pub fn quaternary(&self) -> u32 {
+    pub fn quaternary(self) -> u32 {
         self.non_primary().quaternary()
     }
     #[inline(always)]
-    pub fn tertiary_ignorable(&self) -> bool {
+    pub fn tertiary_ignorable(self) -> bool {
         self.non_primary().tertiary_ignorable()
     }
     #[inline(always)]
-    pub fn either_half_zero(&self) -> bool {
+    pub fn either_half_zero(self) -> bool {
         self.primary() == 0 || (self.0 as u32) == 0
     }
 
     #[inline(always)]
-    pub const fn const_default() -> CollationElement {
+    pub const fn default() -> CollationElement {
         CollationElement(NO_CE_VALUE) // NO_CE
     }
 }
@@ -569,40 +637,40 @@ impl NonPrimary {
         NonPrimary(bits)
     }
     /// Get the bits
-    pub fn bits(&self) -> u32 {
+    pub fn bits(self) -> u32 {
         self.0
     }
     /// Get the secondary weight
     #[inline(always)]
-    pub fn secondary(&self) -> u16 {
+    pub fn secondary(self) -> u16 {
         (self.0 >> 16) as u16
     }
     /// Get the case bits as the high two bits of a u16
     #[inline(always)]
-    pub fn case(&self) -> u16 {
+    pub fn case(self) -> u16 {
         (self.0 as u16) & CASE_MASK
     }
     /// Get the tertiary weight as u16 with the high
     /// two bits of each half zeroed.
     #[inline(always)]
-    pub fn tertiary(&self) -> u16 {
+    pub fn tertiary(self) -> u16 {
         (self.0 as u16) & TERTIARY_MASK
     }
     #[inline(always)]
-    pub fn tertiary_ignorable(&self) -> bool {
+    pub fn tertiary_ignorable(self) -> bool {
         (self.0 as u16) <= NO_CE_TERTIARY
     }
     /// Get the quaternary weight in the original
     /// storage bit positions with the other bits
     /// set to one.
     #[inline(always)]
-    pub fn quaternary(&self) -> u32 {
+    pub fn quaternary(self) -> u32 {
         self.0 | !(QUATERNARY_MASK as u32)
     }
     /// Get any combination of tertiary, case, and quaternary
     /// by mask.
     #[inline(always)]
-    pub fn tertiary_case_quarternary(&self, mask: u16) -> u16 {
+    pub fn tertiary_case_quarternary(self, mask: u16) -> u16 {
         debug_assert!((mask & CASE_MASK) == CASE_MASK || (mask & CASE_MASK) == 0);
         debug_assert!((mask & TERTIARY_MASK) == TERTIARY_MASK || (mask & TERTIARY_MASK) == 0);
         debug_assert!((mask & QUATERNARY_MASK) == QUATERNARY_MASK || (mask & QUATERNARY_MASK) == 0);
@@ -610,8 +678,13 @@ impl NonPrimary {
     }
 
     #[inline(always)]
-    pub fn case_quaternary(&self) -> u16 {
+    pub fn case_quaternary(self) -> u16 {
         (self.0 as u16) & (CASE_MASK | QUATERNARY_MASK)
+    }
+
+    #[inline(always)]
+    pub fn ignorable(self) -> bool {
+        self.0 == 0
     }
 }
 
@@ -628,19 +701,19 @@ impl Default for NonPrimary {
 /// need the ccc yet, and when lookahead has already done the
 /// trie lookups, we don't need `trie_value`, as it is implied
 /// by ccc.
-///
-/// TODO(#2386): This struct carries redundant information, and
-/// `upcoming` should be split into a buffer of `CharacterAndClass`
-///  and an `Option<CharacterAndTrieValue>`, but that refactoring
-/// isn't 100% necessary, so focusing on data format stability
-/// for 1.0.
-///
-/// (Deliberately non-`Copy`, because `CharacterAndClass` is
-/// non-`Copy`.)
+//
+// TODO(#2386): This struct carries redundant information, and
+// `upcoming` should be split into a buffer of `CharacterAndClass`
+//  and an `Option<CharacterAndTrieValue>`, but that refactoring
+// isn't 100% necessary, so focusing on data format stability
+// for 1.0.
+//
+// (Deliberately non-`Copy`, because `CharacterAndClass` is
+// non-`Copy`.)
 #[derive(Debug, Clone)]
-struct CharacterAndClassAndTrieValue {
+pub(crate) struct CharacterAndClassAndTrieValue {
     c_and_c: CharacterAndClass,
-    trie_val: u32,
+    pub trie_val: u32,
 }
 
 impl CharacterAndClassAndTrieValue {
@@ -678,11 +751,12 @@ impl CharacterAndClassAndTrieValue {
             }
         }
     }
+
     pub fn decomposition_starts_with_non_starter(&self) -> bool {
         decomposition_starts_with_non_starter(self.trie_val)
     }
 
-    fn character(&self) -> char {
+    pub fn character(&self) -> char {
         self.c_and_c.character()
     }
 
@@ -716,24 +790,30 @@ impl CharacterAndClassAndTrieValue {
 // or the crate-module-qualified name of this struct
 // without coordination.
 #[derive(Debug, Clone)]
+// Safety invariant: The low 24 bits are a valid char
 struct CharacterAndClass(u32);
 
 impl CharacterAndClass {
     pub fn new(c: char, ccc: CanonicalCombiningClass) -> Self {
+        // Safety invariant upheld here: the first half is a valid char
+        // and the second half does not affect the low 24 bits
         CharacterAndClass(u32::from(c) | (u32::from(ccc.0) << 24))
     }
     pub fn new_with_placeholder(c: char) -> Self {
+        // Safety invariant upheld here: the first half is a valid char
+        // and the second half does not affect the low 24 bits
         CharacterAndClass(u32::from(c) | ((0xFF) << 24))
     }
     pub fn new_with_trie_value(c: char, trie_value: u32) -> Self {
         Self::new(c, ccc_from_trie_value(trie_value))
     }
     pub fn character(&self) -> char {
-        // Safe, because the low 24 bits came from a `char`
-        // originally.
-        unsafe { char::from_u32_unchecked(self.0 & 0xFFFFFF) }
+        // Safety: from the safety invariant, this extracts the low 24 bits
+        unsafe { char::from_u32_unchecked(self.0 & 0xFF_FFFF) }
     }
     pub fn ccc(&self) -> CanonicalCombiningClass {
+        // Safety invariant upheld here: The argument is outside of the low 24 bits,
+        // and \0 is a valid character
         CanonicalCombiningClass((self.0 >> 24) as u8)
     }
     pub fn character_and_ccc(&self) -> (char, CanonicalCombiningClass) {
@@ -743,7 +823,9 @@ impl CharacterAndClass {
         if self.0 >> 24 != 0xFF {
             return;
         }
-        let scalar = self.0 & 0xFFFFFF;
+        let scalar = self.0 & 0xFF_FFFF;
+        // Safety invariant upheld here: The first half doesn't affect the lower 24 bits,
+        // and the second half was taken from the old `self` which had these invariants upheld already.
         self.0 = ((ccc_from_trie_value(trie.get32_u32(scalar)).0 as u32) << 24) | scalar;
     }
 }
@@ -752,13 +834,24 @@ impl CharacterAndClass {
 /// over `CollationElement` with a tailoring.
 /// Not a real Rust iterator: Instead of `None` uses `NO_CE` to indicate
 /// end of iteration to optimize comparison.
+///
+/// It is _extremely_ important for performance that `SmallVec`s not be
+/// moved. To facilitate move-avoidance, this struct has the following
+/// life cycle where `new` returns the struct in a state that is not
+/// yet valid for a `next` call until `init` is called:
+///
+/// 1. `new`.
+/// 2. Some number of calls to `iter_next_before_init` and
+///    `prepend_upcoming_before_init`.
+/// 3. `init`.
+/// 4. Some number of calls to `next`.
 pub(crate) struct CollationElements<'data, I>
 where
     I: Iterator<Item = char>,
 {
     iter: I,
     /// Already computed but not yet returned `CollationElement`s.
-    pending: SmallVec<[CollationElement; 6]>, // TODO(#2005): Figure out good length
+    pending: SmallVec<[CollationElement; PENDING_CE_BUFFER_SIZE]>, // TODO(#2005): Figure out good length
     /// The index of the next item to be returned from `pending`. The purpose
     /// of this index is to avoid moving the rest of the items.
     pending_pos: usize,
@@ -785,11 +878,14 @@ where
     /// if `upcoming` isn't empty (with `iter` having been exhausted), the
     /// first `char` in `upcoming` must have its decomposition start with a
     /// starter.
-    upcoming: SmallVec<[CharacterAndClassAndTrieValue; 10]>, /* TODO(#2005): Figure out good length; longest contraction suffix in CLDR 40 is 7 characters long */
+    ///
+    /// TODO: Reverse the order, since now `insert(0, x)` and `remove(0)`
+    /// are used more often than `push()` and `pop()`.
+    upcoming: SmallVec<[CharacterAndClassAndTrieValue; UPCOMING_CHARACTER_BUFFER_SIZE]>,
     /// The root collation data.
-    root: &'data CollationDataV1<'data>,
+    root: &'data CollationData<'data>,
     /// Tailoring if applicable.
-    tailoring: &'data CollationDataV1<'data>,
+    tailoring: &'data CollationData<'data>,
     /// The `CollationElement32` mapping for the Hangul Jamo block.
     ///
     /// Note: in ICU4C the jamo table contains only modern jamo. Here, the jamo table contains the whole Unicode block.
@@ -797,6 +893,8 @@ where
     /// The `CollationElement32` mapping for the Combining Diacritical Marks block.
     diacritics: &'data ZeroSlice<u16>,
     /// NFD main trie.
+    ///
+    /// See components/normalizer/trie-value-format.md
     trie: &'data CodePointTrie<'data, u32>,
     /// NFD complex decompositions on the BMP
     scalars16: &'data ZeroSlice<u16>,
@@ -807,35 +905,38 @@ where
     numeric_primary: Option<u8>,
     /// Whether the Lithuanian combining dot above handling is enabled.
     lithuanian_dot_above: bool,
+    /// Whether `upcoming` (except the last item) has been normalized already
+    upcoming_normalized: bool,
     #[cfg(debug_assertions)]
     /// Whether `iter` has been exhausted
     iter_exhausted: bool,
+    #[cfg(debug_assertions)]
+    /// Whether `init` has been called
+    initialized: bool,
 }
 
 impl<'data, I> CollationElements<'data, I>
 where
     I: Iterator<Item = char>,
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         delegate: I,
-        root: &'data CollationDataV1,
-        tailoring: &'data CollationDataV1,
+        root: &'data CollationData,
+        tailoring: &'data CollationData,
         jamo: &'data [<u32 as AsULE>::ULE; JAMO_COUNT],
         diacritics: &'data ZeroSlice<u16>,
-        decompositions: &'data DecompositionDataV1,
-        tables: &'data DecompositionTablesV1,
+        decompositions: &'data DecompositionData,
+        tables: &'data DecompositionTables,
         numeric_primary: Option<u8>,
         lithuanian_dot_above: bool,
     ) -> Self {
-        let mut u = SmallVec::new();
-        u.push(CharacterAndClassAndTrieValue::new_with_non_decomposing_starter('\u{FFFF}')); // Make sure the process always begins with a starter
-        let mut ret = CollationElements::<I> {
+        CollationElements::<I> {
             iter: delegate,
             pending: SmallVec::new(),
             pending_pos: 0,
             prefix: ['\u{FFFF}'; 2],
-            upcoming: u,
+            upcoming: SmallVec::new(),
             root,
             tailoring,
             jamo,
@@ -845,11 +946,69 @@ where
             scalars32: &tables.scalars24,
             numeric_primary,
             lithuanian_dot_above,
+            upcoming_normalized: false,
             #[cfg(debug_assertions)]
             iter_exhausted: false,
-        };
-        let _ = ret.next(); // Remove the placeholder starter
-        ret
+            #[cfg(debug_assertions)]
+            initialized: false,
+        }
+    }
+
+    pub fn iter_next_before_init(&mut self) -> Option<CharacterAndClassAndTrieValue> {
+        #[cfg(debug_assertions)]
+        debug_assert!(!self.initialized);
+        self.iter_next()
+    }
+
+    pub fn prepend_upcoming_before_init(&mut self, c: CharacterAndClassAndTrieValue) {
+        #[cfg(debug_assertions)]
+        debug_assert!(!self.initialized);
+        self.upcoming.insert(0, c);
+    }
+
+    pub fn init(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(!self.initialized);
+            self.initialized = true;
+        }
+
+        // Ensure the last item is a starter (unless)
+        // iter exhausted.
+        if let Some(last) = self.upcoming.last()
+            && last.decomposition_starts_with_non_starter()
+        {
+            // Not using `while let` to be able to set `iter_exhausted`
+            loop {
+                if let Some(ch) = self.iter_next() {
+                    let starter = !ch.decomposition_starts_with_non_starter();
+                    self.upcoming.push(ch);
+                    if starter {
+                        break;
+                    }
+                } else {
+                    #[cfg(debug_assertions)]
+                    {
+                        self.iter_exhausted = true;
+                    }
+                    break;
+                }
+            }
+        }
+
+        let mut starts_with_starter = false;
+        if let Some(first) = self.upcoming.first()
+            && !first.decomposition_starts_with_non_starter()
+        {
+            starts_with_starter = true;
+        }
+        if !starts_with_starter {
+            self.upcoming.insert(
+                0,
+                CharacterAndClassAndTrieValue::new_with_non_decomposing_starter('\u{FFFF}'),
+            ); // Make sure the process always begins with a starter
+            let _ = self.next(); // Remove the placeholder starter
+        }
     }
 
     fn iter_next(&mut self) -> Option<CharacterAndClassAndTrieValue> {
@@ -884,19 +1043,19 @@ where
         }
         // index has to be in range due to the check above.
         // rewriting with `get()` would result in two checks.
-        #[allow(clippy::indexing_slicing)]
+        #[expect(clippy::indexing_slicing)]
         if !self.upcoming[0].decomposition_starts_with_non_starter() {
             return;
         }
         // We now have a single character that decomposes to start with
         // a non-starter. Decompose it and assign the real canonical combining class.
         let first = self.upcoming.remove(0);
-        let _ = self.push_decomposed_combining(first);
+        self.push_decomposed_combining(first);
         // Not using `while let` to be able to set `iter_exhausted`
         loop {
             if let Some(ch) = self.iter_next() {
                 if ch.decomposition_starts_with_non_starter() {
-                    let _ = self.push_decomposed_combining(ch);
+                    self.push_decomposed_combining(ch);
                 } else {
                     // Got a new starter
                     self.upcoming.push(ch);
@@ -912,11 +1071,80 @@ where
         }
     }
 
-    fn push_decomposed_combining(&mut self, c: CharacterAndClassAndTrieValue) -> usize {
+    /// Ensures that `upcoming` is normalized to NFD, except:
+    /// 1. When the last item is a starter, it isn't necessarily normalized.
+    /// 2. Hangul syllable are unnormalized.
+    fn ensure_upcoming_normalized(&mut self) {
+        if self.upcoming_normalized {
+            return;
+        }
+        self.upcoming_normalized = true;
+        let without_trailing_starter = if let Some((last, head)) = self.upcoming.split_last() {
+            if !last.decomposition_starts_with_non_starter() {
+                if head.is_empty() {
+                    // There is a single starter, which isn't required
+                    // to be normalized.
+                    return;
+                } else {
+                    head
+                }
+            } else {
+                &self.upcoming[..]
+            }
+        } else {
+            // Make the assertion conditional to make CI happy.
+            #[cfg(debug_assertions)]
+            debug_assert!(self.iter_exhausted);
+            return;
+        };
+
+        // It would be better to attempt to normalize in place, but let's do at
+        // least this.
+        if without_trailing_starter.iter().all(|c| {
+            (c.trie_val
+                & !(BACKWARD_COMBINING_MARKER | NON_ROUND_TRIP_MARKER | HANGUL_SYLLABLE_MARKER))
+                == 0
+        }) {
+            return;
+        }
+
+        let mut unnormalized = core::mem::take(&mut self.upcoming);
+        let last_index = unnormalized.len() - 1;
+        // Indexing is for debug assert only.
+        #[expect(clippy::indexing_slicing)]
+        {
+            debug_assert!(!unnormalized[0].decomposition_starts_with_non_starter());
+        }
+        let mut start_combining = 0;
+        for (i, c) in unnormalized.drain(..).enumerate() {
+            if c.decomposition_starts_with_non_starter() {
+                self.push_decomposed_combining(c);
+            } else if i == last_index {
+                // Indices are in range by construction, so indexing is OK.
+                #[expect(clippy::indexing_slicing)]
+                self.upcoming[start_combining..].sort_by_key(|c| c.ccc());
+                self.upcoming.push(c);
+                return;
+            } else {
+                // Indices are in range by construction, so indexing is OK.
+                #[expect(clippy::indexing_slicing)]
+                self.upcoming[start_combining..].sort_by_key(|c| c.ccc());
+                start_combining = self.push_decomposed_starter(c);
+            }
+        }
+        // Make the assertion conditional to make CI happy.
+        #[cfg(debug_assertions)]
+        debug_assert!(self.iter_exhausted);
+        // Indices are in range by construction, so indexing is OK.
+        #[expect(clippy::indexing_slicing)]
+        self.upcoming[start_combining..].sort_by_key(|c| c.ccc());
+    }
+
+    fn push_decomposed_combining(&mut self, c: CharacterAndClassAndTrieValue) {
         if !trie_value_indicates_special_non_starter_decomposition(c.trie_val) {
             debug_assert!(trie_value_has_ccc(c.trie_val));
             self.upcoming.push(c);
-            return 1;
+            return;
         }
 
         // The Tibetan special cases are starters that decompose into non-starters.
@@ -928,7 +1156,6 @@ where
                         '\u{0300}',
                         CanonicalCombiningClass::Above,
                     ));
-                1
             }
             '\u{0341}' => {
                 // COMBINING ACUTE TONE MARK
@@ -937,7 +1164,6 @@ where
                         '\u{0301}',
                         CanonicalCombiningClass::Above,
                     ));
-                1
             }
             '\u{0343}' => {
                 // COMBINING GREEK KORONIS
@@ -946,7 +1172,6 @@ where
                         '\u{0313}',
                         CanonicalCombiningClass::Above,
                     ));
-                1
             }
             '\u{0344}' => {
                 // COMBINING GREEK DIALYTIKA TONOS
@@ -960,7 +1185,6 @@ where
                         '\u{0301}',
                         CanonicalCombiningClass::Above,
                     ));
-                2
             }
             '\u{0F73}' => {
                 // TIBETAN VOWEL SIGN II
@@ -974,7 +1198,6 @@ where
                         '\u{0F72}',
                         CanonicalCombiningClass::CCC130,
                     ));
-                2
             }
             '\u{0F75}' => {
                 // TIBETAN VOWEL SIGN UU
@@ -988,7 +1211,6 @@ where
                         '\u{0F74}',
                         CanonicalCombiningClass::CCC132,
                     ));
-                2
             }
             '\u{0F81}' => {
                 // TIBETAN VOWEL SIGN REVERSED II
@@ -1002,23 +1224,15 @@ where
                         '\u{0F80}',
                         CanonicalCombiningClass::CCC130,
                     ));
-                2
             }
             _ => {
                 // GIGO case
                 debug_assert!(false);
-                0
             }
         }
     }
 
-    // Decomposes `c`, pushes it to `self.upcoming` (unless the character is
-    // a Hangul syllable; Hangul isn't allowed to participate in contractions),
-    // gathers the following combining characters from `self.iter` and the following starter.
-    // Sorts the combining characters and leaves the starter at the end
-    // unnormalized. The trailing unnormalized starter doesn't get appended if
-    // `self.iter` is exhausted.
-    fn push_decomposed_and_gather_combining(&mut self, c: CharacterAndClassAndTrieValue) {
+    fn push_decomposed_starter(&mut self, c: CharacterAndClassAndTrieValue) -> usize {
         let mut search_start_combining = false;
         let old_len = self.upcoming.len();
         // Not inserting early returns below to keep the same structure
@@ -1028,36 +1242,39 @@ where
         // Hangul syllables in lookahead, because Hangul isn't allowed to
         // participate in contractions, and the trie default is that a character
         // is its own decomposition.
+
+        // See components/normalizer/trie-value-format.md
         let decomposition = c.trie_val;
-        if decomposition <= BACKWARD_COMBINING_STARTER_MARKER {
+        if (decomposition & !(BACKWARD_COMBINING_MARKER | NON_ROUND_TRIP_MARKER))
+            <= HANGUL_SYLLABLE_MARKER
+        {
             // The character is its own decomposition (or Hangul syllable)
             // Set the Canonical Combining Class to zero
             self.upcoming.push(
                 CharacterAndClassAndTrieValue::new_with_non_decomposing_starter(c.character()),
             );
         } else {
-            let trail_or_complex = (decomposition >> 16) as u16;
-            let lead = decomposition as u16;
-            if lead > NON_ROUND_TRIP_MARKER && trail_or_complex != 0 {
+            let high_zeros = (decomposition & HIGH_ZEROS_MASK) == 0;
+            let low_zeros = (decomposition & LOW_ZEROS_MASK) == 0;
+            if !high_zeros && !low_zeros {
                 // Decomposition into two BMP characters: starter and non-starter
-                self.upcoming.push(
-                    CharacterAndClassAndTrieValue::new_with_non_decomposing_starter(char_from_u16(
-                        lead,
-                    )),
-                );
-                let low_c = char_from_u16(trail_or_complex);
+                let starter = char_from_u32(decomposition & 0x7FFF);
+                let low_c = char_from_u32((decomposition >> 15) & 0x7FFF);
+                self.upcoming
+                    .push(CharacterAndClassAndTrieValue::new_with_non_decomposing_starter(starter));
                 let trie_value = self.trie.get(low_c);
                 self.upcoming.push(
                     CharacterAndClassAndTrieValue::new_with_non_special_decomposition_trie_val(
                         low_c, trie_value,
                     ),
                 );
-            } else if lead > NON_ROUND_TRIP_MARKER {
+            } else if high_zeros {
+                let singleton = decomposition as u16;
                 debug_assert_ne!(
-                    lead, FDFA_MARKER,
+                    singleton, FDFA_MARKER,
                     "How come U+FDFA NFKD marker seen in NFD?"
                 );
-                if (lead & 0xFF00) == 0xD800 {
+                if (singleton & 0xFF00) == 0xD800 {
                     // We're at the end of the stream, so we aren't dealing with the
                     // next undecomposed starter but are dealing with an
                     // already-decomposed non-starter. Just put it back.
@@ -1066,35 +1283,22 @@ where
                     #[cfg(debug_assertions)]
                     debug_assert!(self.iter_exhausted);
                 } else {
-                    debug_assert_ne!(lead, SPECIAL_NON_STARTER_DECOMPOSITION_MARKER_U16);
                     // Decomposition into one BMP character
                     self.upcoming.push(
                         CharacterAndClassAndTrieValue::new_with_non_decomposing_starter(
-                            char_from_u16(lead),
+                            char_from_u16(singleton),
                         ),
                     );
                 }
             } else {
-                // Complex decomposition
-                // Format for 16-bit value:
-                // 15..13: length minus two for 16-bit case and length minus one for
-                //         the 32-bit case. Length 8 needs to fit in three bits in
-                //         the 16-bit case, and this way the value is future-proofed
-                //         up to 9 in the 16-bit case. Zero is unused and length one
-                //         in the 16-bit case goes directly into the trie.
-                //     12: 1 if all trailing characters are guaranteed non-starters,
-                //         0 if no guarantees about non-starterness.
-                //         Note: The bit choice is this way around to allow for
-                //         dynamically falling back to not having this but instead
-                //         having one more bit for length by merely choosing
-                //         different masks.
-                //  11..0: Start offset in storage. If less than the length of
-                //         scalars16, the offset is into scalars16. Otherwise,
-                //         the offset minus the length of scalars16 is an offset
-                //         into scalars32.
-                let offset = usize::from(trail_or_complex & 0xFFF);
+                debug_assert!(low_zeros);
+                // Only 12 of 14 bits used as of Unicode 16.
+                let offset = (((decomposition & !(0b11 << 30)) >> 16) as usize) - 1;
+                // Only 3 of 4 bits used as of Unicode 16.
+                let len_bits = decomposition & 0b1111;
+                let only_non_starters_in_trail = (decomposition & 0b10000) != 0;
                 if offset < self.scalars16.len() {
-                    let len = usize::from(trail_or_complex >> 13) + 2;
+                    let len = (len_bits + 2) as usize;
                     for u in unwrap_or_gigo(
                         self.scalars16.get_subslice(offset..offset + len),
                         SINGLE_REPLACEMENT_CHARACTER_U16, // single instead of empty for consistency with the other code path
@@ -1107,7 +1311,7 @@ where
                             .push(CharacterAndClassAndTrieValue::new_with_non_special_decomposition_trie_val(ch, trie_value));
                     }
                 } else {
-                    let len = usize::from(trail_or_complex >> 13) + 1;
+                    let len = (len_bits + 1) as usize;
                     let offset32 = offset - self.scalars16.len();
                     for ch in unwrap_or_gigo(
                         self.scalars32.get_subslice(offset32..offset32 + len),
@@ -1120,15 +1324,15 @@ where
                             .push(CharacterAndClassAndTrieValue::new_with_non_special_decomposition_trie_val(ch, trie_value));
                     }
                 }
-                search_start_combining = trail_or_complex & 0x1000 == 0;
+                search_start_combining = !only_non_starters_in_trail;
             }
         }
-        let start_combining = if search_start_combining {
+        if search_start_combining {
             // The decomposition contains starters. As of Unicode 14,
             // There are two possible patterns:
             // BMP: starter, starter, non-starter
             // Plane 1: starter, starter.
-            // However, for forward compatility, support any combination
+            // However, for forward compatibility, support any combination
             // and search for the last starter.
             let mut i = self.upcoming.len() - 1;
             loop {
@@ -1148,39 +1352,49 @@ where
             i + 1
         } else {
             old_len + 1
-        };
-        let mut end_combining = start_combining;
+        }
+    }
+
+    // Decomposes `c`, pushes it to `self.upcoming` (unless the character is
+    // a Hangul syllable; Hangul isn't allowed to participate in contractions),
+    // gathers the following combining characters from `self.iter` and the following starter.
+    // Sorts the combining characters and leaves the starter at the end
+    // unnormalized. The trailing unnormalized starter doesn't get appended if
+    // `self.iter` is exhausted.
+    fn push_decomposed_and_gather_combining(&mut self, c: CharacterAndClassAndTrieValue) {
+        let start_combining = self.push_decomposed_starter(c);
         // Not using `while let` to be able to set `iter_exhausted`
         loop {
             if let Some(ch) = self.iter_next() {
                 if ch.decomposition_starts_with_non_starter() {
-                    end_combining += self.push_decomposed_combining(ch);
+                    self.push_decomposed_combining(ch);
                 } else {
                     // Got a new starter
+                    // Indices are in range by construction, so indexing is OK.
+                    #[expect(clippy::indexing_slicing)]
+                    self.upcoming[start_combining..].sort_by_key(|c| c.ccc());
                     self.upcoming.push(ch);
-                    break;
+                    return;
                 }
             } else {
                 #[cfg(debug_assertions)]
                 {
                     self.iter_exhausted = true;
                 }
-                break;
+                // Indices are in range by construction, so indexing is OK.
+                #[expect(clippy::indexing_slicing)]
+                self.upcoming[start_combining..].sort_by_key(|c| c.ccc());
+                return;
             }
         }
-        // Perhaps there is a better borrow checker idiom than a function
-        // call for indicating that `upcoming` and `ccc` are disjoint and don't
-        // overlap. However, this works.
-        // Indices are in range by construction, so indexing is OK.
-        #[allow(clippy::indexing_slicing)]
-        self.upcoming[start_combining..end_combining].sort_by_key(|c| c.ccc());
     }
 
     // Assumption: `pos` starts from zero and increases one by one.
     // Indexing is OK, because we check against `len()` and the `pos`
     // increases one by one by construction.
-    #[allow(clippy::indexing_slicing)]
+    #[expect(clippy::indexing_slicing)]
     fn look_ahead(&mut self, pos: usize) -> Option<CharacterAndClassAndTrieValue> {
+        debug_assert!(self.upcoming_normalized);
         if pos + 1 == self.upcoming.len() {
             let c = self.upcoming.remove(pos);
             self.push_decomposed_and_gather_combining(c);
@@ -1234,7 +1448,7 @@ where
         let start = c.decomposition_starts_with_non_starter() as usize;
         self.upcoming.insert(0, c);
         // Indices in range by construction
-        #[allow(clippy::indexing_slicing)]
+        #[expect(clippy::indexing_slicing)]
         {
             let slice: &mut [CharacterAndClassAndTrieValue] = &mut self.upcoming[start..end];
             slice.sort_by_key(|cc| cc.ccc());
@@ -1254,6 +1468,8 @@ where
     }
 
     pub fn next(&mut self) -> CollationElement {
+        #[cfg(debug_assertions)]
+        debug_assert!(self.initialized);
         debug_assert!(self.is_next_decomposition_starts_with_starter());
         if let Some(&ret) = self.pending.get(self.pending_pos) {
             self.pending_pos += 1;
@@ -1267,8 +1483,10 @@ where
         if let Some(c_c_tv) = self.next_internal() {
             let mut c = c_c_tv.character();
             let mut ce32;
-            let mut data: &CollationDataV1 = self.tailoring;
-            let mut combining_characters: SmallVec<[CharacterAndClass; 7]> = SmallVec::new(); // TODO(#2005): Figure out good length
+            let mut data: &CollationData = self.tailoring;
+            let mut combining_characters: SmallVec<
+                [CharacterAndClass; COMBINING_CHARACTER_BUFFER_SIZE],
+            > = SmallVec::new(); // TODO(#2005): Figure out good length
 
             // Betting that fusing the NFD algorithm into this one at the
             // expense of the repetitiveness below, the common cases become
@@ -1277,20 +1495,12 @@ where
             // optimize based on that bet.
             let hangul_offset = u32::from(c).wrapping_sub(HANGUL_S_BASE); // SIndex in the spec
             if hangul_offset >= HANGUL_S_COUNT {
+                // See components/normalizer/trie-value-format.md
                 let decomposition = c_c_tv.trie_val;
-                if decomposition <= BACKWARD_COMBINING_STARTER_MARKER {
+                if (decomposition & !(BACKWARD_COMBINING_MARKER | NON_ROUND_TRIP_MARKER)) == 0 {
                     // The character is its own decomposition
                     let jamo_index = (c as usize).wrapping_sub(HANGUL_L_BASE as usize);
-                    // Attribute belongs on an inner expression, but
-                    // https://github.com/rust-lang/rust/issues/15701
-                    #[allow(clippy::indexing_slicing)]
-                    if jamo_index >= self.jamo.len() {
-                        ce32 = data.ce32_for_char(c);
-                        if ce32 == FALLBACK_CE32 {
-                            data = self.root;
-                            ce32 = data.ce32_for_char(c);
-                        }
-                    } else {
+                    if let Some(&jamo) = self.jamo.get(jamo_index) {
                         // The purpose of reading the CE32 from the jamo table instead
                         // of the trie even in this case is to make it unnecessary
                         // for all search collation tries to carry a copy of the Hangul
@@ -1310,7 +1520,13 @@ where
                         data = self.root;
                         // Index in range by construction above. Not using `get` with
                         // `if let` in order to put the likely branch first.
-                        ce32 = CollationElement32::new_from_ule(self.jamo[jamo_index]);
+                        ce32 = CollationElement32::new_from_ule(jamo);
+                    } else {
+                        ce32 = data.ce32_for_char(c);
+                        if ce32 == FALLBACK_CE32 {
+                            data = self.root;
+                            ce32 = data.ce32_for_char(c);
+                        }
                     }
                     if self.is_next_decomposition_starts_with_starter() {
                         if let Some(ce) = ce32.to_ce_simple_or_long_primary() {
@@ -1332,22 +1548,25 @@ where
                         // handle `Implicit` and `Offset` tags here.
                     }
                 } else {
-                    let trail_or_complex = (decomposition >> 16) as u16;
-                    let lead = decomposition as u16;
-                    if lead > NON_ROUND_TRIP_MARKER && trail_or_complex != 0 {
+                    let high_zeros = (decomposition & HIGH_ZEROS_MASK) == 0;
+                    let low_zeros = (decomposition & LOW_ZEROS_MASK) == 0;
+                    if !high_zeros && !low_zeros {
                         // Decomposition into two BMP characters: starter and non-starter
-                        c = char_from_u16(lead);
+                        c = char_from_u32(decomposition & 0x7FFF);
                         ce32 = data.ce32_for_char(c);
                         if ce32 == FALLBACK_CE32 {
                             data = self.root;
                             ce32 = data.ce32_for_char(c);
                         }
-                        let combining = char_from_u16(trail_or_complex);
+                        let combining = char_from_u32((decomposition >> 15) & 0x7FFF);
                         if self.is_next_decomposition_starts_with_starter() {
                             let diacritic_index =
-                                (trail_or_complex as usize).wrapping_sub(COMBINING_DIACRITICS_BASE);
+                                (combining as usize).wrapping_sub(COMBINING_DIACRITICS_BASE);
                             if let Some(secondary) = self.diacritics.get(diacritic_index) {
-                                debug_assert!(trail_or_complex != 0x0344, "Should never have COMBINING GREEK DIALYTIKA TONOS here, since it should have decomposed further.");
+                                debug_assert_ne!(
+                                    combining, '\u{0344}',
+                                    "Should never have COMBINING GREEK DIALYTIKA TONOS here, since it should have decomposed further."
+                                );
                                 if let Some(ce) = ce32.to_ce_simple_or_long_primary() {
                                     let ce_for_combining =
                                         CollationElement::new_from_secondary(secondary);
@@ -1372,14 +1591,13 @@ where
                                             }
                                         }
                                         TrieResult::Intermediate(trie_ce32) => {
-                                            if !ce32.at_least_one_suffix_contains_starter() {
-                                                if let Some(ce) =
+                                            if !ce32.at_least_one_suffix_contains_starter()
+                                                && let Some(ce) =
                                                     CollationElement32::new(trie_ce32 as u32)
                                                         .to_ce_simple_or_long_primary()
-                                                {
-                                                    self.mark_prefix_unmatchable();
-                                                    return ce;
-                                                }
+                                            {
+                                                self.mark_prefix_unmatchable();
+                                                return ce;
                                             }
                                         }
                                         TrieResult::FinalValue(trie_ce32) => {
@@ -1397,43 +1615,34 @@ where
                         }
                         combining_characters
                             .push(CharacterAndClass::new_with_placeholder(combining));
-                    } else if lead > NON_ROUND_TRIP_MARKER {
-                        debug_assert_ne!(lead, 1, "How come U+FDFA NFKD marker seen in NFD?");
-                        debug_assert_ne!(lead, 2, "How come non-starter marker seen here?");
+                    } else if high_zeros {
+                        let singleton = decomposition as u16;
+                        debug_assert_ne!(
+                            singleton, FDFA_MARKER,
+                            "How come U+FDFA NFKD marker seen in NFD?"
+                        );
                         // Decomposition into one BMP character
-                        c = char_from_u16(lead);
+                        c = char_from_u16(singleton);
                         ce32 = data.ce32_for_char(c);
                         if ce32 == FALLBACK_CE32 {
                             data = self.root;
                             ce32 = data.ce32_for_char(c);
                         }
-                        if self.is_next_decomposition_starts_with_starter() {
-                            if let Some(ce) = ce32.to_ce_simple_or_long_primary() {
-                                self.prefix_push(c);
-                                return ce;
-                            }
+                        if self.is_next_decomposition_starts_with_starter()
+                            && let Some(ce) = ce32.to_ce_simple_or_long_primary()
+                        {
+                            self.prefix_push(c);
+                            return ce;
                         }
                     } else {
-                        // Complex decomposition
-                        // Format for 16-bit value:
-                        // 15..13: length minus two for 16-bit case and length minus one for
-                        //         the 32-bit case. Length 8 needs to fit in three bits in
-                        //         the 16-bit case, and this way the value is future-proofed
-                        //         up to 9 in the 16-bit case. Zero is unused and length one
-                        //         in the 16-bit case goes directly into the trie.
-                        //     12: 1 if all trailing characters are guaranteed non-starters,
-                        //         0 if no guarantees about non-starterness.
-                        //         Note: The bit choice is this way around to allow for
-                        //         dynamically falling back to not having this but instead
-                        //         having one more bit for length by merely choosing
-                        //         different masks.
-                        //  11..0: Start offset in storage. If less than the length of
-                        //         scalars16, the offset is into scalars16. Otherwise,
-                        //         the offset minus the length of scalars16 is an offset
-                        //         into scalars32.
-                        let offset = usize::from(trail_or_complex & 0xFFF);
+                        debug_assert!(low_zeros);
+                        // Only 12 of 14 bits used as of Unicode 16.
+                        let offset = (((decomposition & !(0b11 << 30)) >> 16) as usize) - 1;
+                        // Only 3 of 4 bits used as of Unicode 16.
+                        let len_bits = decomposition & 0b1111;
+                        let only_non_starters_in_trail = (decomposition & 0b10000) != 0;
                         if offset < self.scalars16.len() {
-                            let len = usize::from(trail_or_complex >> 13) + 2;
+                            let len = (len_bits + 2) as usize;
                             let (starter, tail) = self
                                 .scalars16
                                 .get_subslice(offset..offset + len)
@@ -1442,12 +1651,12 @@ where
                                     || {
                                         // GIGO case
                                         debug_assert!(false);
-                                        (REPLACEMENT_CHARACTER, EMPTY_U16)
+                                        (char::REPLACEMENT_CHARACTER, EMPTY_U16)
                                     },
                                     |(first, tail)| (char_from_u16(first), tail),
                                 );
                             c = starter;
-                            if trail_or_complex & 0x1000 != 0 {
+                            if only_non_starters_in_trail {
                                 for u in tail.iter() {
                                     let char_from_u = char_from_u16(u);
                                     let trie_value = self.trie.get(char_from_u);
@@ -1484,7 +1693,7 @@ where
                                 }
                             }
                         } else {
-                            let len = usize::from(trail_or_complex >> 13) + 1;
+                            let len = (len_bits + 1) as usize;
                             let offset32 = offset - self.scalars16.len();
                             let (starter, tail) = self
                                 .scalars32
@@ -1493,11 +1702,11 @@ where
                                 .unwrap_or_else(|| {
                                     // GIGO case
                                     debug_assert!(false);
-                                    (REPLACEMENT_CHARACTER, EMPTY_CHAR)
+                                    (char::REPLACEMENT_CHARACTER, EMPTY_CHAR)
                                 });
 
                             c = starter;
-                            if trail_or_complex & 0x1000 != 0 {
+                            if only_non_starters_in_trail {
                                 for ch in tail.iter() {
                                     let trie_value = self.trie.get(ch);
                                     let ccc = ccc_from_trie_value(trie_value);
@@ -1546,7 +1755,7 @@ where
                 // No prefix matches on Hangul
                 self.mark_prefix_unmatchable();
                 // Indexing OK, because indices in range by construction
-                #[allow(clippy::indexing_slicing)]
+                #[expect(clippy::indexing_slicing)]
                 if self.is_next_decomposition_starts_with_starter() {
                     // TODO(#1941): Assuming self-contained CE32s is OK for the root,
                     // but not currently OK for search collation, which at this time
@@ -1574,11 +1783,8 @@ where
                 // last jamo unmapped to `CollationElement` in `pending` and instead prepend it to
                 // `upcoming`.
                 //
-                // The `unsafe` blocks are OK, because the value is by construction in the Hangul
-                // jamo block, which is in the scalar value range.
-                //
                 // Indexing OK, because indices in range by construction
-                #[allow(clippy::indexing_slicing)]
+                #[expect(clippy::indexing_slicing)]
                 if t != 0 {
                     self.pending.push(
                         CollationElement32::new_from_ule(
@@ -1588,21 +1794,25 @@ where
                     );
                     self.upcoming.insert(
                         0,
+                        // Safety: HANGUL_T_BASE is 0x11A7, t is < HANGUL_T_COUNT = 28, so this is definitely
+                        // in range for a char (≤ 0xD800)
                         CharacterAndClassAndTrieValue::new_with_non_decomposing_starter(unsafe {
-                            core::char::from_u32_unchecked(HANGUL_T_BASE + t)
+                            char::from_u32_unchecked(HANGUL_T_BASE + t)
                         }),
                     );
                 } else {
                     self.upcoming.insert(
                         0,
+                        // Safety: HANGUL_V_BASE is 0x1161, v is < HANGUL_N_COUNT = 588, so this is definitely
+                        // in range for a char (≤ 0xD800)
                         CharacterAndClassAndTrieValue::new_with_non_decomposing_starter(unsafe {
-                            core::char::from_u32_unchecked(HANGUL_V_BASE + v)
+                            char::from_u32_unchecked(HANGUL_V_BASE + v)
                         }),
                     );
                 }
 
                 // Indexing OK, because indices in range by construction
-                #[allow(clippy::indexing_slicing)]
+                #[expect(clippy::indexing_slicing)]
                 return CollationElement32::new_from_ule(self.jamo[l as usize])
                     .to_ce_self_contained_or_gigo();
             }
@@ -1683,7 +1893,8 @@ where
                                     CanonicalCombiningClass::NotReordered;
                                 // TODO(#2001): Pending removals will in practice be small numbers.
                                 // What if we made the item smaller than usize?
-                                let mut pending_removals: SmallVec<[usize; 1]> = SmallVec::new();
+                                let mut pending_removals: SmallVec<[usize; PENDING_REMOVALS_SIZE]> =
+                                    SmallVec::new();
                                 while let Some((character, ccc)) =
                                     combining_characters.get(i).map(|c| c.character_and_ccc())
                                 {
@@ -1731,6 +1942,7 @@ where
                                 // `CodePointInversionList` check in the common case.
                                 may_have_contracted_starter = true;
                                 debug_assert!(pending_removals.is_empty());
+                                self.ensure_upcoming_normalized();
                                 loop {
                                     let ahead = self.look_ahead(looked_ahead);
                                     looked_ahead += 1;
@@ -1756,6 +1968,7 @@ where
                                                 let mut attempt = 0;
                                                 let mut i = 0;
                                                 most_recent_skipped_ccc = ch.ccc();
+                                                self.ensure_upcoming_normalized();
                                                 loop {
                                                     let ahead = self.look_ahead(looked_ahead + i);
                                                     if let Some(ch) = ahead {
@@ -1850,7 +2063,8 @@ where
                             }
                             Tag::Digit => {
                                 if let Some(high_bits) = self.numeric_primary {
-                                    let mut digits: SmallVec<[u8; 8]> = SmallVec::new(); // TODO(#2005): Figure out good length
+                                    let mut digits: SmallVec<[u8; DIGIT_BUFFER_SIZE]> =
+                                        SmallVec::new(); // TODO(#2005): Figure out good length
                                     digits.push(ce32.digit());
                                     let numeric_primary = u32::from(high_bits) << 24;
                                     if combining_characters.is_empty() {
@@ -1862,6 +2076,7 @@ where
                                         // Performing the usual fallback pattern anyway just in
                                         // case.
                                         may_have_contracted_starter = true;
+                                        self.ensure_upcoming_normalized();
                                         while let Some(upcoming) = self.look_ahead(looked_ahead) {
                                             looked_ahead += 1;
                                             ce32 =
@@ -1877,36 +2092,46 @@ where
                                             digits.push(ce32.digit());
                                         }
                                     }
-                                    // Skip leading zeros
-                                    let mut zeros = 0;
-                                    while let Some(&digit) = digits.get(zeros) {
-                                        if digit != 0 {
-                                            break;
-                                        }
-                                        zeros += 1;
-                                    }
-                                    if zeros == digits.len() {
-                                        // All zeros, keep a zero
-                                        zeros = digits.len() - 1;
-                                    }
-                                    // Index in range by construction above
-                                    #[allow(clippy::indexing_slicing)]
-                                    let mut remaining = &digits[zeros..];
+                                    let mut remaining = digits.as_slice();
                                     while !remaining.is_empty() {
+                                        // Skip leading zeros
+
+                                        // If this isn't our initial loop round and we've truncated
+                                        // a chunk to 254 digits on a previous round, the eventual
+                                        // comparison result can be wrong, but that replicates an
+                                        // ICU4C bug. Let's fix both as a follow-up.
+                                        //
+                                        // https://unicode-org.atlassian.net/browse/ICU-23351
+                                        loop {
+                                            let Some((first, tail)) = remaining.split_first()
+                                            else {
+                                                // Keep one zero
+                                                // If we get here, we must have skipped a zero, since
+                                                // 1) the while loop condition above meant that we started
+                                                //    with a non-empty slice AND
+                                                // 2) this loop only skips zeros
+                                                // Instead of trying to recover the same zero that we already
+                                                // skipped, let's just fill in a static slice.
+                                                remaining = &[0];
+                                                break;
+                                            };
+                                            if *first != 0 {
+                                                break;
+                                            }
+                                            remaining = tail;
+                                        }
                                         // Numeric CEs are generated for segments of
                                         // up to 254 digits.
-                                        let (head, tail) = if remaining.len() > 254 {
-                                            remaining.split_at(254)
-                                        } else {
-                                            (remaining, &b""[..])
-                                        };
+                                        let (head, tail) = remaining
+                                            .split_at_checked(254)
+                                            .unwrap_or((remaining, b""));
                                         remaining = tail;
                                         // From ICU4C CollationIterator::appendNumericSegmentCEs
                                         if head.len() <= 7 {
                                             let mut digit_iter = head.iter();
                                             // `unwrap` succeeds, because we always have at least one
                                             // digit to even start numeric processing.
-                                            #[allow(clippy::unwrap_used)]
+                                            #[expect(clippy::unwrap_used)]
                                             let mut value = u32::from(*digit_iter.next().unwrap());
                                             for &digit in digit_iter {
                                                 value *= 10;
@@ -1968,7 +2193,7 @@ where
 
                                         // Set the exponent. 4 pairs->132, 5 pairs->133, ..., 127 pairs->255.
                                         let mut len = head.len();
-                                        let num_pairs = (len as u32 + 1) / 2; // as u32 OK, because capped to 254
+                                        let num_pairs = (len as u32).div_ceil(2); // as u32 OK, because capped to 254
                                         let mut primary =
                                             numeric_primary | ((132 - 4 + num_pairs) << 16);
                                         // Find the length without trailing 00 pairs.
@@ -1982,16 +2207,16 @@ where
                                         //   `head[len - 1]` isn't a leading zero, and `&&`
                                         //   short-circuits, so the `head[len - 2]` access doesn't
                                         //   occur.
-                                        #[allow(clippy::indexing_slicing)]
+                                        #[expect(clippy::indexing_slicing)]
                                         while head[len - 1] == 0 && head[len - 2] == 0 {
                                             len -= 2;
                                         }
                                         // Read the first pair
                                         // Index in bounds by construction above.
-                                        #[allow(clippy::indexing_slicing)]
+                                        #[expect(clippy::indexing_slicing)]
                                         let mut digit_iter = head[..len].iter();
                                         // `unwrap` succeeds by construction
-                                        #[allow(clippy::unwrap_used)]
+                                        #[expect(clippy::unwrap_used)]
                                         let mut pair = if len & 1 == 1 {
                                             // Only "half a pair" if we have an odd number of digits.
                                             u32::from(*digit_iter.next().unwrap())
@@ -2064,22 +2289,20 @@ where
                         let diacritic_index = (c as usize).wrapping_sub(COMBINING_DIACRITICS_BASE);
                         if let Some(secondary) = self.diacritics.get(diacritic_index) {
                             // TODO(#2006): unlikely annotation
-                            if c == '\u{0307}' && self.lithuanian_dot_above {
-                                if let Some(next_c) =
+                            if c == '\u{0307}'
+                                && self.lithuanian_dot_above
+                                && let Some(next_c) =
                                     combining_characters.get(i + 1).map(|c| c.character())
-                                {
-                                    if next_c == '\u{0300}'
-                                        || next_c == '\u{0301}'
-                                        || next_c == '\u{0303}'
-                                    {
-                                        // Lithuanian contracts COMBINING DOT ABOVE with three other diacritics of the
-                                        // same combining class such that the COMBINING DOT ABOVE is ignored for
-                                        // collation. Since the combining class is the same, it's valid to simply
-                                        // look at the next character in `combining_characters`.
-                                        i += 1;
-                                        continue 'combining;
-                                    }
-                                }
+                                && (next_c == '\u{0300}'
+                                    || next_c == '\u{0301}'
+                                    || next_c == '\u{0303}')
+                            {
+                                // Lithuanian contracts COMBINING DOT ABOVE with three other diacritics of the
+                                // same combining class such that the COMBINING DOT ABOVE is ignored for
+                                // collation. Since the combining class is the same, it's valid to simply
+                                // look at the next character in `combining_characters`.
+                                i += 1;
+                                continue 'combining;
                             }
                             self.pending
                                 .push(CollationElement::new_from_secondary(secondary));
@@ -2107,7 +2330,7 @@ where
                     i = 0;
                     while i < drain_from_upcoming {
                         // By construction, `drain_from_upcoming` doesn't exceed `upcoming.len()`
-                        #[allow(clippy::indexing_slicing)]
+                        #[expect(clippy::indexing_slicing)]
                         let ch = self.upcoming[i].character();
                         self.prefix_push(ch);
                         i += 1;
@@ -2138,12 +2361,13 @@ where
                             // non-starters in order to maintain the invariant of
                             // `upcoming` on the next call to `next()`.
                             drain_from_upcoming = 0;
+                            looked_ahead = 0;
                             self.collect_combining(&mut combining_characters);
                             continue 'combining_outer;
                         }
                     }
                     // By construction, we have at least on pending CE by now.
-                    #[allow(clippy::indexing_slicing)]
+                    #[expect(clippy::indexing_slicing)]
                     let ret = self.pending[0];
                     debug_assert_eq!(self.pending_pos, 0);
                     if self.pending.len() == 1 {
@@ -2160,11 +2384,14 @@ where
     }
 
     #[inline(always)]
-    fn collect_combining(&mut self, combining_characters: &mut SmallVec<[CharacterAndClass; 7]>) {
+    fn collect_combining(
+        &mut self,
+        combining_characters: &mut SmallVec<[CharacterAndClass; COMBINING_CHARACTER_BUFFER_SIZE]>,
+    ) {
         while !self.is_next_decomposition_starts_with_starter() {
             // `unwrap` is OK, because `!self.is_next_decomposition_starts_with_starter()`
             // means the `unwrap()` must succeed.
-            #[allow(clippy::unwrap_used)]
+            #[expect(clippy::unwrap_used)]
             let combining = self.next_internal().unwrap().c_and_c;
             let combining_c = combining.character();
             if !in_inclusive_range(combining_c, '\u{0340}', '\u{0F81}') {

@@ -2,9 +2,6 @@
   "main": {
     "bn": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "bn"
       },
       "personNames": {
@@ -139,7 +136,7 @@
             "given": "জেনদায়া"
           },
           "nativeGS": {
-            "given": "আইরিন",
+            "given": "শ্রেয়া",
             "surname": "চৌধুরী"
           },
           "nativeGGS": {

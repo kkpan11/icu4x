@@ -2,198 +2,217 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::cldr_serde;
+use super::coverage_experimental::CoverageLevelForXPath;
 use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
+use crate::cldr_serde;
+use crate::cldr_serde::alt::{Alt, WithAlt};
+use crate::displaynames::extract_names_for_zeromap_struct;
 
-use icu::experimental::displaynames::provider::*;
-use icu::locale::subtags::Language;
+use icu::experimental::displaynames::provider::{
+    LanguageDisplayNames, LocaleDisplayNames, LocaleNamesLanguageV0, LocaleNamesLocaleV0,
+};
+use icu::locale::LanguageIdentifier;
+use icu::locale::provider::names::{
+    LocaleNamesLanguageLongHeavyV1, LocaleNamesLanguageLongLightV1,
+    LocaleNamesLanguageMediumHeavyV1, LocaleNamesLanguageMediumLightV1,
+    LocaleNamesLanguageMediumTinyV1, LocaleNamesLanguageMenuMediumHeavyV1,
+    LocaleNamesLanguageMenuMediumLightV1, LocaleNamesLanguageShortHeavyV1,
+    LocaleNamesLanguageShortLightV1, MenuNameParts,
+};
 use icu_provider::prelude::*;
+use potential_utf::PotentialUtf8;
 use std::collections::{BTreeMap, HashSet};
-use zerovec::ule::UnvalidatedStr;
+use tinystr::TinyAsciiStr;
+use zerovec::VarZeroCow;
 
-impl DataProvider<LanguageDisplayNamesV1Marker> for SourceDataProvider {
-    fn load(
-        &self,
-        req: DataRequest,
-    ) -> Result<DataResponse<LanguageDisplayNamesV1Marker>, DataError> {
-        self.check_req::<LanguageDisplayNamesV1Marker>(req)?;
-        let langid = req.id.locale.get_langid();
+impl DataProvider<LocaleNamesLanguageV0> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<LocaleNamesLanguageV0>, DataError> {
+        self.check_req::<LocaleNamesLanguageV0>(req)?;
 
         let data: &cldr_serde::displaynames::language::Resource = self
             .cldr()?
             .displaynames()
-            .read_and_parse(&langid, "languages.json")?;
+            .read_and_parse(req.id.locale, "languages.json")?;
 
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(LanguageDisplayNamesV1::from(data)),
+            payload: DataPayload::from_owned(LanguageDisplayNames::from(data)),
         })
     }
 }
-impl DataProvider<LocaleDisplayNamesV1Marker> for SourceDataProvider {
-    fn load(
-        &self,
-        req: DataRequest,
-    ) -> Result<DataResponse<LocaleDisplayNamesV1Marker>, DataError> {
-        self.check_req::<LocaleDisplayNamesV1Marker>(req)?;
-        let langid = req.id.locale.get_langid();
+impl DataProvider<LocaleNamesLocaleV0> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<LocaleNamesLocaleV0>, DataError> {
+        self.check_req::<LocaleNamesLocaleV0>(req)?;
 
         let data: &cldr_serde::displaynames::language::Resource = self
             .cldr()?
             .displaynames()
-            .read_and_parse(&langid, "languages.json")?;
+            .read_and_parse(req.id.locale, "languages.json")?;
 
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(LocaleDisplayNamesV1::from(data)),
+            payload: DataPayload::from_owned(LocaleDisplayNames::from(data)),
         })
     }
 }
 
-impl IterableDataProviderCached<LanguageDisplayNamesV1Marker> for SourceDataProvider {
-    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        Ok(self
-            .cldr()?
-            .displaynames()
-            .list_langs()?
-            .filter(|langid| {
-                // The directory might exist without languages.json
-                self.cldr()
-                    .unwrap()
-                    .displaynames()
-                    .file_exists(langid, "languages.json")
-                    .unwrap_or_default()
-            })
-            .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
-            .collect())
-    }
-}
+crate::displaynames::impl_displaynames_legacy_iter_v1!(LocaleNamesLanguageV0, "languages.json");
+crate::displaynames::impl_displaynames_legacy_iter_v1!(LocaleNamesLocaleV0, "languages.json");
 
-impl IterableDataProviderCached<LocaleDisplayNamesV1Marker> for SourceDataProvider {
-    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        Ok(self
-            .cldr()?
-            .displaynames()
-            .list_langs()?
-            .filter(|langid| {
-                // The directory might exist without languages.json
-                self.cldr()
-                    .unwrap()
-                    .displaynames()
-                    .file_exists(langid, "languages.json")
-                    .unwrap_or_default()
-            })
-            .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
-            .collect())
-    }
-}
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageMediumTinyV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    None,
+    language,
+    CoverageLevelForXPath::Basic | CoverageLevelForXPath::Core,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageMediumLightV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    None,
+    language,
+    CoverageLevelForXPath::Moderate,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageMediumHeavyV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    None,
+    language,
+    CoverageLevelForXPath::Modern | CoverageLevelForXPath::Comprehensive,
+);
 
-/// Substring used to denote alternative region names data variants for a given region. For example: "BA-alt-short", "TL-alt-variant".
-const ALT_SUBSTRING: &str = "-alt-";
-/// Substring used to denote short display names data variants for a given language. For example: "az-alt-short".
-const ALT_SHORT_SUBSTRING: &str = "-alt-short";
-/// Substring used to denote long display names data variants for a given language. For example: "az-alt-long".
-const ALT_LONG_SUBSTRING: &str = "-alt-long";
-/// Substring used to denote menu display names data variants for a given language. For example: "az-alt-menu".
-const ALT_MENU_SUBSTRING: &str = "-alt-menu";
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageShortLightV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    Some(Alt::Short),
+    language,
+    CoverageLevelForXPath::Moderate,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageShortHeavyV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    Some(Alt::Short),
+    language,
+    CoverageLevelForXPath::Modern | CoverageLevelForXPath::Comprehensive,
+);
 
-impl From<&cldr_serde::displaynames::language::Resource> for LanguageDisplayNamesV1<'static> {
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageLongLightV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    Some(Alt::Long),
+    language,
+    CoverageLevelForXPath::Moderate,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesLanguageLongHeavyV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    Some(Alt::Long),
+    language,
+    CoverageLevelForXPath::Modern | CoverageLevelForXPath::Comprehensive,
+);
+crate::displaynames::impl_displaynames_menu_v1!(
+    LocaleNamesLanguageMenuMediumLightV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    language,
+    CoverageLevelForXPath::Moderate,
+);
+crate::displaynames::impl_displaynames_menu_v1!(
+    LocaleNamesLanguageMenuMediumHeavyV1,
+    LanguageIdentifier,
+    cldr_serde::displaynames::language::Resource,
+    "languages.json",
+    languages,
+    language,
+    CoverageLevelForXPath::Modern | CoverageLevelForXPath::Comprehensive,
+);
+
+impl From<&cldr_serde::displaynames::language::Resource> for LanguageDisplayNames<'static> {
     fn from(other: &cldr_serde::displaynames::language::Resource) -> Self {
-        let mut names = BTreeMap::new();
-        let mut short_names = BTreeMap::new();
-        let mut long_names = BTreeMap::new();
-        let mut menu_names = BTreeMap::new();
-        for entry in other.main.value.localedisplaynames.languages.iter() {
-            if let Some(lang) = entry.0.strip_suffix(ALT_SHORT_SUBSTRING) {
-                if let Ok(lang) = lang.parse::<Language>() {
-                    short_names.insert(lang.into_tinystr(), entry.1.as_ref());
+        let extracted = extract_names_for_zeromap_struct(
+            &other.main.value.localedisplaynames.languages,
+            // TODO(#8012): Handle preference-specific alt variants, perhaps with datagen alt flags.
+            &[Alt::Variant, Alt::Secondary, Alt::Official],
+            "language",
+            |langid| {
+                // LanguageDisplayNames contains display names for language subtags without other subtags
+                if langid.script.is_some() || langid.region.is_some() || !langid.variants.is_empty()
+                {
+                    None
+                } else {
+                    Some(langid.language.to_tinystr())
                 }
-            } else if let Some(lang) = entry.0.strip_suffix(ALT_LONG_SUBSTRING) {
-                if let Ok(lang) = lang.parse::<Language>() {
-                    long_names.insert(lang.into_tinystr(), entry.1.as_ref());
-                }
-            } else if let Some(lang) = entry.0.strip_suffix(ALT_MENU_SUBSTRING) {
-                if let Ok(lang) = lang.parse::<Language>() {
-                    menu_names.insert(lang.into_tinystr(), entry.1.as_ref());
-                }
-            } else if let Ok(lang) = entry.0.parse::<Language>() {
-                names.insert(lang.into_tinystr(), entry.1.as_ref());
-            }
-        }
+            },
+        );
+
+        let to_zero_map = |map: BTreeMap<TinyAsciiStr<3>, &str>| {
+            map.into_iter()
+                .map(|(k, v)| (k.to_unvalidated(), v))
+                .collect()
+        };
+
         Self {
-            // Old CLDR versions may contain trivial entries, so filter
-            names: names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-            short_names: short_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-            long_names: long_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-            menu_names: menu_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
+            names: to_zero_map(extracted.names),
+            short_names: to_zero_map(extracted.short_names),
+            long_names: to_zero_map(extracted.long_names),
+            menu_names: to_zero_map(extracted.menu_names),
         }
     }
 }
 
-impl From<&cldr_serde::displaynames::language::Resource> for LocaleDisplayNamesV1<'static> {
+impl From<&cldr_serde::displaynames::language::Resource> for LocaleDisplayNames<'static> {
     fn from(other: &cldr_serde::displaynames::language::Resource) -> Self {
-        let mut names = BTreeMap::new();
-        let mut short_names = BTreeMap::new();
-        let mut long_names = BTreeMap::new();
-        let mut menu_names = BTreeMap::new();
-        for entry in other.main.value.localedisplaynames.languages.iter() {
-            #[allow(clippy::collapsible_if)] // consistency
-            if let Some(locale) = entry.0.strip_suffix(ALT_SHORT_SUBSTRING) {
-                if locale.contains('-') {
-                    short_names.insert(locale, entry.1.as_ref());
+        let extracted = extract_names_for_zeromap_struct(
+            &other.main.value.localedisplaynames.languages,
+            &[Alt::Variant, Alt::Secondary, Alt::Official],
+            "language",
+            |langid| {
+                // LocaleDisplayNames contains display names for languages with other subtags,
+                // not duplicating the display names found in LanguageDisplayNames
+                if langid.script.is_none() && langid.region.is_none() && langid.variants.is_empty()
+                {
+                    None
+                } else {
+                    Some(langid.to_string())
                 }
-            } else if let Some(locale) = entry.0.strip_suffix(ALT_LONG_SUBSTRING) {
-                if locale.contains('-') {
-                    long_names.insert(locale, entry.1.as_ref());
-                }
-            } else if let Some(locale) = entry.0.strip_suffix(ALT_MENU_SUBSTRING) {
-                if locale.contains('-') {
-                    menu_names.insert(locale, entry.1.as_ref());
-                }
-            } else if !entry.0.contains(ALT_SUBSTRING) {
-                if entry.0.contains('-') {
-                    names.insert(entry.0, entry.1.as_ref());
-                }
-            }
-        }
+            },
+        );
+
+        let to_zero_map = |map: BTreeMap<String, &str>| {
+            map.iter()
+                .map(|(k, v)| (PotentialUtf8::from_str(k), *v))
+                .collect()
+        };
+
         Self {
-            names: names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (UnvalidatedStr::from_str(k), v))
-                .collect(),
-            short_names: short_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (UnvalidatedStr::from_str(k), v))
-                .collect(),
-            long_names: long_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (UnvalidatedStr::from_str(k), v))
-                .collect(),
-            menu_names: menu_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (UnvalidatedStr::from_str(k), v))
-                .collect(),
+            names: to_zero_map(extracted.names),
+            short_names: to_zero_map(extracted.short_names),
+            long_names: to_zero_map(extracted.long_names),
+            menu_names: to_zero_map(extracted.menu_names),
         }
     }
 }
@@ -201,15 +220,15 @@ impl From<&cldr_serde::displaynames::language::Resource> for LocaleDisplayNamesV
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu::locale::{langid, subtags::language};
+    use icu::locale::{data_locale, subtags::language};
 
     #[test]
     fn test_basic_lang_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<LanguageDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesLanguageV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -218,7 +237,7 @@ mod tests {
         assert_eq!(
             data.get()
                 .names
-                .get(&language!("aa").into_tinystr().to_unvalidated())
+                .get(&language!("aa").to_tinystr().to_unvalidated())
                 .unwrap(),
             "Afar"
         );
@@ -228,9 +247,9 @@ mod tests {
     fn test_basic_lang_short_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<LanguageDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesLanguageV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -239,7 +258,7 @@ mod tests {
         assert_eq!(
             data.get()
                 .short_names
-                .get(&language!("az").into_tinystr().to_unvalidated())
+                .get(&language!("az").to_tinystr().to_unvalidated())
                 .unwrap(),
             "Azeri"
         );
@@ -249,9 +268,9 @@ mod tests {
     fn test_basic_lang_long_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<LanguageDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesLanguageV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -260,7 +279,7 @@ mod tests {
         assert_eq!(
             data.get()
                 .long_names
-                .get(&language!("zh").into_tinystr().to_unvalidated())
+                .get(&language!("zh").to_tinystr().to_unvalidated())
                 .unwrap(),
             "Mandarin Chinese"
         );
@@ -270,9 +289,9 @@ mod tests {
     fn test_basic_lang_menu_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<LanguageDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesLanguageV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -281,7 +300,7 @@ mod tests {
         assert_eq!(
             data.get()
                 .menu_names
-                .get(&language!("zh").into_tinystr().to_unvalidated())
+                .get(&language!("zh").to_tinystr().to_unvalidated())
                 .unwrap(),
             "Chinese, Mandarin"
         );
@@ -291,9 +310,9 @@ mod tests {
     fn test_basic_locale_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<LocaleDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesLocaleV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -302,9 +321,262 @@ mod tests {
         assert_eq!(
             data.get()
                 .names
-                .get(UnvalidatedStr::from_str("de-CH"))
+                .get(PotentialUtf8::from_str("de-CH"))
                 .unwrap(),
             "Swiss High German"
         );
+    }
+
+    #[test]
+    fn test_locale_names_language_medium_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageMediumLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("fr").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "French");
+    }
+
+    #[test]
+    fn test_locale_names_language_medium_tiny() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageMediumTinyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("en").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "English");
+    }
+
+    #[test]
+    fn test_locale_names_language_medium_heavy() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageMediumHeavyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("aa").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Afar");
+    }
+
+    #[test]
+    fn test_locale_names_language_short_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageShortLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("en-GB").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "UK English");
+    }
+
+    #[test]
+    fn test_locale_names_language_short_heavy() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageShortHeavyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("az").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Azeri");
+    }
+
+    #[test]
+    fn test_locale_names_language_long_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageLongLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("zh").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Mandarin Chinese");
+    }
+
+    #[test]
+    fn test_locale_names_language_long_heavy() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageLongHeavyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("cr").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Woods Cree");
+    }
+
+    #[test]
+    fn test_locale_names_language_menu_medium_heavy() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesLanguageMenuMediumHeavyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("ku").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(data.get().core(), "Kurdish");
+        assert_eq!(data.get().extension(), "Kurmanji");
+    }
+
+    #[test]
+    fn test_locale_names_language_menu_medium_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        // Test fallback to alt-menu
+        let data: DataPayload<LocaleNamesLanguageMenuMediumLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("zh").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(data.get().core(), "Chinese, Mandarin");
+        assert_eq!(data.get().extension(), "");
+    }
+
+    /// The cartesian product of Language x (Short | Medium | Long) x (Minimal | Core | Extended) x (Menu)
+    /// contains some data markers that are uninhabited. This test ensures that every language display name
+    /// key and coverage tier combination in CLDR is covered by an existing marker, so if future CLDR releases
+    /// add data for uninhabited markers, we learn about it and can take action.
+    #[test]
+    #[cfg(feature = "networking")]
+    fn test_empty_coverage_tiers_assert_no_data() {
+        use crate::displaynames::coverage_experimental::CheckAltCoverage;
+
+        let provider = SourceDataProvider::new();
+        let cldr = provider.cldr().unwrap();
+
+        crate::displaynames::coverage_experimental::for_each_cldr_key_and_tier(
+            cldr,
+            "languages.json",
+            // TODO(#8012): Handle preference-specific alt variants, perhaps with datagen alt flags.
+            &[Alt::Variant, Alt::Secondary, Alt::Official],
+            |l| &l.language,
+            |res: &cldr_serde::displaynames::language::Resource| {
+                &res.main.value.localedisplaynames.languages
+            },
+            |locale, key, tier| {
+                if LocaleNamesLanguageMediumTinyV1::contains_key(key, tier)
+                    || LocaleNamesLanguageMediumLightV1::contains_key(key, tier)
+                    || LocaleNamesLanguageMediumHeavyV1::contains_key(key, tier)
+                    || LocaleNamesLanguageShortLightV1::contains_key(key, tier)
+                    || LocaleNamesLanguageShortHeavyV1::contains_key(key, tier)
+                    || LocaleNamesLanguageLongLightV1::contains_key(key, tier)
+                    || LocaleNamesLanguageLongHeavyV1::contains_key(key, tier)
+                    || LocaleNamesLanguageMenuMediumLightV1::contains_key(key, tier)
+                    || LocaleNamesLanguageMenuMediumHeavyV1::contains_key(key, tier)
+                {
+                    return;
+                }
+
+                // TODO(#7831): Add missing markers
+                if matches!((tier, key.alt, key.menu), |(
+                    CoverageLevelForXPath::Basic,
+                    Some(Alt::Short),
+                    None,
+                )| (
+                    CoverageLevelForXPath::Basic,
+                    None,
+                    Some(_)
+                ) | (
+                    CoverageLevelForXPath::Basic,
+                    Some(Alt::Menu),
+                    None
+                )) {
+                    return;
+                }
+
+                panic!(
+                    "Found unexpected alt, menu, and tier combination for language: {key:?} in locale: {locale:?} and tier: {tier:?}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "networking")]
+    fn test_modern_locales_have_self_language_name() {
+        use crate::CoverageLevel;
+
+        let provider = SourceDataProvider::new();
+        let cldr = provider.cldr().unwrap();
+        let modern_locales = cldr.locales([CoverageLevel::Modern]).unwrap();
+
+        let tiny_language_ids =
+            IterableDataProvider::<LocaleNamesLanguageMediumTinyV1>::iter_ids(&provider).unwrap();
+
+        for data_locale in modern_locales {
+            if data_locale.is_unknown() {
+                continue;
+            }
+            let langid = data_locale.into_locale().id;
+            let language = langid.language;
+
+            let data_id = DataIdentifierCow::from_borrowed_and_owned(
+                DataMarkerAttributes::from_str_or_panic(language.as_str()),
+                data_locale,
+            );
+
+            // Assert that all modern locales contain a language displayname for themselves in the tiny slice
+            assert!(tiny_language_ids.contains(&data_id), "{data_locale}");
+        }
     }
 }

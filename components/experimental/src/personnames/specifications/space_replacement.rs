@@ -6,8 +6,7 @@ use icu_locale_core::Locale;
 
 const DEFAULT_FOREIGN_SPACE_REPLACEMENT: &str = " ";
 
-///
-/// https://www.unicode.org/reports/tr35/tr35-personNames.html#setting-the-spacereplacement
+/// <https://www.unicode.org/reports/tr35/tr35-personNames.html#setting-the-spacereplacement>
 pub fn space_replacement<'lt>(
     formatting_locale: &Locale,
     person_name_locale: &Locale,
@@ -39,8 +38,8 @@ mod tests {
 
         // locales are maximized earlier during the formatting process.
         let lc = LocaleExpander::new_extended();
-        lc.maximize(&mut formatting_locale);
-        lc.maximize(&mut person_name_locale);
+        lc.maximize(&mut formatting_locale.id);
+        lc.maximize(&mut person_name_locale.id);
 
         let result = super::space_replacement(
             &formatting_locale,
@@ -59,8 +58,8 @@ mod tests {
 
         // locales are maximized earlier during the formatting process.
         let lc = LocaleExpander::new_extended();
-        lc.maximize(&mut formatting_locale);
-        lc.maximize(&mut person_name_locale);
+        lc.maximize(&mut formatting_locale.id);
+        lc.maximize(&mut person_name_locale.id);
 
         let result = super::space_replacement(
             &formatting_locale,
@@ -79,8 +78,8 @@ mod tests {
 
         // locales are maximized earlier during the formatting process.
         let lc = LocaleExpander::new_extended();
-        lc.maximize(&mut formatting_locale);
-        lc.maximize(&mut person_name_locale);
+        lc.maximize(&mut formatting_locale.id);
+        lc.maximize(&mut person_name_locale.id);
 
         let result = super::space_replacement(
             &formatting_locale,
@@ -99,8 +98,8 @@ mod tests {
 
         // locales are maximized earlier during the formatting process.
         let lc = LocaleExpander::new_extended();
-        lc.maximize(&mut formatting_locale);
-        lc.maximize(&mut person_name_locale);
+        lc.maximize(&mut formatting_locale.id);
+        lc.maximize(&mut person_name_locale.id);
 
         let result = super::space_replacement(
             &formatting_locale,
@@ -119,8 +118,8 @@ mod tests {
 
         // locales are maximized earlier during the formatting process.
         let lc = LocaleExpander::new_extended();
-        lc.maximize(&mut formatting_locale);
-        lc.maximize(&mut person_name_locale);
+        lc.maximize(&mut formatting_locale.id);
+        lc.maximize(&mut person_name_locale.id);
 
         let result = super::space_replacement(
             &formatting_locale,

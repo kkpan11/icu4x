@@ -1,0 +1,628 @@
+// This file is part of ICU4X. For terms of use, please see the file
+// called LICENSE at the top level of the ICU4X source tree
+// (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
+
+use super::*;
+use crate::AltVariantKind;
+use crate::SourceDataProvider;
+use icu::datetime::fieldsets::enums::TimeFieldSet;
+
+#[test]
+fn test_check_for_field() {
+    assert!(check_for_field(
+        DataMarkerAttributes::from_str_or_panic("ym0d"),
+        "y"
+    ));
+    assert!(check_for_field(
+        DataMarkerAttributes::from_str_or_panic("ym0d"),
+        "m0"
+    ));
+    assert!(check_for_field(
+        DataMarkerAttributes::from_str_or_panic("ym0d"),
+        "d"
+    ));
+    assert!(!check_for_field(
+        DataMarkerAttributes::from_str_or_panic("ym0d"),
+        "y0"
+    ));
+    assert!(!check_for_field(
+        DataMarkerAttributes::from_str_or_panic("ym0d"),
+        "m"
+    ));
+    assert!(check_for_field(
+        DataMarkerAttributes::from_str_or_panic("eh0"),
+        "e"
+    ));
+    assert!(check_for_field(
+        DataMarkerAttributes::from_str_or_panic("eh0"),
+        "h0"
+    ));
+    assert!(!check_for_field(
+        DataMarkerAttributes::from_str_or_panic("eh0"),
+        "e0"
+    ));
+    assert!(!check_for_field(
+        DataMarkerAttributes::from_str_or_panic("eh0"),
+        "h"
+    ));
+}
+
+#[test]
+fn test_en_year_patterns() {
+    use icu::locale::data_locale;
+
+    let provider = SourceDataProvider::new_testing();
+    let payload: DataPayload<DatetimePatternsDateGregorianV1> = provider
+        .load(DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                DataMarkerAttributes::from_str_or_panic("ym0d"),
+                &data_locale!("en"),
+            ),
+            metadata: Default::default(),
+        })
+        .unwrap()
+        .payload;
+
+    let json_str = serde_json::to_string_pretty(payload.get()).unwrap();
+
+    assert_eq!(
+        json_str,
+        r#"{
+  "has_explicit_medium": true,
+  "has_explicit_short": true,
+  "variant_pattern_indices": [
+    0,
+    0,
+    4,
+    5,
+    6,
+    7
+  ],
+  "elements": [
+    "MMMM d, y",
+    "MMM d, y",
+    "M/d/yy",
+    "M/d/y",
+    "MMMM d, y GGG",
+    "MMM d, y GGG",
+    "M/d/y GGG"
+  ]
+}"#
+    );
+}
+
+#[test]
+fn test_en_md_patterns() {
+    use icu::locale::data_locale;
+
+    let provider = SourceDataProvider::new_testing();
+    let payload: DataPayload<DatetimePatternsDateGregorianV1> = provider
+        .load(DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                DataMarkerAttributes::from_str_or_panic("m0d"),
+                &data_locale!("en"),
+            ),
+            metadata: Default::default(),
+        })
+        .unwrap()
+        .payload;
+
+    let json_str = serde_json::to_string_pretty(payload.get()).unwrap();
+
+    assert_eq!(
+        json_str,
+        r#"{
+  "has_explicit_medium": true,
+  "has_explicit_short": true,
+  "variant_pattern_indices": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "elements": [
+    "MMMM d",
+    "MMM d",
+    "M/d"
+  ]
+}"#
+    );
+}
+
+#[test]
+fn test_hebr_override() {
+    use icu::datetime::provider::fields::{FieldLength, FieldNumericOverrides, FieldSymbol};
+    use icu::datetime::provider::pattern::PatternItem;
+    use icu::locale::data_locale;
+
+    // This test verifies that the ja-u-ca-japanese has jpanyear overrides
+    // for the year field in datetime patterns, as specified in CLDR.
+    let provider = SourceDataProvider::new_testing();
+    let payload: DataPayload<DatetimePatternsDateJapaneseV1> = provider
+        .load(DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                DataMarkerAttributes::from_str_or_panic("ym0d"),
+                &data_locale!("ja"),
+            ),
+            metadata: Default::default(),
+        })
+        .unwrap()
+        .payload;
+
+    let elements = &payload.get().elements;
+    let mut found_jpan = false;
+
+    for element in elements.iter() {
+        let (_metadata, items) = element.get_default();
+        for item in items.iter() {
+            if let PatternItem::Field(field) = item
+                && let FieldSymbol::Year(_) = field.symbol
+                && matches!(
+                    field.length,
+                    FieldLength::NumericOverride(FieldNumericOverrides::Jpnyear)
+                )
+            {
+                found_jpan = true;
+            }
+        }
+    }
+
+    assert!(
+        found_jpan,
+        "Should have found year field with jpanyear override"
+    );
+}
+
+#[test]
+fn test_en_hour_patterns() {
+    use icu::locale::data_locale;
+
+    let provider = SourceDataProvider::new_testing();
+    let payload: DataPayload<DatetimePatternsTimeV1> = provider
+        .load(DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                DataMarkerAttributes::from_str_or_panic("j"),
+                &data_locale!("en"),
+            ),
+            metadata: Default::default(),
+        })
+        .unwrap()
+        .payload;
+
+    let json_str = serde_json::to_string_pretty(payload.get()).unwrap();
+
+    assert_eq!(
+        json_str,
+        r#"{
+  "variant_pattern_indices": [
+    2,
+    2,
+    2,
+    3,
+    3,
+    3
+  ],
+  "elements": [
+    "h a",
+    "h:mm a",
+    "h:mm:ss a"
+  ]
+}"#
+    );
+}
+
+#[test]
+fn test_en_hour_patterns_alt_ascii() {
+    use icu::locale::data_locale;
+
+    let provider = SourceDataProvider::new_testing();
+    let provider_ascii = provider
+        .clone()
+        .with_alt_variants(std::iter::once(AltVariantKind::DatetimeAscii));
+    let locale = data_locale!("en");
+    for &attributes in TimeFieldSet::ALL_DATA_MARKER_ATTRIBUTES {
+        let req = DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(attributes, &locale),
+            metadata: Default::default(),
+        };
+        let payload: DataPayload<DatetimePatternsTimeV1> = provider.load(req).unwrap().payload;
+        let payload_ascii: DataPayload<DatetimePatternsTimeV1> =
+            provider_ascii.load(req).unwrap().payload;
+
+        let json_str = serde_json::to_string_pretty(payload.get()).unwrap();
+        let json_str_ascii = serde_json::to_string_pretty(payload_ascii.get()).unwrap();
+        assert!(
+            json_str_ascii.is_ascii(),
+            "Alt-ASCII JSON for attributes {attributes:?} should contain only ASCII characters"
+        );
+        if attributes != DataMarkerAttributes::from_str_or_panic("h0") {
+            assert_ne!(
+                json_str_ascii, json_str,
+                "Alt-ASCII should produce a different result"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_en_overlap_patterns() {
+    use icu::locale::data_locale;
+
+    let provider = SourceDataProvider::new_testing();
+    let payload: DataPayload<DatetimePatternsDateGregorianV1> = provider
+        .load(DataRequest {
+            id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                DataMarkerAttributes::from_str_or_panic("ej"),
+                &data_locale!("en"),
+            ),
+            metadata: Default::default(),
+        })
+        .unwrap()
+        .payload;
+
+    let json_str = serde_json::to_string_pretty(payload.get()).unwrap();
+
+    assert_eq!(
+        json_str,
+        r#"{
+  "has_explicit_medium": true,
+  "variant_pattern_indices": [
+    3,
+    4,
+    4,
+    5,
+    6,
+    6
+  ],
+  "elements": [
+    "EEEE h a",
+    "E h a",
+    "EEEE h:m a",
+    "E h:mm a",
+    "EEEE h:m:s a",
+    "E h:mm:ss a"
+  ]
+}"#
+    );
+}
+
+/// This is a test that should eventually be moved to CLDR.
+///
+/// See: <https://unicode-org.atlassian.net/browse/CLDR-14993>
+#[cfg(feature = "networking")]
+mod date_skeleton_consistency_tests {
+    use super::*;
+
+    use crate::CoverageLevel;
+    use crate::datetime::DatagenCalendar;
+    use icu::datetime::provider::fields;
+    use icu::datetime::provider::pattern::{CoarseHourCycle, reference, runtime};
+    use icu::datetime::provider::skeleton::reference::Skeleton;
+    use std::collections::BTreeMap;
+
+    /// When canonicalizing the pattern, normalize only (G=GGG) or be more aggressive
+    /// (such as ignoring whitespace and certain punctuation characters)
+    #[derive(Copy, Clone)]
+    enum PatternCanonicalizationStrategy {
+        NormalizeOnly,
+        FlattenNumerics,
+        Aggressive,
+    }
+
+    #[derive(Copy, Clone)]
+    enum TestStrictness {
+        Comprehensive,
+        LowHangingFruit,
+    }
+
+    #[derive(Copy, Clone)]
+    struct TestCaseFixedArgs<'a> {
+        skeleton_patterns: &'a BTreeMap<Skeleton, PluralElements<runtime::Pattern<'static>>>,
+        preferred_hour_cycle: CoarseHourCycle,
+        length_combinations_v1: &'a GenericLengthPatterns<'a>,
+        cal: DatagenCalendar,
+        locale: &'a DataLocale,
+        skeleton_pattern_set: &'a HashSet<String>,
+        pattern_canonicalization_strategy: PatternCanonicalizationStrategy,
+    }
+
+    struct TestCaseInfo<'a> {
+        pattern: &'a str,
+        skeleton: &'a str,
+        length: &'a str,
+    }
+
+    fn canonicalize_pattern(
+        pattern: &mut reference::Pattern,
+        strategy: PatternCanonicalizationStrategy,
+    ) {
+        use PatternCanonicalizationStrategy::*;
+        use icu::datetime::provider::fields::{Field, FieldLength, FieldSymbol};
+        use icu::datetime::provider::pattern::PatternItem;
+
+        let mut items = core::mem::take(pattern).into_items();
+        items.retain_mut(|item| {
+            match (item, strategy) {
+                (
+                    PatternItem::Field(
+                        field @ Field {
+                            symbol: FieldSymbol::Era,
+                            length: FieldLength::Three,
+                        },
+                    ),
+                    NormalizeOnly | Aggressive | FlattenNumerics,
+                ) => {
+                    field.length = FieldLength::One;
+                    true
+                }
+                // Ignore differences between 'y' and 'yy'?
+                (
+                    PatternItem::Field(
+                        field @ Field {
+                            length: FieldLength::Two,
+                            ..
+                        },
+                    ),
+                    Aggressive | FlattenNumerics,
+                ) => {
+                    field.length = FieldLength::One;
+                    true
+                }
+                // TODO(#5892): For now, ignore differences between 'ccc', 'cccc', and 'EEE'
+                (
+                    PatternItem::Field(
+                        field @ Field {
+                            symbol: FieldSymbol::Weekday(fields::Weekday::StandAlone),
+                            length: FieldLength::Four,
+                        },
+                    ),
+                    Aggressive,
+                ) => {
+                    field.symbol = FieldSymbol::Weekday(fields::Weekday::Format);
+                    field.length = FieldLength::Three;
+                    true
+                }
+                // Ignore differences between 'MMM' and 'MMMM'?
+                (
+                    PatternItem::Field(
+                        field @ Field {
+                            length: FieldLength::Four,
+                            ..
+                        },
+                    ),
+                    Aggressive | FlattenNumerics,
+                ) => {
+                    field.length = FieldLength::Three;
+                    true
+                }
+                // Ignore whitespace and ASCII punctuation?
+                (PatternItem::Literal(' ' | '.' | ',' | '/' | '-'), Aggressive) => false,
+                _ => true,
+            }
+        });
+        *pattern = items.into();
+    }
+
+    /// Returns whether the check was successful.
+    fn check_single_pattern(data: TestCaseFixedArgs, info: TestCaseInfo) -> bool {
+        // TODO: Use a Skeleton here in order to retain 'E' vs 'c'
+        let parsed_skeleton: reference::Pattern = info.skeleton.parse().unwrap();
+        let components = components::Bag::from(&parsed_skeleton);
+        let context = SemanticSkeletonsContext {
+            skeleton_patterns: data.skeleton_patterns.clone(),
+            length_combinations_v1: data.length_combinations_v1.clone(),
+        };
+        let selected_pattern = select_pattern::<PatternsWithDistance<_>>(
+            &context,
+            components,
+            data.preferred_hour_cycle,
+        )
+        .into_inner()
+        .try_into_other()
+        .unwrap();
+
+        // Canonicalize the two patterns to make comparison more precise
+        let mut selected_pattern = reference::Pattern::from(&selected_pattern);
+        canonicalize_pattern(
+            &mut selected_pattern,
+            data.pattern_canonicalization_strategy,
+        );
+        let selected_pattern = runtime::Pattern::from(&selected_pattern).to_string();
+        let mut expected_pattern: reference::Pattern = info.pattern.parse().unwrap();
+        let mut pattern_for_lookup = expected_pattern.clone();
+        canonicalize_pattern(
+            &mut expected_pattern,
+            data.pattern_canonicalization_strategy,
+        );
+        let expected_pattern = runtime::Pattern::from(&expected_pattern).to_string();
+        canonicalize_pattern(
+            &mut pattern_for_lookup,
+            PatternCanonicalizationStrategy::FlattenNumerics,
+        );
+        let pattern_for_lookup = runtime::Pattern::from(&pattern_for_lookup).to_string();
+
+        // Check if there is a match
+        if expected_pattern != selected_pattern {
+            let locale = data.locale;
+            let cal = data.cal;
+            let length = info.length;
+            let in_available_formats = data.skeleton_pattern_set.contains(&pattern_for_lookup);
+            println!(
+                "{}\t{expected_pattern}\t{selected_pattern}\t{locale}\t{cal:?}\t{length}",
+                if in_available_formats {
+                    "MATCH"
+                } else {
+                    "MISSING"
+                }
+            );
+            // Don't return an error if there is no match in available formats!
+            !in_available_formats
+        } else {
+            true
+        }
+    }
+
+    fn check_all_patterns_for_calendar_and_locale(
+        provider: &SourceDataProvider,
+        cal: DatagenCalendar,
+        locale: &DataLocale,
+        strictness: TestStrictness,
+    ) -> usize {
+        let mut num_problems = 0;
+        let data = provider.get_dates_resource(locale, Some(cal)).unwrap();
+        let length_combinations_v1 = convert_length_patterns(
+            &data.datetime_formats_at_time,
+            provider.datetime_ascii_preference(),
+        );
+        let skeleton_patterns = data
+            .datetime_formats
+            .available_formats
+            .parse_skeletons(provider.datetime_ascii_preference());
+        let skeleton_pattern_set = data
+            .datetime_formats
+            .available_formats
+            .0
+            .values()
+            .map(|pattern_str| {
+                let mut pattern: reference::Pattern = pattern_str.parse().unwrap();
+                // always use FlattenNumerics mode for availableFormats lookup
+                canonicalize_pattern(
+                    &mut pattern,
+                    PatternCanonicalizationStrategy::FlattenNumerics,
+                );
+                runtime::Pattern::from(&pattern).to_string()
+            })
+            .collect::<HashSet<_>>();
+        let test_case_data = TestCaseFixedArgs {
+            skeleton_patterns: &skeleton_patterns,
+            preferred_hour_cycle: preferred_hour_cycle(data, locale),
+            length_combinations_v1: &length_combinations_v1,
+            cal,
+            locale,
+            skeleton_pattern_set: &skeleton_pattern_set,
+            pattern_canonicalization_strategy: match strictness {
+                TestStrictness::Comprehensive => PatternCanonicalizationStrategy::NormalizeOnly,
+                TestStrictness::LowHangingFruit => PatternCanonicalizationStrategy::Aggressive,
+            },
+        };
+        num_problems += !check_single_pattern(
+            test_case_data,
+            TestCaseInfo {
+                pattern: data.date_skeletons.short.get_pattern(),
+                skeleton: data.date_skeletons.short.get_pattern(),
+                length: "date-short",
+            },
+        ) as usize;
+        num_problems += !check_single_pattern(
+            test_case_data,
+            TestCaseInfo {
+                pattern: data.date_skeletons.medium.get_pattern(),
+                skeleton: data.date_skeletons.medium.get_pattern(),
+                length: "date-medum",
+            },
+        ) as usize;
+        num_problems += !check_single_pattern(
+            test_case_data,
+            TestCaseInfo {
+                pattern: data.date_skeletons.long.get_pattern(),
+                skeleton: data.date_skeletons.long.get_pattern(),
+                length: "date-long",
+            },
+        ) as usize;
+        num_problems += !check_single_pattern(
+            test_case_data,
+            TestCaseInfo {
+                pattern: data.date_skeletons.full.get_pattern(),
+                skeleton: data.date_skeletons.full.get_pattern(),
+                length: "date-full",
+            },
+        ) as usize;
+        // TODO: Also check time? Date seems more impactful in the short term
+        num_problems
+    }
+
+    #[test]
+    fn gregorian_only() {
+        // NOTE: This test is intended to run over all modern locales
+        let provider = SourceDataProvider::new();
+
+        let mut num_problems = 0;
+        for locale in provider
+            .locales_for_coverage_levels([CoverageLevel::Modern])
+            .unwrap()
+        {
+            num_problems += check_all_patterns_for_calendar_and_locale(
+                &provider,
+                DatagenCalendar::Gregorian,
+                &locale,
+                TestStrictness::LowHangingFruit,
+            );
+        }
+        if num_problems != 0 {
+            panic!("{num_problems} problems");
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn all_calendars() {
+        // NOTE: This test is intended to run over all modern locales
+        let provider = SourceDataProvider::new();
+
+        let mut num_problems = 0;
+        use DatagenCalendar::*;
+        for cal in [
+            Buddhist, Chinese, Coptic, Dangi, Ethiopic, Gregorian, Hebrew, Indian, Hijri, Japanese,
+            Persian, Roc,
+        ] {
+            for locale in provider
+                .locales_for_coverage_levels([CoverageLevel::Modern])
+                .unwrap()
+            {
+                num_problems += check_all_patterns_for_calendar_and_locale(
+                    &provider,
+                    cal,
+                    &locale,
+                    TestStrictness::Comprehensive,
+                );
+            }
+        }
+        if num_problems != 0 {
+            panic!("{num_problems} problems");
+        }
+    }
+}
+
+/// Verify that `preferred_hour_cycle()` infers the correct `CoarseHourCycle`
+/// from CLDR time skeleton patterns.
+#[test]
+fn test_preferred_hour_cycle_by_locale() {
+    use icu::datetime::provider::pattern::CoarseHourCycle;
+
+    let provider = SourceDataProvider::new_testing();
+
+    // (locale, expected coarse hour cycle)
+    let cases = [
+        ("en", CoarseHourCycle::H11H12), // US English
+        ("fr", CoarseHourCycle::H23),    // French
+        // en-GB not in test data; en-ZA follows UK conventions (h23)
+        ("en-ZA", CoarseHourCycle::H23),
+        ("ja", CoarseHourCycle::H23), // Japanese
+    ];
+
+    for (locale_str, expected) in cases {
+        let locale = locale_str.parse::<DataLocale>().unwrap();
+        let data = provider
+            .get_dates_resource(&locale, Some(DatagenCalendar::Gregorian))
+            .expect("Failed to load dates resource");
+
+        let actual = preferred_hour_cycle(data, &locale);
+
+        assert_eq!(
+            actual, expected,
+            "Locale {locale_str}: expected {expected:?}, got {actual:?}"
+        );
+    }
+}

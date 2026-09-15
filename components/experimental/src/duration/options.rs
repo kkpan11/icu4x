@@ -62,13 +62,15 @@ pub struct DurationFormatterOptions {
 
 /// Options for configuring the number of fractional digits to display.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FractionalDigits {
     /// Show as many fractional digits as necessary to display the whole duration,
     /// omitting trailing zeroes after the decimal point.
     #[default]
     ShowAll,
     /// Use the given number of fractional digits.
-    /// Rounded to zero if necessary.
+    /// This value must be in the range 0..=9.
+    /// Fractional digits are truncated if necessary.
     Fixed(u8),
 }
 

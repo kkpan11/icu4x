@@ -1,0 +1,98 @@
+{
+  "patterns": [
+    [
+      {
+        "Literal": "‏"
+      },
+      {
+        "Placeholder": "Place0"
+      },
+      {
+        "Literal": " "
+      },
+      {
+        "Placeholder": "Place1"
+      }
+    ],
+    [
+      {
+        "Literal": "‏‎-"
+      },
+      {
+        "Placeholder": "Place0"
+      },
+      {
+        "Literal": " "
+      },
+      {
+        "Placeholder": "Place1"
+      }
+    ],
+    [
+      {
+        "Literal": "؜"
+      },
+      {
+        "Placeholder": "Place0"
+      },
+      {
+        "Placeholder": "Place1"
+      }
+    ],
+    [
+      {
+        "Literal": "(؜"
+      },
+      {
+        "Placeholder": "Place0"
+      },
+      {
+        "Placeholder": "Place1"
+      },
+      {
+        "Literal": ")"
+      }
+    ],
+    [
+      {
+        "Literal": "؜"
+      },
+      {
+        "Placeholder": "Place0"
+      },
+      {
+        "Literal": " "
+      },
+      {
+        "Placeholder": "Place1"
+      }
+    ],
+    [
+      {
+        "Literal": "(؜"
+      },
+      {
+        "Placeholder": "Place0"
+      },
+      {
+        "Literal": " "
+      },
+      {
+        "Placeholder": "Place1"
+      },
+      {
+        "Literal": ")"
+      }
+    ]
+  ],
+  "indices": {
+    "standard": 0,
+    "standard_negative": 1,
+    "standard_alpha_next_to_number": 0,
+    "standard_alpha_next_to_number_negative": 1,
+    "accounting_positive": 2,
+    "accounting_negative": 3,
+    "accounting_alpha_next_to_number_positive": 4,
+    "accounting_alpha_next_to_number_negative": 5
+  }
+}

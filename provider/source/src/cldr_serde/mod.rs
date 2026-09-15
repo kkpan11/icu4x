@@ -8,31 +8,35 @@
 //! deserialization support. These structures can be used in the transformers.
 
 pub(crate) mod aliases;
+pub(crate) mod alt;
 pub(crate) mod ca;
 pub(crate) mod coverage_levels;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 pub(crate) mod currencies;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 pub(crate) mod date_fields;
+pub(crate) mod day_periods;
 pub(crate) mod directionality;
-#[cfg(feature = "experimental")]
+#[cfg_attr(not(feature = "unstable"), allow(dead_code))]
 pub(crate) mod displaynames;
+pub(crate) mod eras;
 pub(crate) mod exemplar_chars;
-pub(crate) mod japanese;
 pub(crate) mod likely_subtags;
 pub(crate) mod list_patterns;
 pub(crate) mod locale_resource;
 pub(crate) mod numbering_systems;
 pub(crate) mod numbers;
 pub(crate) mod parent_locales;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 pub(crate) mod personnames;
+#[cfg(feature = "unstable")]
 pub(crate) mod plural_ranges;
 pub(crate) mod plurals;
+#[cfg(feature = "unstable")]
+pub(crate) mod segmentation;
 pub(crate) mod time_zones;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 pub(crate) mod transforms;
-#[cfg(feature = "experimental")]
 pub(crate) mod units;
 pub(crate) mod week_data;
 

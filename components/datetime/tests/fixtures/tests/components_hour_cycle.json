@@ -6,14 +6,20 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h11" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "0:25\u202fAM"
+                "en-u-hc-h11": {
+                    "formatted": "0:25\u202fAM",
+                    "pattern": "K:mm\u202fa"
+                }
             }
         }
     },
@@ -24,14 +30,20 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "12:25\u202fAM"
+                "en-u-hc-h12": {
+                    "formatted": "12:25\u202fAM",
+                    "pattern": "h:mm\u202fa"
+                }
             }
         }
     },
@@ -42,32 +54,20 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "00:25"
-            }
-        }
-    },
-    {
-        "description": "h24 in the english locale",
-        "input": {
-            "value": "2020-01-07T00:25:07.000",
-            "options": {
-                "components": {
-                    "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h24" }
+                "en-u-hc-h23": {
+                    "formatted": "00:25",
+                    "pattern": "HH:mm"
                 }
-            }
-        },
-        "output": {
-            "values": {
-                "en": "24:25"
             }
         }
     },
@@ -79,14 +79,17 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h11" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "ar": "٠:٢٥ ص"
+                "ar-EG-u-hc-h11": "٠:٢٥ ص"
             }
         }
     },
@@ -97,14 +100,17 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "ar": "١٢:٢٥ ص"
+                "ar-EG-u-hc-h12": "١٢:٢٥ ص"
             }
         }
     },
@@ -115,32 +121,17 @@
             "options": {
                 "components": {
                     "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "minute": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "minute"
                 }
             }
         },
         "output": {
             "values": {
-                "ar": "٠٠:٢٥"
-            }
-        }
-    },
-    {
-        "description": "h24 in the arabic locale",
-        "input": {
-            "value": "2020-01-07T00:25:07.000",
-            "options": {
-                "components": {
-                    "hour": "numeric",
-                    "minute": "numeric",
-                    "preferences": { "hourCycle": "h24" }
-                }
-            }
-        },
-        "output": {
-            "values": {
-                "ar": "٢٤:٢٥"
+                "ar-EG-u-hc-h23": "٠٠:٢٥"
             }
         }
     },
@@ -150,14 +141,17 @@
             "value": "2002-12-31T00:05:07.000",
             "options": {
                 "components": {
-                    "hour": "numeric",
-                    "preferences": { "hourCycle": "h11" }
+                    "hour": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "hour"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "0\u202fAM"
+                "en-u-hc-h11": "0\u202fAM"
             }
         }
     },
@@ -167,14 +161,17 @@
             "value": "2002-12-31T00:05:07.000",
             "options": {
                 "components": {
-                    "hour": "numeric",
-                    "preferences": { "hourCycle": "h12" }
+                    "hour": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "hour"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "12\u202fAM"
+                "en-u-hc-h12": "12\u202fAM"
             }
         }
     },
@@ -184,31 +181,17 @@
             "value": "2002-12-31T00:05:07.000",
             "options": {
                 "components": {
-                    "hour": "numeric",
-                    "preferences": { "hourCycle": "h23" }
+                    "hour": "numeric"
+                },
+                "semantic": {
+                    "length": "short",
+                    "timePrecision": "hour"
                 }
             }
         },
         "output": {
             "values": {
-                "en": "00"
-            }
-        }
-    },
-    {
-        "description": "h24 with singleton h",
-        "input": {
-            "value": "2002-12-31T00:05:07.000",
-            "options": {
-                "components": {
-                    "hour": "numeric",
-                    "preferences": { "hourCycle": "h24" }
-                }
-            }
-        },
-        "output": {
-            "values": {
-                "en": "24"
+                "en-u-hc-h23": "00"
             }
         }
     }

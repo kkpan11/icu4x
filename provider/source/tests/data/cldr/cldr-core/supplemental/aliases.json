@@ -1,8 +1,8 @@
 {
   "supplemental": {
     "version": {
-      "_unicodeVersion": "15.1.0",
-      "_cldrVersion": "45"
+      "_unicodeVersion": "16.0.0",
+      "_cldrVersion": "49"
     },
     "metadata": {
       "alias": {
@@ -279,6 +279,10 @@
             "_reason": "macrolanguage",
             "_replacement": "syr"
           },
+          "cls": {
+            "_reason": "macrolanguage",
+            "_replacement": "sa"
+          },
           "cmk": {
             "_reason": "deprecated",
             "_replacement": "xch"
@@ -334,6 +338,10 @@
           "dap": {
             "_reason": "deprecated",
             "_replacement": "njz"
+          },
+          "dek": {
+            "_reason": "deprecated",
+            "_replacement": "sqm"
           },
           "deu": {
             "_reason": "overlong",
@@ -455,10 +463,6 @@
             "_reason": "overlong",
             "_replacement": "fa"
           },
-          "fat": {
-            "_reason": "macrolanguage",
-            "_replacement": "ak"
-          },
           "fij": {
             "_reason": "overlong",
             "_replacement": "fj"
@@ -554,6 +558,10 @@
           "gno": {
             "_reason": "macrolanguage",
             "_replacement": "gon"
+          },
+          "gom": {
+            "_reason": "macrolanguage",
+            "_replacement": "kok"
           },
           "gre": {
             "_reason": "bibliographic",
@@ -867,10 +875,6 @@
             "_reason": "macrolanguage",
             "_replacement": "kg"
           },
-          "knn": {
-            "_reason": "macrolanguage",
-            "_replacement": "kok"
-          },
           "koj": {
             "_reason": "deprecated",
             "_replacement": "kwv"
@@ -1051,10 +1055,6 @@
             "_reason": "overlong",
             "_replacement": "mt"
           },
-          "mnk": {
-            "_reason": "macrolanguage",
-            "_replacement": "man"
-          },
           "mnt": {
             "_reason": "deprecated",
             "_replacement": "wnn"
@@ -1074,6 +1074,10 @@
           "mon": {
             "_reason": "overlong",
             "_replacement": "mn"
+          },
+          "mrd": {
+            "_reason": "deprecated",
+            "_replacement": "mgp"
           },
           "mri": {
             "_reason": "overlong",
@@ -1133,7 +1137,7 @@
           },
           "nbx": {
             "_reason": "deprecated",
-            "_replacement": "ekc"
+            "_replacement": "gll"
           },
           "ncp": {
             "_reason": "deprecated",
@@ -1210,6 +1214,10 @@
           "npi": {
             "_reason": "macrolanguage",
             "_replacement": "ne"
+          },
+          "nte": {
+            "_reason": "deprecated",
+            "_replacement": "eko"
           },
           "nts": {
             "_reason": "deprecated",
@@ -1494,6 +1502,10 @@
           "sh": {
             "_reason": "legacy",
             "_replacement": "sr-Latn"
+          },
+          "shl": {
+            "_reason": "deprecated",
+            "_replacement": "mrh"
           },
           "sin": {
             "_reason": "overlong",
@@ -1910,6 +1922,10 @@
           "ymt": {
             "_reason": "deprecated",
             "_replacement": "mtm"
+          },
+          "yol": {
+            "_reason": "deprecated",
+            "_replacement": "enm"
           },
           "yor": {
             "_reason": "overlong",
@@ -4877,6 +4893,10 @@
             "_reason": "overlong",
             "_replacement": "GP"
           },
+          "frgua": {
+            "_reason": "deprecated",
+            "_replacement": "GP"
+          },
           "frh": {
             "_reason": "deprecated",
             "_replacement": "frcor"
@@ -4897,9 +4917,17 @@
             "_reason": "deprecated",
             "_replacement": "frnaq"
           },
+          "frlre": {
+            "_reason": "deprecated",
+            "_replacement": "RE"
+          },
           "frm": {
             "_reason": "deprecated",
             "_replacement": "frges"
+          },
+          "frmay": {
+            "_reason": "deprecated",
+            "_replacement": "YT"
           },
           "frmf": {
             "_reason": "overlong",
@@ -5204,6 +5232,10 @@
             }
           },
           "Asia": {
+            "Choibalsan": {
+              "_reason": "deprecated",
+              "_replacement": "Asia/Ulaanbaatar"
+            },
             "Chongqing": {
               "_reason": "deprecated",
               "_replacement": "Asia/Shanghai"
@@ -5229,9 +5261,17 @@
               "_replacement": "Australia/Hobart"
             }
           },
+          "CST6CDT": {
+            "_reason": "deprecated",
+            "_replacement": "America/Chicago"
+          },
           "EST": {
             "_reason": "deprecated",
-            "_replacement": "America/Indianapolis"
+            "_replacement": "America/Panama"
+          },
+          "EST5EDT": {
+            "_reason": "deprecated",
+            "_replacement": "America/New_York"
           },
           "Europe": {
             "Belfast": {
@@ -5255,6 +5295,10 @@
             "_reason": "deprecated",
             "_replacement": "America/Phoenix"
           },
+          "MST7MDT": {
+            "_reason": "deprecated",
+            "_replacement": "America/Denver"
+          },
           "Pacific": {
             "Johnston": {
               "_reason": "deprecated",
@@ -5264,6 +5308,10 @@
               "_reason": "deprecated",
               "_replacement": "Pacific/Truk"
             }
+          },
+          "PST8PDT": {
+            "_reason": "deprecated",
+            "_replacement": "America/Los_Angeles"
           },
           "SystemV": {
             "AST4": {

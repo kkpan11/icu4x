@@ -3,540 +3,620 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use crate::SourceDataProvider;
-use icu::collections::codepointtrie::CodePointTrie;
+use crate::properties::ucd_helpers::{self, UcdLine};
+use icu::collections::codepointtrie::{CodePointTrie, TrieValue};
+use icu::properties::props::EnumeratedProperty;
 use icu::properties::provider::{names::*, *};
 use icu_provider::prelude::*;
-use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::convert::TryFrom;
-use tinystr::TinyStr4;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Debug;
+use zerotrie::ZeroTrieSimpleAscii;
+use zerovec::ule::NichedOption;
 
 impl SourceDataProvider {
-    pub(super) fn get_enumerated_prop<'a>(
-        &'a self,
-        key: &str,
-    ) -> Result<&'a super::uprops_serde::enumerated::EnumeratedPropertyMap, DataError> {
-        self.icuexport()?
-            .read_and_parse_toml::<super::uprops_serde::enumerated::Main>(&format!(
-                "uprops/{}/{}.toml",
-                self.trie_type(),
-                key
-            ))?
-            .enum_property
-            .first()
-            .ok_or_else(|| DataErrorKind::MarkerNotFound.into_error())
-    }
-    fn get_mask_prop<'a>(
-        &'a self,
-        key: &str,
-    ) -> Result<&'a super::uprops_serde::mask::MaskPropertyMap, DataError> {
-        self.icuexport()?
-            .read_and_parse_toml::<super::uprops_serde::mask::Main>(&format!(
-                "uprops/{}/{}.toml",
-                self.trie_type(),
-                key
-            ))?
-            .mask_property
-            .first()
-            .ok_or(DataError::custom(
-                "Loading icuexport property data failed: \
-                 Are you using a sufficiently recent icuexport? (Must be ⪈ 72.1)",
-            ))
-    }
-}
+    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+    pub(super) fn build_enumerated_prop<T: EnumeratedProperty + Debug>(
+        &self,
+        short_name_to_t: HashMap<&'static str, T>,
+    ) -> Result<CodePointTrie<'static, T>, DataError> {
+        let name = str::from_utf8(T::NAME).unwrap();
+        let short_name = str::from_utf8(T::SHORT_NAME).unwrap();
 
-fn get_prop_values_map<F>(
-    values: &[super::uprops_serde::PropertyValue],
-    transform_u32: F,
-) -> Result<PropertyValueNameToEnumMapV1<'static>, DataError>
-where
-    F: Fn(u32) -> Result<u16, DataError>,
-{
-    let mut map = BTreeMap::new();
-    for value in values {
-        let discr = transform_u32(value.discr)?;
-        map.insert(
-            NormalizedPropertyNameStr::boxed_from_bytes(value.long.as_bytes()),
-            discr,
-        );
-        if let Some(ref short) = value.short {
-            map.insert(
-                NormalizedPropertyNameStr::boxed_from_bytes(short.as_bytes()),
-                discr,
-            );
-        }
-        for alias in &value.aliases {
-            map.insert(
-                NormalizedPropertyNameStr::boxed_from_bytes(alias.as_bytes()),
-                discr,
-            );
-        }
-    }
-    Ok(PropertyValueNameToEnumMapV1 {
-        map: map.into_iter().collect(),
-    })
-}
+        self.validate_property_name(name, short_name)?;
 
-/// Convert a map from property values to their names into
-/// a linear map where each index represents a property value
-fn map_to_vec<'a>(
-    map: &'a BTreeMap<u16, &'a str>,
-    prop_name: &str,
-) -> Result<Vec<&'a str>, DataError> {
-    // Use .first_key_value() and .last_key_value() after bumping MSRV
-    let first = if let Some((&first, _)) = map.iter().next() {
-        if first > 0 {
-            return Err(DataError::custom(
-                "Property has nonzero starting discriminant, perhaps consider \
-                 storing its names as a sparse map or by specializing this error",
-            )
-            .with_display_context(&format!("Property: {prop_name}, discr: {first}")));
+        fn normalize(s: &str) -> String {
+            s.replace(['_', '-', ' '], "").to_ascii_lowercase()
         }
 
-        first
-    } else {
-        return Err(DataError::custom("Property has no values!").with_display_context(prop_name));
-    };
-    let last = if let Some((&last, _)) = map.iter().next_back() {
-        let range = usize::from(1 + last - first);
-        let count = map.len();
-        let gaps = range - count;
-        if gaps > 0 {
-            return Err(DataError::custom("Property has more than 0 gaps, \
-                perhaps consider storing its names in a sparse map or by specializing this error")
-                .with_display_context(&format!("Property: {prop_name}, discriminant range: {first}..{last}, discriminant count: {count}")));
-        }
+        let names_to_short_names = self
+            .enumerated_prop_names(name, short_name)?
+            .0
+            .into_iter()
+            // Blocks.txt contains non-standard aliases
+            .map(|(k, v)| (normalize(k), v))
+            .collect::<BTreeMap<_, _>>();
 
-        last
-    } else {
-        return Err(DataError::custom("Property has no values!").with_display_context(prop_name));
-    };
-
-    let mut v = Vec::new();
-    for i in 0..=last {
-        if let Some(&val) = map.get(&i) {
-            v.push(val)
-        } else {
-            v.push("")
-        }
-    }
-    Ok(v)
-}
-
-/// Load the mapping from property values to their names
-fn load_values_to_names(
-    data: &super::uprops_serde::enumerated::EnumeratedPropertyMap,
-    is_short: bool,
-) -> Result<BTreeMap<u16, &str>, DataError> {
-    let mut map: BTreeMap<_, &str> = BTreeMap::new();
-
-    for value in &data.values {
-        let discr = u16::try_from(value.discr)
-            .map_err(|_| DataError::custom("Found value larger than u16 for property"))?;
-        if is_short {
-            if let Some(ref short) = value.short {
-                map.insert(discr, short);
+        let file = match name {
+            "Indic_Conjunct_Break" => "ucd/DerivedCoreProperties.txt".into(),
+            "Canonical_Combining_Class"
+            | "General_Category"
+            | "Bidi_Class"
+            | "Numeric_Type"
+            | "East_Asian_Width"
+            | "Joining_Type"
+            | "Joining_Group" => {
+                format!(
+                    "ucd/extracted/Derived{}.txt",
+                    name.replace('_', "").replace("Canonical", "")
+                )
             }
-        } else {
-            map.insert(discr, &value.long);
+            "Grapheme_Cluster_Break" | "Word_Break" | "Sentence_Break" => {
+                format!(
+                    "ucd/auxiliary/{}Property.txt",
+                    name.replace('_', "").replace("Cluster", "")
+                )
+            }
+            "Block" => "ucd/Blocks.txt".into(),
+            _ => format!(
+                "ucd/{}.txt",
+                name.replace('_', "").replace("Script", "Scripts")
+            ),
+        };
+
+        let mut builder = icu_codepointtrie_builder::CodePointTrieBuilder::new(
+            T::default(),
+            T::default(),
+            self.trie_type().into(),
+        );
+
+        let mut last_seen_cp = -1i32;
+
+        for line in self.rscd()?.parse_ucd_lines(&file)? {
+            match line {
+                UcdLine::Missing(fields) => {
+                    let mut fields = fields.fields();
+                    let cps = fields.next().unwrap();
+                    if &file == "ucd/DerivedCoreProperties.txt" {
+                        // This is a file containing multiple properties, so we need to check
+                        // the second column for the property name
+                        if fields.next().unwrap() != short_name {
+                            continue;
+                        }
+                    }
+                    let value = fields.next().unwrap();
+                    let value = names_to_short_names
+                        .get(normalize(value).as_str())
+                        .expect("file should only use names from PropertyValueAliases.txt")
+                        .0;
+
+                    let Some(&value) = short_name_to_t.get(value) else {
+                        // Don't log an error for every code point, the name data marker code
+                        // will log an error that there's an unknown variant.
+                        continue;
+                    };
+
+                    let range = ucd_helpers::parse_range(cps);
+                    if range == (0..=0x10FFFF) {
+                        // This is a statement of default. just check that we're using the same one
+                        assert_eq!(value, T::default());
+                    } else {
+                        assert!(
+                            *range.start() as i32 > last_seen_cp,
+                            "Found @missing rule after data in its block in {file}, we don't currently handle it"
+                        );
+                        builder.set_range_value(range, value);
+                    }
+                }
+                UcdLine::Fields(fields) => {
+                    let mut fields = fields.fields();
+                    let cp_range = fields.next().unwrap();
+                    if &file == "ucd/DerivedCoreProperties.txt" {
+                        // This is a file containing multiple properties, so we need to check
+                        // the second column for the property name
+                        if fields.next().unwrap() != short_name {
+                            continue;
+                        }
+                    }
+
+                    let value = fields.next().unwrap();
+                    let value = names_to_short_names
+                        .get(normalize(value).as_str())
+                        .expect("file should only use names from PropertyValueAliases.txt")
+                        .0;
+                    let Some(&value) = short_name_to_t.get(value) else {
+                        // Don't log an error for every code point, the name data marker code
+                        // will log an error that there's an unknown variant.
+                        continue;
+                    };
+
+                    let range = ucd_helpers::parse_range(cp_range);
+                    last_seen_cp = *range.end() as i32;
+                    builder.set_range_value(range, value);
+                }
+            }
         }
+
+        Ok(builder.build())
     }
 
-    Ok(map)
+    // The second element is a potential default value declared in PropertyValueAliases.txt
+    #[allow(clippy::type_complexity)] // just a tuple
+    fn enumerated_prop_names<'a>(
+        &'a self,
+        name: &str,
+        short_name: &str,
+    ) -> Result<(HashMap<&'a str, (&'a str, NameType)>, Option<&'a str>), DataError> {
+        let mut names = HashMap::new();
+        let mut default = None;
+
+        for line in self
+            .rscd()?
+            .parse_ucd_lines("ucd/PropertyValueAliases.txt")?
+        {
+            match line {
+                UcdLine::Missing(fields) => {
+                    let mut fields = fields.fields();
+                    assert_eq!(
+                        fields.next().unwrap(),
+                        "0000..10FFFF",
+                        "We only expect full-range @missing values in PropertyValueAliases.txt"
+                    );
+                    if fields.next().unwrap() != name {
+                        continue;
+                    }
+                    default = Some(fields.next().unwrap())
+                }
+                UcdLine::Fields(fields) => {
+                    let mut fields = fields.fields();
+                    if fields.next().unwrap() != short_name {
+                        continue;
+                    }
+                    let numeric_name = (short_name.as_bytes()
+                        == icu::properties::props::CanonicalCombiningClass::SHORT_NAME)
+                        .then(|| fields.next().unwrap());
+                    let short = fields.next().unwrap();
+                    let long = fields.next().unwrap();
+                    names.insert(short, (short, NameType::Short));
+                    names.insert(long, (short, NameType::Long));
+                    for alias in fields {
+                        names.insert(alias, (short, NameType::Alias));
+                    }
+                    if let Some(numeric_name) = numeric_name {
+                        names.insert(numeric_name, (short, NameType::Numeric));
+                    }
+                }
+            }
+        }
+
+        for &name in names.keys() {
+            if !name
+                .bytes()
+                // https://www.unicode.org/reports/tr44/#Property_And_Value_Aliases
+                .all(|b| matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_'))
+                // https://github.com/unicode-org/properties/issues/606
+                && name != "Arabic_Presentation_Forms-A"
+            {
+                return Err(
+                    DataError::custom("Property name contains invalid characters")
+                        .with_display_context(name),
+                );
+            }
+        }
+
+        Ok((names, default))
+    }
 }
 
-/// Load the mapping from property values to their names as a sparse map
-fn load_values_to_names_sparse<M>(
-    p: &SourceDataProvider,
-    prop_name: &str,
-    is_short: bool,
-) -> Result<DataResponse<M>, DataError>
-where
-    M: DynamicDataMarker<Yokeable = PropertyEnumToValueNameSparseMapV1<'static>>,
-{
-    let data = p.get_enumerated_prop(prop_name)
-        .map_err(|_| DataError::custom("Loading icuexport property data failed: \
-                                        Are you using a sufficiently recent icuexport? (Must be ⪈ 72.1)"))?;
-    let map = load_values_to_names(data, is_short)?;
-    let map = map.into_iter().collect();
-    let data_struct = PropertyEnumToValueNameSparseMapV1 { map };
-    Ok(DataResponse {
-        metadata: Default::default(),
-        payload: DataPayload::from_owned(data_struct),
+#[derive(Debug)]
+enum NameType {
+    Short,
+    Long,
+    Numeric,
+    Alias,
+}
+
+fn validate_dense<T: TrieValue + Debug, V: Debug + Copy>(
+    map: &HashMap<T, V>,
+) -> Result<Vec<V>, DataError> {
+    let map = map
+        .iter()
+        .map(|(k, &v)| (k.to_u32() as usize, v))
+        .collect::<BTreeMap<_, _>>();
+
+    if !map.keys().copied().eq(0..map.len()) {
+        return Err(DataError::custom(
+            "Property has more than 0 gaps and cannot be stored in a dense map",
+        )
+        .with_debug_context(&map));
+    };
+
+    Ok(map.into_values().collect())
+}
+
+#[allow(clippy::unnecessary_wraps)] // signature required by macro
+fn convert_sparse<T: TrieValue>(
+    map: HashMap<T, &str>,
+) -> Result<PropertyEnumToValueNameSparseMap<'static>, DataError> {
+    Ok(PropertyEnumToValueNameSparseMap {
+        map: map
+            .into_iter()
+            .map(|(k, v)| (u16::try_from(k.to_u32()).unwrap(), v))
+            .collect(),
     })
 }
 
-/// Load the mapping from property values to their names as a linear map
-fn load_values_to_names_linear<M>(
-    p: &SourceDataProvider,
-    prop_name: &str,
-    is_short: bool,
-) -> Result<DataResponse<M>, DataError>
-where
-    M: DynamicDataMarker<Yokeable = PropertyEnumToValueNameLinearMapV1<'static>>,
-{
-    let data = p.get_enumerated_prop(prop_name)
-        .map_err(|_| DataError::custom("Loading icuexport property data failed: \
-                                        Are you using a sufficiently recent icuexport? (Must be ⪈ 72.1)"))?;
-    let map = load_values_to_names(data, is_short)?;
-    let vec = map_to_vec(&map, prop_name)?;
-    let varzerovec = (&vec).into();
-    let data_struct = PropertyEnumToValueNameLinearMapV1 { map: varzerovec };
-    Ok(DataResponse {
-        metadata: Default::default(),
-        payload: DataPayload::from_owned(data_struct),
+fn convert_linear<T: TrieValue + Debug>(
+    map: HashMap<T, &str>,
+) -> Result<PropertyEnumToValueNameLinearMap<'static>, DataError> {
+    let dense = validate_dense(&map)?;
+
+    Ok(PropertyEnumToValueNameLinearMap {
+        map: (&dense).into(),
     })
 }
 
-/// Load the mapping from property values to their names as a linear map of TinyStr4s
-fn load_values_to_names_linear4<M>(
-    p: &SourceDataProvider,
-    prop_name: &str,
-    is_short: bool,
-) -> Result<DataResponse<M>, DataError>
-where
-    M: DynamicDataMarker<Yokeable = PropertyEnumToValueNameLinearTiny4MapV1<'static>>,
-{
-    let data = p.get_enumerated_prop(prop_name)
-        .map_err(|_| DataError::custom("Loading icuexport property data failed: \
-                                        Are you using a sufficiently recent icuexport? (Must be ⪈ 72.1)"))?;
-    let map = load_values_to_names(data, is_short)?;
-    let vec = map_to_vec(&map, prop_name)?;
-    let vec: Result<Vec<_>, _> = vec.into_iter().map(TinyStr4::try_from_str).collect();
+fn convert_script(
+    map: HashMap<icu::properties::props::Script, &str>,
+) -> Result<PropertyScriptToIcuScriptMap<'static>, DataError> {
+    let dense = validate_dense(&map)?;
 
-    let vec = vec.map_err(|_| {
-        DataError::custom("Found property value longer than 4 characters for linear4 property")
-    })?;
-    let zerovec = vec.into_iter().collect();
-    let data_struct = PropertyEnumToValueNameLinearTiny4MapV1 { map: zerovec };
-    Ok(DataResponse {
-        metadata: Default::default(),
-        payload: DataPayload::from_owned(data_struct),
+    Ok(PropertyScriptToIcuScriptMap {
+        map: dense
+            .into_iter()
+            .map(|s| {
+                if s.is_empty() {
+                    Ok(NichedOption(None))
+                } else {
+                    icu::locale::subtags::Script::try_from_str(s)
+                        .map(Some)
+                        .map(NichedOption)
+                }
+            })
+            .collect::<Result<_, _>>()
+            .map_err(|_| DataError::custom("Found invalid script tag"))?,
     })
 }
+
 macro_rules! expand {
-    ($(($marker:ident, $marker_n2e:ident,
-        // marker_e2sns is short for marker_enum_to_short_name_sparse, etc
-        // We only support selecting one of these at a time right now, but we need
-        // different variable names for the macro matcher to work
-        $((sparse: $marker_e2sns:ident, $marker_e2lns:ident),)?
-        $((linear: $marker_e2snl:ident, $marker_e2lnl:ident),)?
-        $((linear4: $marker_e2snl4:ident, $marker_e2lnl4:ident),)?
-
-
-        $prop_name:literal)),+,) => {
+    ($(
+        (
+            $prop:ty,
+            $marker:ident,
+            $parse_marker:ident,
+            $short_marker:ident[$short_convert:ident],
+            $long_marker:ident[$long_convert:ident]
+        )
+    ),+,) => {
         $(
             impl DataProvider<$marker> for SourceDataProvider
             {
                 fn load(&self, req: DataRequest) -> Result<DataResponse<$marker>, DataError> {
                     self.check_req::<$marker>(req)?;
-                    let source_cpt_data = &self.get_enumerated_prop($prop_name)?.code_point_trie;
 
-                    let code_point_trie = CodePointTrie::try_from(source_cpt_data).map_err(|e| {
-                        DataError::custom("Could not parse CodePointTrie TOML").with_display_context(&e)
-                    })?;
-                    let data_struct = PropertyCodePointMapV1::CodePointTrie(code_point_trie);
+                    #[cfg(not(any(feature = "use_wasm", feature = "use_icu4c")))]
+                    return Err(DataError::custom(
+                        "icu_provider_source must be built with use_icu4c or use_wasm to build properties data",
+                    )
+                    .with_req($marker::INFO, req));
+                    #[cfg(any(feature = "use_wasm", feature = "use_icu4c"))]
+                    {
+                        let trie = if let Some(t) = self.rscd()?.cpt_cache.get(str::from_utf8(<$prop as EnumeratedProperty>::SHORT_NAME).unwrap()).
+                            and_then(|t| t.downcast_ref::<CodePointTrie<'static, $prop>>().cloned()) {
+                            t
+                        } else {
+                            let trie = self.build_enumerated_prop::<$prop>(<$prop>::names().collect())?;
+
+                            self.rscd()?.cpt_cache
+                                .insert(str::from_utf8(<$prop as EnumeratedProperty>::SHORT_NAME).unwrap(), Box::new(trie.clone()));
+
+                            trie
+                        };
+
+                        Ok(DataResponse {
+                            metadata: Default::default(),
+                            payload: DataPayload::from_owned(PropertyCodePointMap::CodePointTrie(trie)),
+                        })
+                    }
+                }
+            }
+
+            impl DataProvider<$parse_marker> for SourceDataProvider
+            {
+                fn load(&self, req: DataRequest) -> Result<DataResponse<$parse_marker>, DataError> {
+                    self.check_req::<$parse_marker>(req)?;
+
+                    let short_name_to_t = <$prop>::names().collect::<HashMap<_, _>>();
+
+                    let names = self.enumerated_prop_names(str::from_utf8(<$prop as EnumeratedProperty>::NAME).unwrap(), str::from_utf8(<$prop as EnumeratedProperty>::SHORT_NAME).unwrap())?.0;
+
+                    for (name, _) in &short_name_to_t {
+                        if !names.contains_key(name) && <$prop as EnumeratedProperty>::SHORT_NAME != icu::properties::props::Script::SHORT_NAME {
+                            log::warn!(
+                                "UCD does not contain {} {name:?}",
+                                str::from_utf8(<$prop as EnumeratedProperty>::NAME).unwrap()
+                            );
+                        }
+                    }
+
+                    let trie = names
+                        .into_iter()
+                        .filter_map(|(name, (short_name, _))| Some((name, short_name_to_t.get(short_name).copied()?)))
+                        // Add short names that are only defined in ICU4X, not in the UCD (Scripts)
+                        .chain(short_name_to_t.clone().into_iter())
+                        .map(|(n, v)| (n, v.to_u32() as usize))
+                        .collect::<HashMap<_, _>>()
+                        .into_iter()
+                        .collect::<ZeroTrieSimpleAscii<_>>()
+                        .convert_store();
+
                     Ok(DataResponse {
                         metadata: Default::default(),
-                        payload: DataPayload::from_owned(data_struct),
+                        payload: DataPayload::from_owned(PropertyValueNameToEnumMap { map: trie }),
+                    })
+                }
+            }
+
+            impl DataProvider<$short_marker> for SourceDataProvider
+            {
+                fn load(&self, req: DataRequest) -> Result<DataResponse<$short_marker>, DataError> {
+                    self.check_req::<$short_marker>(req)?;
+
+                    let map = ($short_convert)(<$prop>::names().map(|(k, v)| (v, k)).collect())?;
+
+                    Ok(DataResponse {
+                        metadata: Default::default(),
+                        payload: DataPayload::from_owned(map),
+                    })
+                }
+            }
+
+            impl DataProvider<$long_marker> for SourceDataProvider
+            {
+                fn load(&self, req: DataRequest) -> Result<DataResponse<$long_marker>, DataError> {
+                    self.check_req::<$long_marker>(req)?;
+                    let short_name_to_t = <$prop>::names().collect::<HashMap<_, _>>();
+
+                    let names = self.enumerated_prop_names(str::from_utf8(<$prop as EnumeratedProperty>::NAME).unwrap(), str::from_utf8(<$prop as EnumeratedProperty>::SHORT_NAME).unwrap())?.0;
+
+                    let names = short_name_to_t.iter().map(|(&short_name, &t)| (t, short_name))
+                        .chain(names
+                            .iter()
+                            .filter(|(_, (_, ty))| matches!(ty, NameType::Long))
+                            .filter_map(|(&name, (short_name, _))| {
+                                let Some(&t) = short_name_to_t.get(short_name) else {
+                                    if <$prop>::SHORT_NAME == icu::properties::props::GeneralCategory::SHORT_NAME {
+                                        // PropertyValueAliases.txt lists both GeneralCategory and GeneralCategoryGroup
+                                        // values, so this is expected
+                                        return None;
+                                    }
+                                    log::error!(
+                                        "Missing Rust value for {} {name:?} {short_name:?}",
+                                        str::from_utf8(<$prop as EnumeratedProperty>::NAME).unwrap()
+                                    );
+                                    return None;
+                                };
+                                Some((t, name))
+                            })
+                        )
+                        .collect();
+
+                    let map = ($long_convert)(names)?;
+
+                    Ok(DataResponse {
+                        metadata: Default::default(),
+                        payload: DataPayload::from_owned(map),
                     })
                 }
             }
 
             impl crate::IterableDataProviderCached<$marker> for SourceDataProvider {
                 fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                    self.get_enumerated_prop($prop_name)?;
                     Ok(HashSet::from_iter([Default::default()]))
                 }
             }
 
-            impl DataProvider<$marker_n2e> for SourceDataProvider
-            {
-                fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_n2e>, DataError> {
-                    self.check_req::<$marker_n2e>(req)?;
-                    let data = self.get_enumerated_prop($prop_name)
-                        .map_err(|_| DataError::custom("Loading icuexport property data failed: \
-                                                        Are you using a sufficiently recent icuexport? (Must be ⪈ 72.1)"))?;
-
-                    let data_struct = get_prop_values_map(&data.values, |v| u16::try_from(v).map_err(|_| DataError::custom(concat!("Found value larger than u16 for property ", $prop_name))))?;
-                    Ok(DataResponse {
-                        metadata: Default::default(),
-                        payload: DataPayload::from_owned(data_struct),
-                    })
-                }
-            }
-
-            impl crate::IterableDataProviderCached<$marker_n2e> for SourceDataProvider {
-                                fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                    self.get_enumerated_prop($prop_name)?;
+            impl crate::IterableDataProviderCached<$parse_marker> for SourceDataProvider {
+                fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
                     Ok(HashSet::from_iter([Default::default()]))
                 }
             }
 
-            $(
-                impl DataProvider<$marker_e2sns> for SourceDataProvider
-                {
-                    fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_e2sns>, DataError> {
-                        self.check_req::<$marker_e2sns>(req)?;
-                        load_values_to_names_sparse(self, $prop_name, true)
-                    }
+            impl crate::IterableDataProviderCached<$short_marker> for SourceDataProvider {
+                fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
+                    Ok(HashSet::from_iter([Default::default()]))
                 }
+            }
 
-                impl crate::IterableDataProviderCached<$marker_e2sns> for SourceDataProvider {
-                    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                        self.get_enumerated_prop($prop_name)?;
-                        Ok(HashSet::from_iter([Default::default()]))
-                    }
+            impl crate::IterableDataProviderCached<$long_marker> for SourceDataProvider {
+                fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
+                    Ok(HashSet::from_iter([Default::default()]))
                 }
-
-                impl DataProvider<$marker_e2lns> for SourceDataProvider
-                {
-                    fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_e2lns>, DataError> {
-                        self.check_req::<$marker_e2lns>(req)?;
-                        load_values_to_names_sparse(self, $prop_name, false)
-                    }
-                }
-
-                impl crate::IterableDataProviderCached<$marker_e2lns> for SourceDataProvider {
-                    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                        self.get_enumerated_prop($prop_name)?;
-                        Ok(HashSet::from_iter([Default::default()]))
-                    }
-                }
-            )?
-
-            $(
-                impl DataProvider<$marker_e2snl> for SourceDataProvider
-                {
-                    fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_e2snl>, DataError> {
-                        self.check_req::<$marker_e2snl>(req)?;
-                        load_values_to_names_linear(self, $prop_name, true)
-                    }
-                }
-
-                impl crate::IterableDataProviderCached<$marker_e2snl> for SourceDataProvider {
-                    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                        self.get_enumerated_prop($prop_name)?;
-                        Ok(HashSet::from_iter([Default::default()]))
-                    }
-                }
-
-                impl DataProvider<$marker_e2lnl> for SourceDataProvider
-                {
-                    fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_e2lnl>, DataError> {
-                        self.check_req::<$marker_e2lnl>(req)?;
-                        load_values_to_names_linear(self, $prop_name, false)
-                    }
-                }
-
-                impl crate::IterableDataProviderCached<$marker_e2lnl> for SourceDataProvider {
-                    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                        self.get_enumerated_prop($prop_name)?;
-                        Ok(HashSet::from_iter([Default::default()]))
-                    }
-                }
-            )?
-
-            $(
-                impl DataProvider<$marker_e2snl4> for SourceDataProvider
-                {
-                    fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_e2snl4>, DataError> {
-                        self.check_req::<$marker_e2snl4>(req)?;
-                        load_values_to_names_linear4(self, $prop_name, true)
-                    }
-                }
-
-                impl crate::IterableDataProviderCached<$marker_e2snl4> for SourceDataProvider {
-                    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                        self.get_enumerated_prop($prop_name)?;
-                        Ok(HashSet::from_iter([Default::default()]))
-                    }
-                }
-
-                impl DataProvider<$marker_e2lnl4> for SourceDataProvider
-                {
-                    fn load(&self, req: DataRequest) -> Result<DataResponse<$marker_e2lnl4>, DataError> {
-                        self.check_req::<$marker_e2lnl4>(req)?;
-                        // Tiny4 is only for short names
-                        load_values_to_names_linear(self, $prop_name, false)
-                    }
-                }
-
-                impl crate::IterableDataProviderCached<$marker_e2lnl4> for SourceDataProvider {
-                    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError>  {
-                        self.get_enumerated_prop($prop_name)?;
-                        Ok(HashSet::from_iter([Default::default()]))
-                    }
-                }
-            )?
+            }
         )+
-    };
+    }
 }
 
 // Special handling for GeneralCategoryMask
-impl DataProvider<GeneralCategoryMaskNameToValueV1Marker> for SourceDataProvider {
+impl DataProvider<PropertyNameParseGeneralCategoryMaskV1> for SourceDataProvider {
     fn load(
         &self,
         req: DataRequest,
-    ) -> Result<DataResponse<GeneralCategoryMaskNameToValueV1Marker>, DataError> {
-        use icu::properties::GeneralCategoryGroup;
-        use zerovec::ule::AsULE;
+    ) -> Result<DataResponse<PropertyNameParseGeneralCategoryMaskV1>, DataError> {
+        use icu::properties::props::GeneralCategoryGroup;
 
-        self.check_req::<GeneralCategoryMaskNameToValueV1Marker>(req)?;
+        self.check_req::<PropertyNameParseGeneralCategoryMaskV1>(req)?;
 
-        let data = self.get_mask_prop("gcm")?;
-        let data_struct = get_prop_values_map(&data.values, |v| {
-            let value: GeneralCategoryGroup = v.into();
-            let ule = value.to_unaligned();
-            let packed = u16::from_unaligned(ule);
+        let short_name_to_t = GeneralCategoryGroup::names().collect::<HashMap<_, _>>();
 
-            // sentinel value
-            if packed == 0xFF00 {
-                return Err(DataError::custom("Found unknown general category mask value, properties code may need to be updated."));
-            }
-            Ok(packed)
-        })?;
+        let trie = self
+            .enumerated_prop_names("General_Category", "gc")?
+            .0
+            .into_iter()
+            .filter(|(_, (_, ty))| matches!(ty, NameType::Short | NameType::Long | NameType::Alias))
+            .filter_map(|(name, (short_name, _))| {
+                let Some(&t) = short_name_to_t.get(short_name) else {
+                    log::error!(
+                        "Missing Rust value for GeneralCategoryGroup {name:?} {short_name:?}"
+                    );
+                    return None;
+                };
+                Some((name, t))
+            })
+            .map(|(n, v)| (n, v.to_u32() as usize))
+            .collect::<ZeroTrieSimpleAscii<_>>()
+            .convert_store();
+
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(data_struct),
+            payload: DataPayload::from_owned(PropertyValueNameToEnumMap { map: trie }),
         })
     }
 }
 
-impl crate::IterableDataProviderCached<GeneralCategoryMaskNameToValueV1Marker>
+impl crate::IterableDataProviderCached<PropertyNameParseGeneralCategoryMaskV1>
     for SourceDataProvider
 {
     fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        self.get_mask_prop("gcm")?;
         Ok(HashSet::from_iter([Default::default()]))
     }
 }
 
 expand!(
     (
-        CanonicalCombiningClassV1Marker,
-        CanonicalCombiningClassNameToValueV1Marker,
-        (
-            sparse: CanonicalCombiningClassValueToShortNameV1Marker,
-            CanonicalCombiningClassValueToLongNameV1Marker
-        ),
-        "ccc"
+        icu::properties::props::CanonicalCombiningClass,
+        PropertyEnumCanonicalCombiningClassV1,
+        PropertyNameParseCanonicalCombiningClassV1,
+        PropertyNameShortCanonicalCombiningClassV1[convert_sparse],
+        PropertyNameLongCanonicalCombiningClassV1[convert_sparse]
     ),
     (
-        GeneralCategoryV1Marker,
-        GeneralCategoryNameToValueV1Marker,
-        (
-            linear: GeneralCategoryValueToShortNameV1Marker,
-            GeneralCategoryValueToLongNameV1Marker
-        ),
-        "gc"
+        icu::properties::props::GeneralCategory,
+        PropertyEnumGeneralCategoryV1,
+        PropertyNameParseGeneralCategoryV1,
+        PropertyNameShortGeneralCategoryV1[convert_linear],
+        PropertyNameLongGeneralCategoryV1[convert_linear]
     ),
     (
-        BidiClassV1Marker,
-        BidiClassNameToValueV1Marker,
-        (
-            linear: BidiClassValueToShortNameV1Marker,
-            BidiClassValueToLongNameV1Marker
-        ),
-        "bc"
+        icu::properties::props::BidiClass,
+        PropertyEnumBidiClassV1,
+        PropertyNameParseBidiClassV1,
+        PropertyNameShortBidiClassV1[convert_linear],
+        PropertyNameLongBidiClassV1[convert_linear]
     ),
     (
-        ScriptV1Marker,
-        ScriptNameToValueV1Marker,
-        (
-            linear4: ScriptValueToShortNameV1Marker,
-            ScriptValueToLongNameV1Marker
-        ),
-        "sc"
+        icu::properties::props::Block,
+        PropertyEnumBlockV1,
+        PropertyNameParseBlockV1,
+        PropertyNameShortBlockV1[convert_linear],
+        PropertyNameLongBlockV1[convert_linear]
     ),
     (
-        HangulSyllableTypeV1Marker,
-        HangulSyllableTypeNameToValueV1Marker,
-        (
-            linear: HangulSyllableTypeValueToShortNameV1Marker,
-            HangulSyllableTypeValueToLongNameV1Marker
-        ),
-        "hst"
+        icu::properties::props::NumericType,
+        PropertyEnumNumericTypeV1,
+        PropertyNameParseNumericTypeV1,
+        PropertyNameShortNumericTypeV1[convert_linear],
+        PropertyNameLongNumericTypeV1[convert_linear]
     ),
     (
-        EastAsianWidthV1Marker,
-        EastAsianWidthNameToValueV1Marker,
-        (
-            linear: EastAsianWidthValueToShortNameV1Marker,
-            EastAsianWidthValueToLongNameV1Marker
-        ),
-        "ea"
+        icu::properties::props::Script,
+        PropertyEnumScriptV1,
+        PropertyNameParseScriptV1,
+        PropertyNameShortScriptV1[convert_script],
+        PropertyNameLongScriptV1[convert_linear]
     ),
     (
-        IndicSyllabicCategoryV1Marker,
-        IndicSyllabicCategoryNameToValueV1Marker,
-        (
-            linear: IndicSyllabicCategoryValueToShortNameV1Marker,
-            IndicSyllabicCategoryValueToLongNameV1Marker
-        ),
-        "InSC"
+        icu::properties::props::HangulSyllableType,
+        PropertyEnumHangulSyllableTypeV1,
+        PropertyNameParseHangulSyllableTypeV1,
+        PropertyNameShortHangulSyllableTypeV1[convert_linear],
+        PropertyNameLongHangulSyllableTypeV1[convert_linear]
     ),
     (
-        LineBreakV1Marker,
-        LineBreakNameToValueV1Marker,
-        (
-            linear: LineBreakValueToShortNameV1Marker,
-            LineBreakValueToLongNameV1Marker
-        ),
-        "lb"
+        icu::properties::props::EastAsianWidth,
+        PropertyEnumEastAsianWidthV1,
+        PropertyNameParseEastAsianWidthV1,
+        PropertyNameShortEastAsianWidthV1[convert_linear],
+        PropertyNameLongEastAsianWidthV1[convert_linear]
     ),
     (
-        GraphemeClusterBreakV1Marker,
-        GraphemeClusterBreakNameToValueV1Marker,
-        (
-            linear: GraphemeClusterBreakValueToShortNameV1Marker,
-            GraphemeClusterBreakValueToLongNameV1Marker
-        ),
-        "GCB"
+        icu::properties::props::IndicSyllabicCategory,
+        PropertyEnumIndicSyllabicCategoryV1,
+        PropertyNameParseIndicSyllabicCategoryV1,
+        PropertyNameShortIndicSyllabicCategoryV1[convert_linear],
+        PropertyNameLongIndicSyllabicCategoryV1[convert_linear]
     ),
     (
-        WordBreakV1Marker,
-        WordBreakNameToValueV1Marker,
-        (
-            linear: WordBreakValueToShortNameV1Marker,
-            WordBreakValueToLongNameV1Marker
-        ),
-        "WB"
+        icu::properties::props::IndicConjunctBreak,
+        PropertyEnumIndicConjunctBreakV1,
+        PropertyNameParseIndicConjunctBreakV1,
+        PropertyNameShortIndicConjunctBreakV1[convert_linear],
+        PropertyNameLongIndicConjunctBreakV1[convert_linear]
     ),
     (
-        SentenceBreakV1Marker,
-        SentenceBreakNameToValueV1Marker,
-        (
-            linear: SentenceBreakValueToShortNameV1Marker,
-            SentenceBreakValueToLongNameV1Marker
-        ),
-        "SB"
+        icu::properties::props::LineBreak,
+        PropertyEnumLineBreakV1,
+        PropertyNameParseLineBreakV1,
+        PropertyNameShortLineBreakV1[convert_linear],
+        PropertyNameLongLineBreakV1[convert_linear]
     ),
     (
-        JoiningTypeV1Marker,
-        JoiningTypeNameToValueV1Marker,
-        (
-            linear: JoiningTypeValueToShortNameV1Marker,
-            JoiningTypeValueToLongNameV1Marker
-        ),
-        "jt"
+        icu::properties::props::GraphemeClusterBreak,
+        PropertyEnumGraphemeClusterBreakV1,
+        PropertyNameParseGraphemeClusterBreakV1,
+        PropertyNameShortGraphemeClusterBreakV1[convert_linear],
+        PropertyNameLongGraphemeClusterBreakV1[convert_linear]
+    ),
+    (
+        icu::properties::props::WordBreak,
+        PropertyEnumWordBreakV1,
+        PropertyNameParseWordBreakV1,
+        PropertyNameShortWordBreakV1[convert_linear],
+        PropertyNameLongWordBreakV1[convert_linear]
+    ),
+    (
+        icu::properties::props::SentenceBreak,
+        PropertyEnumSentenceBreakV1,
+        PropertyNameParseSentenceBreakV1,
+        PropertyNameShortSentenceBreakV1[convert_linear],
+        PropertyNameLongSentenceBreakV1[convert_linear]
+    ),
+    (
+        icu::properties::props::JoiningType,
+        PropertyEnumJoiningTypeV1,
+        PropertyNameParseJoiningTypeV1,
+        PropertyNameShortJoiningTypeV1[convert_linear],
+        PropertyNameLongJoiningTypeV1[convert_linear]
+    ),
+    (
+        icu::properties::props::JoiningGroup,
+        PropertyEnumJoiningGroupV1,
+        PropertyNameParseJoiningGroupV1,
+        PropertyNameShortJoiningGroupV1[convert_linear],
+        PropertyNameLongJoiningGroupV1[convert_linear]
+    ),
+    (
+        icu::properties::props::VerticalOrientation,
+        PropertyEnumVerticalOrientationV1,
+        PropertyNameParseVerticalOrientationV1,
+        PropertyNameShortVerticalOrientationV1[convert_linear],
+        PropertyNameLongVerticalOrientationV1[convert_linear]
     ),
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu::properties::{GeneralCategory, Script};
 
-    // A test of the UnicodeProperty General_Category is truly a test of the
+    // A test of the UCD property General_Category is truly a test of the
     // `GeneralCategory` Rust enum, not the `GeneralCategoryGroup` Rust enum,
     // since we must match the representation and value width of the data from
-    // the ICU CodePointTrie that ICU4X is reading from.
+    // the CodePointTrie that ICU4X is using.
     #[test]
     fn test_general_category() {
+        use icu::properties::{CodePointMapData, props::GeneralCategory};
         let provider = SourceDataProvider::new_testing();
 
-        let trie = icu::properties::maps::load_general_category(&provider).unwrap();
+        let trie = CodePointMapData::<GeneralCategory>::try_new_unstable(&provider).unwrap();
         let trie = trie.as_code_point_trie().unwrap();
 
         assert_eq!(trie.get32('꣓' as u32), GeneralCategory::DecimalNumber);
@@ -545,9 +625,10 @@ mod tests {
 
     #[test]
     fn test_script() {
+        use icu::properties::{CodePointMapData, props::Script};
         let provider = SourceDataProvider::new_testing();
 
-        let trie = icu::properties::maps::load_script(&provider).unwrap();
+        let trie = CodePointMapData::<Script>::try_new_unstable(&provider).unwrap();
         let trie = trie.as_code_point_trie().unwrap();
 
         assert_eq!(trie.get32('꣓' as u32), Script::Saurashtra);

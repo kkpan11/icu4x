@@ -4,27 +4,26 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use crate::cldr_serde::{self};
 use crate::SourceDataProvider;
+use crate::cldr_serde::{self};
 
-use icu::experimental::dimension::provider::units_essentials::UnitsEssentialsV1Marker;
-
-use icu::experimental::dimension::provider::pattern_key::{PatternKey, PowerValue};
-use icu::experimental::dimension::provider::units_essentials::CompoundCount;
-use icu::experimental::dimension::provider::units_essentials::UnitsEssentialsV1;
-use icu_provider::prelude::*;
+use icu::experimental::dimension::provider::units::essentials::CompoundCount;
+use icu::experimental::dimension::provider::units::essentials::UnitsEssentials;
+use icu::experimental::dimension::provider::units::essentials::UnitsEssentialsV1;
+use icu::experimental::dimension::provider::units::pattern_key::{PatternKey, PowerValue};
 use icu_provider::DataMarkerAttributes;
+use icu_provider::prelude::*;
 use zerovec::ZeroMap;
 
-impl DataProvider<UnitsEssentialsV1Marker> for SourceDataProvider {
-    fn load(&self, req: DataRequest) -> Result<DataResponse<UnitsEssentialsV1Marker>, DataError> {
-        self.check_req::<UnitsEssentialsV1Marker>(req)?;
+impl DataProvider<UnitsEssentialsV1> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<UnitsEssentialsV1>, DataError> {
+        self.check_req::<UnitsEssentialsV1>(req)?;
 
         // Get units
         let units_format_data: &cldr_serde::units::data::Resource = self
             .cldr()?
             .units()
-            .read_and_parse(&req.id.locale.get_langid(), "units.json")?;
+            .read_and_parse(req.id.locale, "units.json")?;
         let units_format_data = &units_format_data.main.value.units;
         let length_data = match req.id.marker_attributes.as_str() {
             "long" => &units_format_data.long,
@@ -33,14 +32,16 @@ impl DataProvider<UnitsEssentialsV1Marker> for SourceDataProvider {
             _ => return Err(DataError::custom("Failed to get length data")),
         };
         let per = length_data
-            .get("per")
-            .and_then(|unit| unit.compound_unit_pattern.as_ref())
+            .per
+            .compound_unit_pattern
+            .as_ref()
             .ok_or_else(|| DataError::custom("Failed to get per"))?
             .clone();
 
         let times = length_data
-            .get("times")
-            .and_then(|unit| unit.compound_unit_pattern.as_ref())
+            .times
+            .compound_unit_pattern
+            .as_ref()
             .ok_or_else(|| DataError::custom("Failed to get times"))?
             .clone();
 
@@ -48,8 +49,8 @@ impl DataProvider<UnitsEssentialsV1Marker> for SourceDataProvider {
 
         // Fill powers
         for (powers, power_value) in [
-            (length_data.get("power2"), PowerValue::Two),
-            (length_data.get("power3"), PowerValue::Three),
+            (length_data.powers.get(&2), PowerValue::Two),
+            (length_data.powers.get(&3), PowerValue::Three),
         ] {
             let powers = powers
                 .as_ref()
@@ -94,34 +95,28 @@ impl DataProvider<UnitsEssentialsV1Marker> for SourceDataProvider {
             });
         }
 
-        /// Fills the prefixes map with the SI prefixes (binary and decimal)
-        const BINARY_PREFIX: &str = "1024p";
-        const DECIMAL_PREFIX: &str = "10p";
-
-        for (key, patterns) in length_data {
-            let pattern_key = if let Some(trimmed_key) = key.strip_prefix(BINARY_PREFIX) {
-                trimmed_key.parse::<u8>().map(PatternKey::Binary)
-            } else if let Some(trimmed_key) = key.strip_prefix(DECIMAL_PREFIX) {
-                trimmed_key.parse::<i8>().map(PatternKey::Decimal)
-            } else {
-                // Skip keys that don't start with the binary or decimal prefixes
-                // NOTE:
-                //      In case there are other prefixes will be added in the future,
-                //      we should update this code to handle them.
-                continue;
-            }
-            .map_err(|_| {
-                DataError::custom("Failed to parse pattern key").with_debug_context(&key)
-            })?;
-
-            if let Some(pattern) = patterns.unit_prefix_pattern.as_ref() {
-                prefixes.insert(pattern_key, pattern.to_string());
-            } else {
-                return Err(DataError::custom("Failed to get pattern").with_debug_context(&key));
-            }
+        for (power, patterns) in &length_data.binary {
+            prefixes.insert(
+                PatternKey::Binary(*power),
+                patterns
+                    .unit_prefix_pattern
+                    .as_ref()
+                    .ok_or_else(|| DataError::custom("Failed to get binary pattern"))?
+                    .clone(),
+            );
+        }
+        for (power, patterns) in &length_data.decimal {
+            prefixes.insert(
+                PatternKey::Decimal(*power),
+                patterns
+                    .unit_prefix_pattern
+                    .as_ref()
+                    .ok_or_else(|| DataError::custom("Failed to get decimal pattern"))?
+                    .clone(),
+            );
         }
 
-        let result = UnitsEssentialsV1 {
+        let result = UnitsEssentials {
             per: per.into(),
             times: times.into(),
             prefixes: ZeroMap::from_iter(prefixes),
@@ -134,25 +129,20 @@ impl DataProvider<UnitsEssentialsV1Marker> for SourceDataProvider {
     }
 }
 
-impl crate::IterableDataProviderCached<UnitsEssentialsV1Marker> for SourceDataProvider {
+impl crate::IterableDataProviderCached<UnitsEssentialsV1> for SourceDataProvider {
     fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
         let units = self.cldr()?.units();
-        let langids = units.list_langs()?;
-        Ok(langids
+        let locales = units.list_locales()?;
+        Ok(locales
             .into_iter()
-            .flat_map(|langid| {
+            .flat_map(|locale| {
                 [
                     DataMarkerAttributes::from_str_or_panic("long"),
                     DataMarkerAttributes::from_str_or_panic("short"),
                     DataMarkerAttributes::from_str_or_panic("narrow"),
                 ]
                 .into_iter()
-                .map(move |length| {
-                    DataIdentifierCow::from_borrowed_and_owned(
-                        length,
-                        DataLocale::from(langid.clone()),
-                    )
-                })
+                .map(move |length| DataIdentifierCow::from_borrowed_and_owned(length, locale))
             })
             .collect())
     }
@@ -160,16 +150,16 @@ impl crate::IterableDataProviderCached<UnitsEssentialsV1Marker> for SourceDataPr
 
 #[test]
 fn test_basic() {
-    use icu::locale::langid;
+    use icu::locale::data_locale;
     use icu_provider::prelude::*;
 
     let provider = SourceDataProvider::new_testing();
 
-    let us_long: DataPayload<UnitsEssentialsV1Marker> = provider
+    let us_long: DataPayload<UnitsEssentialsV1> = provider
         .load(DataRequest {
             id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
                 DataMarkerAttributes::from_str_or_panic("long"),
-                &langid!("en").into(),
+                &data_locale!("en"),
             ),
             ..Default::default()
         })
@@ -182,11 +172,11 @@ fn test_basic() {
     let times = us_long.get().times.to_string();
     assert_eq!(times, "{0}-{1}");
 
-    let fr_long: DataPayload<UnitsEssentialsV1Marker> = provider
+    let fr_long: DataPayload<UnitsEssentialsV1> = provider
         .load(DataRequest {
             id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
                 DataMarkerAttributes::from_str_or_panic("long"),
-                &langid!("fr").into(),
+                &data_locale!("fr"),
             ),
             ..Default::default()
         })
@@ -199,11 +189,11 @@ fn test_basic() {
     let times = fr_long.get().times.to_string();
     assert_eq!(times, "{0}-{1}");
 
-    let ar_eg_short: DataPayload<UnitsEssentialsV1Marker> = provider
+    let ar_eg_short: DataPayload<UnitsEssentialsV1> = provider
         .load(DataRequest {
             id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
                 DataMarkerAttributes::from_str_or_panic("short"),
-                &langid!("ar").into(),
+                &data_locale!("ar"),
             ),
             ..Default::default()
         })

@@ -8,7 +8,8 @@
 
 mod deserializer;
 mod header;
-pub use self::deserializer::from_bytes;
+pub use self::deserializer::from_words;
+pub mod helpers;
 
 #[cfg(feature = "serialize")]
 mod serializer;
@@ -18,6 +19,29 @@ pub use self::serializer::Serializer;
 use core::{fmt, slice::SliceIndex};
 
 use self::header::BinHeader;
+
+/// Includes bytes as a properly aligned and sized `&[u32]`. This is required for `resb` deserialization.
+#[macro_export]
+macro_rules! include_bytes_as_u32 {
+    ($path:literal) => {
+        const {
+            #[repr(align(4))]
+            pub struct AlignedAs<Bytes: ?Sized> {
+                pub bytes: Bytes,
+            }
+
+            const B: &[u8] = &AlignedAs {
+                bytes: *include_bytes!($path),
+            }
+            .bytes;
+            // SAFETY: B is statically borrowed, 4-aligned, and the length is within
+            // the static slice (truncated to a multiple of four).
+            unsafe {
+                core::slice::from_raw_parts(B.as_ptr() as *const u32, B.len() / size_of::<u32>())
+            }
+        }
+    };
+}
 
 /// Gets the endianness of a binary resource bundle's data.
 pub fn determine_endianness(resb: &[u8]) -> Result<Endianness, BinaryDeserializerError> {
@@ -299,7 +323,7 @@ impl ResDescriptor {
     }
 
     /// Returns `true` if the described resource is empty.
-    pub fn is_empty(&self) -> bool {
+    pub fn is_empty(self) -> bool {
         self.value == 0
     }
 
@@ -308,12 +332,12 @@ impl ResDescriptor {
     /// The type of the resource representation is not verified. Consumers are
     /// expected to call the function appropriate to the resource type they are
     /// querying.
-    fn value_as_16_bit_offset(&self) -> usize {
+    fn value_as_16_bit_offset(self) -> usize {
         // When the value of a resource descriptor is an offset, it is counted
         // in units dependent on the resource type (16-bit values for 16-bit
         // resources, 32-bit values for 32-bit resources). Translate that into
         // bytes for consumers.
-        (self.value as usize) * core::mem::size_of::<u16>()
+        (self.value as usize) * size_of::<u16>()
     }
 
     /// Gets the offset to the described 32-bit resource in bytes.
@@ -321,12 +345,12 @@ impl ResDescriptor {
     /// The type of the resource representation is not verified. Consumers are
     /// expected to call the function appropriate to the resource type they are
     /// querying.
-    fn value_as_32_bit_offset(&self) -> usize {
+    fn value_as_32_bit_offset(self) -> usize {
         // When the value of a resource descriptor is an offset, it is counted
         // in units dependent on the resource type (16-bit values for 16-bit
         // resources, 32-bit values for 32-bit resources). Translate that into
         // bytes for consumers.
-        (self.value as usize) * core::mem::size_of::<u32>()
+        (self.value as usize) * size_of::<u32>()
     }
 
     /// Gets the value of the resource descriptor as a signed integer.
@@ -334,7 +358,7 @@ impl ResDescriptor {
     /// The type of the resource representation is not verified. Consumers are
     /// expected to call the function appropriate to the resource type they are
     /// querying.
-    fn value_as_signed_int(&self) -> i32 {
+    fn value_as_signed_int(self) -> i32 {
         ((self.value as i32) << 4) >> 4
     }
 
@@ -343,12 +367,12 @@ impl ResDescriptor {
     /// The type of the resource representation is not verified. Consumers are
     /// expected to call the function appropriate to the resource type they are
     /// querying.
-    fn value_as_unsigned_int(&self) -> u32 {
+    fn value_as_unsigned_int(self) -> u32 {
         self.value
     }
 
     /// Gets the resource type of the described resource.
-    pub fn resource_type(&self) -> ResourceReprType {
+    pub fn resource_type(self) -> ResourceReprType {
         self.resource_type
     }
 }
@@ -362,28 +386,36 @@ pub struct BinaryDeserializerError {
 }
 
 impl BinaryDeserializerError {
-    fn invalid_data(message: &'static str) -> Self {
+    /// TODO
+    #[inline]
+    pub const fn invalid_data(message: &'static str) -> Self {
         Self {
             kind: ErrorKind::InvalidData,
             message,
         }
     }
 
-    fn resource_type_mismatch(message: &'static str) -> Self {
+    /// TODO
+    #[inline]
+    pub const fn resource_type_mismatch(message: &'static str) -> Self {
         Self {
             kind: ErrorKind::ResourceTypeMismatch,
             message,
         }
     }
 
-    fn unsupported_format(message: &'static str) -> Self {
+    /// TODO
+    #[inline]
+    pub const fn unsupported_format(message: &'static str) -> Self {
         Self {
             kind: ErrorKind::UnsupportedFormat,
             message,
         }
     }
 
-    fn unknown(message: &'static str) -> Self {
+    /// TODO
+    #[inline]
+    pub const fn unknown(message: &'static str) -> Self {
         Self {
             kind: ErrorKind::Unknown,
             message,
@@ -438,12 +470,10 @@ where
 fn read_u16(input: &[u8]) -> Result<(u16, &[u8]), BinaryDeserializerError> {
     // Safe to unwrap at the end of this because `try_into()` for arrays will
     // only fail if the slice is the wrong size.
-    #[allow(clippy::unwrap_used)]
-    let bytes = get_subslice(input, ..core::mem::size_of::<u16>())?
-        .try_into()
-        .unwrap();
-    let value = u16::from_le_bytes(bytes);
+    #[expect(clippy::unwrap_used)]
+    let bytes = get_subslice(input, ..size_of::<u16>())?.try_into().unwrap();
+    let value = u16::from_ne_bytes(bytes);
 
-    let rest = get_subslice(input, core::mem::size_of::<u16>()..)?;
+    let rest = get_subslice(input, size_of::<u16>()..)?;
     Ok((value, rest))
 }

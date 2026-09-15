@@ -2,481 +2,297 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-mod fixtures;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use icu_datetime::{DateTimeFormatter, FixedCalendarDateTimeFormatter, fieldsets};
 
-use criterion::{criterion_group, criterion_main, Criterion};
-#[cfg(feature = "experimental")]
-use icu_datetime::neo::TypedNeoFormatter;
-#[cfg(feature = "experimental")]
-use icu_datetime::neo_skeleton::{NeoDateSkeleton, NeoSkeletonLength, NeoTimeComponents};
-#[cfg(feature = "experimental")]
-use icu_datetime::neo_skeleton::{NeoDateTimeComponents, NeoDateTimeSkeleton};
-#[cfg(feature = "experimental")]
-use icu_datetime::options::length;
-use std::fmt::Write;
+use icu_calendar::Gregorian;
+use icu_locale_core::{Locale, locale};
+use icu_time::zone::{IanaParser, ZoneNameTimestamp};
+use icu_time::{DateTime, TimeZoneInfo, ZonedDateTime};
+use writeable::Writeable;
 
-use icu_calendar::{DateTime, Gregorian};
-#[cfg(feature = "experimental")]
-use icu_datetime::DateTimeFormatterOptions;
-use icu_datetime::TypedDateTimeFormatter;
-use icu_datetime::{time_zone::TimeZoneFormatterOptions, TypedZonedDateTimeFormatter};
-use icu_locale_core::Locale;
-use icu_timezone::CustomTimeZone;
-#[cfg(feature = "experimental")]
-use writeable::TryWriteable;
+use icu_datetime::{fieldsets::builder::FieldSetBuilder, provider::fields::components};
+use serde::{Deserialize, Serialize};
 
-#[path = "../tests/mock.rs"]
-mod mock;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Fixture {
+    pub(crate) setups: Vec<TestInput>,
+    pub(crate) values: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TestInput {
+    pub(crate) locale: String,
+    pub(crate) options: TestOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TestOptions {
+    pub(crate) length: Option<TestOptionsLength>,
+    pub(crate) components: Option<TestComponentsBag>,
+    pub(crate) semantic: Option<FieldSetBuilder>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TestOptionsLength {
+    pub(crate) date: Option<TestLength>,
+    pub(crate) time: Option<TestLength>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) enum TestLength {
+    #[serde(rename = "short")]
+    Short,
+    #[serde(rename = "medium")]
+    Medium,
+    #[serde(rename = "long")]
+    Long,
+    #[serde(rename = "full")]
+    Full,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct TestComponentsBag {
+    pub(crate) era: Option<components::Text>,
+    pub(crate) year: Option<components::Year>,
+    pub(crate) month: Option<components::Month>,
+    pub(crate) week: Option<components::Week>,
+    pub(crate) day: Option<components::Day>,
+    pub(crate) weekday: Option<components::Text>,
+
+    pub(crate) hour: Option<components::Numeric>,
+    pub(crate) minute: Option<components::Numeric>,
+    pub(crate) second: Option<components::Numeric>,
+    pub(crate) subsecond: Option<u8>,
+
+    pub(crate) time_zone_name: Option<components::TimeZoneName>,
+}
 
 fn datetime_benches(c: &mut Criterion) {
     let mut group = c.benchmark_group("datetime");
 
-    let mut bench_datetime_with_fixture = |name, file| {
-        let fxs = serde_json::from_str::<fixtures::Fixture>(file).unwrap();
-        group.bench_function(&format!("datetime_{name}"), |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().expect("Failed to parse locale.");
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        #[cfg(feature = "experimental")]
-                        let dtf = {
-                            TypedDateTimeFormatter::<Gregorian>::try_new_experimental(
-                                &locale.into(),
-                                options,
-                            )
-                            .expect("Failed to create TypedDateTimeFormatter.")
-                        };
-                        #[cfg(not(feature = "experimental"))]
-                        let dtf = {
-                            TypedDateTimeFormatter::<Gregorian>::try_new(&locale.into(), options)
-                                .expect("Failed to create TypedDateTimeFormatter.")
-                        };
+    let mut bench_neoneo_datetime_with_fixture = |name, file, has_zones| {
+        let fx = serde_json::from_str::<Fixture>(file).unwrap();
 
-                        let mut result = String::new();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(dt);
-                            write!(result, "{fdt}").expect("Failed to write to date time format.");
-                            result.clear();
-                        }
+        let datetimes = fx
+            .values
+            .iter()
+            .map(|s| {
+                if has_zones {
+                    ZonedDateTime::try_lenient_from_str(s, Gregorian, IanaParser::new()).expect(s)
+                } else {
+                    let DateTime { date, time } = DateTime::try_from_str(s, Gregorian).unwrap();
+                    ZonedDateTime {
+                        date,
+                        time,
+                        // zone is unused but we need to make the types match
+                        zone: TimeZoneInfo::unknown()
+                            .with_zone_name_timestamp(ZoneNameTimestamp::far_in_future()),
                     }
                 }
             })
-        });
-    };
+            .collect::<Vec<_>>();
 
-    bench_datetime_with_fixture("lengths", include_str!("fixtures/tests/lengths.json"));
-
-    #[cfg(feature = "experimental")]
-    bench_datetime_with_fixture("components", include_str!("fixtures/tests/components.json"));
-
-    #[cfg(feature = "experimental")]
-    let mut bench_neoneo_datetime_with_fixture = |name, file| {
-        let fxs = serde_json::from_str::<fixtures::Fixture>(file).unwrap();
-        group.bench_function(&format!("neoneo/datetime_{name}"), |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().expect("Failed to parse locale.");
-                        let options = fixtures::get_options(&setup.options).unwrap();
-
-                        let (neo_components, length) = match options {
-                            DateTimeFormatterOptions::Length(length::Bag {
-                                date: Some(date),
-                                time: Some(time),
-                                ..
-                            }) => {
-                                let neo_skeleton =
-                                    NeoDateTimeSkeleton::from_date_time_length(date, time);
-                                (neo_skeleton.components, neo_skeleton.length)
-                            }
-                            DateTimeFormatterOptions::Length(length::Bag {
-                                date: Some(date),
-                                time: None,
-                                ..
-                            }) => {
-                                let neo_skeleton = NeoDateSkeleton::from_date_length(date);
-                                (
-                                    NeoDateTimeComponents::Date(neo_skeleton.components),
-                                    NeoSkeletonLength::Short,
-                                )
-                            }
-                            DateTimeFormatterOptions::Length(length::Bag {
-                                date: None,
-                                time: Some(time),
-                                ..
-                            }) => {
-                                let neo_time_components = NeoTimeComponents::from_time_length(time);
-                                (
-                                    NeoDateTimeComponents::Time(neo_time_components),
-                                    NeoSkeletonLength::Short,
-                                )
-                            }
-                            _ => todo!(), // Err(LoadError::UnsupportedOptions),
-                        };
-
-                        let dtf = {
-                            TypedNeoFormatter::<Gregorian, _>::try_new_with_components(
-                                &locale.into(),
-                                neo_components,
-                                length.into(),
-                            )
-                            .expect("Failed to create TypedNeoFormatter.")
-                        };
-
-                        let mut result = String::new();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(dt);
-                            fdt.try_write_to(&mut result)
-                                .unwrap()
-                                .expect("Failed to write to date time format.");
-                            result.clear();
-                        }
-                    }
-                }
+        let setups = fx
+            .setups
+            .iter()
+            .map(|s| {
+                (
+                    s.locale.parse::<Locale>().unwrap(),
+                    s.options.semantic.as_ref().unwrap(),
+                )
             })
-        });
-    };
+            .collect::<Vec<_>>();
 
-    #[cfg(feature = "experimental")]
-    bench_neoneo_datetime_with_fixture("lengths", include_str!("fixtures/tests/lengths.json"));
+        let mut result = String::with_capacity(1000);
 
-    let fxs = serde_json::from_str::<fixtures::Fixture>(include_str!(
-        "fixtures/tests/lengths_with_zones.json"
-    ))
-    .unwrap();
-    group.bench_function("zoned_datetime_overview", |b| {
-        b.iter(|| {
-            for fx in &fxs.0 {
-                let datetimes: Vec<(DateTime<Gregorian>, CustomTimeZone)> = fx
-                    .values
-                    .iter()
-                    .map(|value| mock::parse_zoned_gregorian_from_str(value))
-                    .collect();
-                for setup in &fx.setups {
-                    let locale: Locale = setup.locale.parse().unwrap();
-                    let options = fixtures::get_options(&setup.options).unwrap();
-                    let dtf = TypedZonedDateTimeFormatter::<Gregorian>::try_new(
-                        &locale.into(),
-                        options,
-                        TimeZoneFormatterOptions::default(),
-                    )
-                    .unwrap();
-
-                    let mut result = String::new();
+        group.bench_function(format!("semantic/{name}"), |b| {
+            b.iter(|| {
+                for &(ref locale, field_set_builder) in &setups {
+                    let dtf = {
+                        FixedCalendarDateTimeFormatter::<Gregorian, _>::try_new(
+                            locale.into(),
+                            field_set_builder.clone().build_composite().unwrap(),
+                        )
+                        .expect("Failed to create FixedCalendarDateTimeFormatter.")
+                    };
 
                     for dt in &datetimes {
-                        let fdt = dtf.format(&dt.0, &dt.1);
-                        write!(result, "{fdt}").unwrap();
+                        let fdt = dtf.format(dt);
+                        fdt.write_to(&mut result).unwrap();
                         result.clear();
                     }
                 }
+            })
+        });
+    };
+
+    bench_neoneo_datetime_with_fixture("lengths", include_str!("fixtures/lengths.json"), false);
+
+    bench_neoneo_datetime_with_fixture(
+        "components",
+        include_str!("fixtures/components.json"),
+        false,
+    );
+
+    bench_neoneo_datetime_with_fixture(
+        "lengths_with_zones",
+        include_str!("fixtures/lengths_with_zones.json"),
+        true,
+    );
+
+    let ten_cases = [
+        "2001-09-08T18:46:40.000[u-ca=gregory]",
+        "2017-07-13T19:40:00.000[u-ca=gregory]",
+        "2020-09-13T05:26:40.000[u-ca=gregory]",
+        "2021-01-06T22:13:20.000[u-ca=gregory]",
+        "2021-05-02T17:00:00.000[u-ca=gregory]",
+        "2021-08-26T10:46:40.000[u-ca=gregory]",
+        "2021-11-20T03:33:20.000[u-ca=gregory]",
+        "2022-04-14T22:20:00.000[u-ca=gregory]",
+        "2022-08-08T16:06:40.000[u-ca=gregory]",
+        "2033-05-17T20:33:20.000[u-ca=gregory]",
+    ]
+    .map(|s| DateTime::try_from_str(s, Gregorian).unwrap());
+
+    #[inline]
+    fn construct_any_ymd_short() -> DateTimeFormatter<fieldsets::YMD> {
+        DateTimeFormatter::try_new(locale!("fr").into(), fieldsets::YMD::short()).unwrap()
+    }
+
+    #[inline]
+    fn construct_fixed_ymd_short() -> FixedCalendarDateTimeFormatter<Gregorian, fieldsets::YMD> {
+        FixedCalendarDateTimeFormatter::try_new(locale!("fr").into(), fieldsets::YMD::short())
+            .unwrap()
+    }
+
+    #[inline]
+    fn construct_fixed_ymd_long() -> FixedCalendarDateTimeFormatter<Gregorian, fieldsets::YMD> {
+        FixedCalendarDateTimeFormatter::try_new(locale!("fr").into(), fieldsets::YMD::long())
+            .unwrap()
+    }
+
+    group.bench_function("ymd_short/any/construct_and_format/10_cases", |b| {
+        let mut buffer = String::with_capacity(1000);
+        b.iter(|| {
+            for datetime in black_box(&ten_cases).iter() {
+                buffer.clear();
+                let formatter = construct_any_ymd_short();
+                formatter.format(datetime).write_to(&mut buffer).unwrap();
             }
-        })
+        });
+    });
+
+    group.bench_function("ymd_short/any/format_only/10_cases", |b| {
+        let formatter = construct_any_ymd_short();
+        let mut buffer = String::with_capacity(1000);
+        b.iter(|| {
+            for datetime in black_box(&ten_cases).iter() {
+                buffer.clear();
+                black_box(&formatter)
+                    .format(datetime)
+                    .write_to(&mut buffer)
+                    .unwrap();
+            }
+        });
+    });
+
+    group.bench_function("ymd_short/any/format_to_string/10_cases", |b| {
+        let formatter = construct_any_ymd_short();
+        b.iter(|| {
+            let mut counter = 0usize; // make sure the loop is not DCE'd
+            for datetime in black_box(&ten_cases).iter() {
+                let n = black_box(&formatter)
+                    .format(datetime)
+                    .write_to_string()
+                    .len();
+                counter = counter.wrapping_add(n);
+            }
+            counter
+        });
+    });
+
+    group.bench_function("ymd_short/fixed/construct_and_format/10_cases", |b| {
+        let mut buffer = String::with_capacity(1000);
+        b.iter(|| {
+            for datetime in black_box(&ten_cases).iter() {
+                buffer.clear();
+                let formatter = construct_fixed_ymd_short();
+                formatter.format(datetime).write_to(&mut buffer).unwrap();
+            }
+        });
+    });
+
+    group.bench_function("ymd_short/fixed/format_only/10_cases", |b| {
+        let formatter = construct_fixed_ymd_short();
+        let mut buffer = String::with_capacity(1000);
+        b.iter(|| {
+            for datetime in black_box(&ten_cases).iter() {
+                buffer.clear();
+                black_box(&formatter)
+                    .format(datetime)
+                    .write_to(&mut buffer)
+                    .unwrap();
+            }
+        });
+    });
+
+    group.bench_function("ymd_short/fixed/format_to_string/10_cases", |b| {
+        let formatter = construct_fixed_ymd_short();
+        b.iter(|| {
+            let mut counter = 0usize; // make sure the loop is not DCE'd
+            for datetime in black_box(&ten_cases).iter() {
+                let n = black_box(&formatter)
+                    .format(datetime)
+                    .write_to_string()
+                    .len();
+                counter = counter.wrapping_add(n);
+            }
+            counter
+        });
+    });
+
+    group.bench_function("ymd_long/fixed/construct_and_format/10_cases", |b| {
+        let mut buffer = String::with_capacity(1000);
+        b.iter(|| {
+            for datetime in black_box(&ten_cases).iter() {
+                buffer.clear();
+                let formatter = construct_fixed_ymd_long();
+                formatter.format(datetime).write_to(&mut buffer).unwrap();
+            }
+        });
+    });
+
+    group.bench_function("ymd_long/fixed/format_only/10_cases", |b| {
+        let formatter = construct_fixed_ymd_long();
+        let mut buffer = String::with_capacity(1000);
+        b.iter(|| {
+            for datetime in black_box(&ten_cases).iter() {
+                buffer.clear();
+                black_box(&formatter)
+                    .format(datetime)
+                    .write_to(&mut buffer)
+                    .unwrap();
+            }
+        });
+    });
+
+    group.bench_function("ymd_long/fixed/format_to_string/10_cases", |b| {
+        let formatter = construct_fixed_ymd_long();
+        b.iter(|| {
+            let mut counter = 0usize; // make sure the loop is not DCE'd
+            for datetime in black_box(&ten_cases).iter() {
+                let n = black_box(&formatter)
+                    .format(datetime)
+                    .write_to_string()
+                    .len();
+                counter = counter.wrapping_add(n);
+            }
+            counter
+        });
     });
 
     group.finish();
-
-    #[cfg(feature = "bench")]
-    {
-        use writeable::Writeable;
-
-        let mut group = c.benchmark_group("datetime");
-
-        let fxs =
-            serde_json::from_str::<fixtures::Fixture>(include_str!("fixtures/tests/lengths.json"))
-                .unwrap();
-        group.bench_function("TypedDateTimeFormatter/format_to_write", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf =
-                            TypedDateTimeFormatter::<Gregorian>::try_new(&locale.into(), options)
-                                .unwrap();
-
-                        let mut scratch = String::new();
-
-                        for dt in &datetimes {
-                            let _ = dtf.format(dt).write_to(&mut scratch);
-                            scratch.clear();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("TypedDateTimeFormatter/format_to_string", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf =
-                            TypedDateTimeFormatter::<Gregorian>::try_new(&locale.into(), options)
-                                .unwrap();
-
-                        for dt in &datetimes {
-                            let _ = dtf.format_to_string(dt);
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("FormattedDateTime/format", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf =
-                            TypedDateTimeFormatter::<Gregorian>::try_new(&locale.into(), options)
-                                .unwrap();
-
-                        let mut result = String::new();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(dt);
-                            write!(result, "{fdt}").unwrap();
-                            result.clear();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("FormattedDateTime/to_string", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf =
-                            TypedDateTimeFormatter::<Gregorian>::try_new(&locale.into(), options)
-                                .unwrap();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(dt);
-                            let _ = fdt.to_string();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("FormattedDateTime/write_to_string", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<DateTime<Gregorian>> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf =
-                            TypedDateTimeFormatter::<Gregorian>::try_new(&locale.into(), options)
-                                .unwrap();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(dt);
-                            let _ = fdt.write_to_string();
-                        }
-                    }
-                }
-            })
-        });
-
-        let fxs = serde_json::from_str::<fixtures::Fixture>(include_str!(
-            "fixtures/tests/lengths_with_zones.json"
-        ))
-        .unwrap();
-        group.bench_function("TypedZonedDateTimeFormatter/format_to_write", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<(DateTime<Gregorian>, CustomTimeZone)> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_zoned_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf = TypedZonedDateTimeFormatter::<Gregorian>::try_new(
-                            &locale.into(),
-                            options,
-                            TimeZoneFormatterOptions::default(),
-                        )
-                        .unwrap();
-
-                        let mut scratch = String::new();
-
-                        for dt in &datetimes {
-                            let _ = dtf.format(&dt.0, &dt.1).write_to(&mut scratch);
-                            scratch.clear();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("TypedZonedDateTimeFormatter/format_to_string", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<(DateTime<Gregorian>, CustomTimeZone)> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_zoned_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf = TypedZonedDateTimeFormatter::<Gregorian>::try_new(
-                            &locale.into(),
-                            options,
-                            TimeZoneFormatterOptions::default(),
-                        )
-                        .unwrap();
-
-                        for dt in &datetimes {
-                            let _ = dtf.format_to_string(&dt.0, &dt.1);
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("FormattedZonedDateTime/format", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<(DateTime<Gregorian>, CustomTimeZone)> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_zoned_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf = TypedZonedDateTimeFormatter::<Gregorian>::try_new(
-                            &locale.into(),
-                            options,
-                            TimeZoneFormatterOptions::default(),
-                        )
-                        .unwrap();
-
-                        let mut result = String::new();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(&dt.0, &dt.1);
-                            write!(result, "{fdt}").unwrap();
-                            result.clear();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("FormattedZonedDateTime/to_string", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<(DateTime<Gregorian>, CustomTimeZone)> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_zoned_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf = TypedZonedDateTimeFormatter::<Gregorian>::try_new(
-                            &locale.into(),
-                            options,
-                            TimeZoneFormatterOptions::default(),
-                        )
-                        .unwrap();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(&dt.0, &dt.1);
-                            let _ = fdt.to_string();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.bench_function("FormattedZonedDateTime/write_to_string", |b| {
-            b.iter(|| {
-                for fx in &fxs.0 {
-                    let datetimes: Vec<(DateTime<Gregorian>, CustomTimeZone)> = fx
-                        .values
-                        .iter()
-                        .map(|value| mock::parse_zoned_gregorian_from_str(value))
-                        .collect();
-
-                    for setup in &fx.setups {
-                        let locale: Locale = setup.locale.parse().unwrap();
-                        let options = fixtures::get_options(&setup.options).unwrap();
-                        let dtf = TypedZonedDateTimeFormatter::<Gregorian>::try_new(
-                            &locale.into(),
-                            options,
-                            TimeZoneFormatterOptions::default(),
-                        )
-                        .unwrap();
-
-                        for dt in &datetimes {
-                            let fdt = dtf.format(&dt.0, &dt.1);
-                            let _ = fdt.write_to_string();
-                        }
-                    }
-                }
-            })
-        });
-
-        group.finish();
-    }
 }
 
 criterion_group!(benches, datetime_benches);

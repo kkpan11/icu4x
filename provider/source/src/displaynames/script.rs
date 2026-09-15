@@ -2,109 +2,114 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::cldr_serde;
+use super::coverage_experimental::CoverageLevelForXPath;
 use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
-use core::convert::TryFrom;
+use crate::cldr_serde;
+use crate::cldr_serde::alt::{Alt, WithAlt};
+use crate::displaynames::extract_names_for_zeromap_struct;
 use icu::experimental::displaynames::provider::*;
-use icu::locale::{subtags::Script, ParseError};
+use icu::locale::provider::names::*;
+use icu::locale::subtags::Script;
 use icu_provider::prelude::*;
 use std::collections::{BTreeMap, HashSet};
+use zerovec::VarZeroCow;
 
-impl DataProvider<ScriptDisplayNamesV1Marker> for SourceDataProvider {
-    fn load(
-        &self,
-        req: DataRequest,
-    ) -> Result<DataResponse<ScriptDisplayNamesV1Marker>, DataError> {
-        self.check_req::<ScriptDisplayNamesV1Marker>(req)?;
-        let langid = req.id.locale.get_langid();
+impl DataProvider<LocaleNamesScriptV0> for SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<LocaleNamesScriptV0>, DataError> {
+        self.check_req::<LocaleNamesScriptV0>(req)?;
 
         let data: &cldr_serde::displaynames::script::Resource = self
             .cldr()?
             .displaynames()
-            .read_and_parse(&langid, "scripts.json")?;
+            .read_and_parse(req.id.locale, "scripts.json")?;
 
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(ScriptDisplayNamesV1::try_from(data).map_err(
-                |e| DataError::custom("data for ScriptDisplayNames").with_display_context(&e),
-            )?),
+            payload: DataPayload::from_owned(ScriptDisplayNames::from(data)),
         })
     }
 }
 
-impl IterableDataProviderCached<ScriptDisplayNamesV1Marker> for SourceDataProvider {
-    fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-        Ok(self
-            .cldr()?
-            .displaynames()
-            .list_langs()?
-            .filter(|langid| {
-                // The directory might exist without scripts.json
-                self.cldr()
-                    .unwrap()
-                    .displaynames()
-                    .file_exists(langid, "scripts.json")
-                    .unwrap_or_default()
-            })
-            .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
-            .collect())
-    }
-}
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesScriptMediumTinyV1,
+    Script,
+    cldr_serde::displaynames::script::Resource,
+    "scripts.json",
+    scripts,
+    None,
+    script,
+    CoverageLevelForXPath::Basic | CoverageLevelForXPath::Core,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesScriptMediumLightV1,
+    Script,
+    cldr_serde::displaynames::script::Resource,
+    "scripts.json",
+    scripts,
+    None,
+    script,
+    CoverageLevelForXPath::Moderate,
+);
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesScriptMediumHeavyV1,
+    Script,
+    cldr_serde::displaynames::script::Resource,
+    "scripts.json",
+    scripts,
+    None,
+    script,
+    CoverageLevelForXPath::Modern | CoverageLevelForXPath::Comprehensive,
+);
 
-/// Substring used to denote alternative display names data variants for a given script. For example: "BA-alt-short", "TL-alt-variant".
-/// TODO(#3316): Distinguish stand-alone ("Traditional Han") from default ("Traditional")
-const ALT_SUBSTRING: &str = "-alt-";
-/// Substring used to denote short display names data variants for a given script. For example: "az-alt-short".
-const ALT_SHORT_SUBSTRING: &str = "-alt-short";
+crate::displaynames::impl_displaynames_v1!(
+    LocaleNamesScriptShortHeavyV1,
+    Script,
+    cldr_serde::displaynames::script::Resource,
+    "scripts.json",
+    scripts,
+    Some(Alt::Short),
+    script,
+    CoverageLevelForXPath::Modern | CoverageLevelForXPath::Comprehensive,
+);
 
-impl TryFrom<&cldr_serde::displaynames::script::Resource> for ScriptDisplayNamesV1<'static> {
-    type Error = ParseError;
+crate::displaynames::impl_displaynames_legacy_iter_v1!(LocaleNamesScriptV0, "scripts.json");
 
-    fn try_from(other: &cldr_serde::displaynames::script::Resource) -> Result<Self, Self::Error> {
-        let mut names = BTreeMap::new();
-        let mut short_names = BTreeMap::new();
-        for entry in other.main.value.localedisplaynames.scripts.iter() {
-            if let Some(script) = entry.0.strip_suffix(ALT_SHORT_SUBSTRING) {
-                short_names.insert(
-                    Script::try_from_str(script)?.into_tinystr(),
-                    entry.1.as_str(),
-                );
-            } else if !entry.0.contains(ALT_SUBSTRING) {
-                names.insert(
-                    Script::try_from_str(entry.0)?.into_tinystr(),
-                    entry.1.as_str(),
-                );
-            }
+impl From<&cldr_serde::displaynames::script::Resource> for ScriptDisplayNames<'static> {
+    fn from(other: &cldr_serde::displaynames::script::Resource) -> Self {
+        let extracted = extract_names_for_zeromap_struct(
+            &other.main.value.localedisplaynames.scripts,
+            // TODO(#8012): Handle preference-specific alt variants, perhaps with datagen alt flags.
+            &[Alt::Variant, Alt::Secondary, Alt::StandAlone],
+            "script",
+            |script| Some(script.to_tinystr()),
+        );
+
+        let to_zero_map = |map: BTreeMap<tinystr::TinyAsciiStr<4>, &str>| {
+            map.into_iter()
+                .map(|(k, v)| (k.to_unvalidated(), v))
+                .collect()
+        };
+
+        Self {
+            names: to_zero_map(extracted.names),
+            short_names: to_zero_map(extracted.short_names),
         }
-        Ok(Self {
-            // Old CLDR versions may contain trivial entries, so filter
-            names: names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-            short_names: short_names
-                .into_iter()
-                .filter(|&(k, v)| k != v)
-                .map(|(k, v)| (k.to_unvalidated(), v))
-                .collect(),
-        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu::locale::{langid, subtags::script};
+    use icu::locale::{data_locale, subtags::script};
 
     #[test]
     fn test_basic_script_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<ScriptDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesScriptV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -113,7 +118,7 @@ mod tests {
         assert_eq!(
             data.get()
                 .names
-                .get(&script!("Cans").into_tinystr().to_unvalidated())
+                .get(&script!("Cans").to_tinystr().to_unvalidated())
                 .unwrap(),
             "Unified Canadian Aboriginal Syllabics"
         );
@@ -123,9 +128,9 @@ mod tests {
     fn test_basic_script_short_display_names() {
         let provider = SourceDataProvider::new_testing();
 
-        let data: DataPayload<ScriptDisplayNamesV1Marker> = provider
+        let data: DataPayload<LocaleNamesScriptV0> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })
             .unwrap()
@@ -134,9 +139,118 @@ mod tests {
         assert_eq!(
             data.get()
                 .short_names
-                .get(&script!("Cans").into_tinystr().to_unvalidated())
+                .get(&script!("Cans").to_tinystr().to_unvalidated())
                 .unwrap(),
             "UCAS"
+        );
+    }
+
+    #[test]
+    fn test_locale_names_script_medium_light() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesScriptMediumLightV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("Arab").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Arabic");
+    }
+
+    #[test]
+    fn test_locale_names_script_medium_tiny() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesScriptMediumTinyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("Latn").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Latin");
+    }
+
+    #[test]
+    fn test_locale_names_script_medium_heavy() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesScriptMediumHeavyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("Cans").unwrap(),
+                    &data_locale!("en"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "Unified Canadian Aboriginal Syllabics");
+    }
+
+    #[test]
+    fn test_locale_names_script_short_heavy() {
+        let provider = SourceDataProvider::new_testing();
+
+        let data: DataPayload<LocaleNamesScriptShortHeavyV1> = provider
+            .load(DataRequest {
+                id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                    DataMarkerAttributes::try_from_str("Cans").unwrap(),
+                    &data_locale!("en-001"),
+                ),
+                ..Default::default()
+            })
+            .unwrap()
+            .payload;
+
+        assert_eq!(&**data.get(), "UCAS");
+    }
+
+    /// The cartesian product of Script x (Short | Medium) x (Minimal | Core | Extended)
+    /// contains some data markers that are uninhabited. This test ensures that every script display name
+    /// key and coverage tier combination in CLDR is covered by an existing marker, so if future CLDR releases
+    /// add data for uninhabited markers, we learn about it and can take action.
+    #[test]
+    #[cfg(feature = "networking")]
+    fn test_empty_coverage_tiers_assert_no_data() {
+        use crate::displaynames::coverage_experimental::CheckAltCoverage;
+
+        let provider = SourceDataProvider::new();
+        let cldr = provider.cldr().unwrap();
+
+        crate::displaynames::coverage_experimental::for_each_cldr_key_and_tier(
+            cldr,
+            "scripts.json",
+            // TODO(#8012): Handle preference-specific alt variants, perhaps with datagen alt flags.
+            &[Alt::Variant, Alt::Secondary, Alt::StandAlone],
+            |l| &l.script,
+            |res: &cldr_serde::displaynames::script::Resource| {
+                &res.main.value.localedisplaynames.scripts
+            },
+            |locale, key, tier| {
+                if LocaleNamesScriptMediumTinyV1::contains_key(key, tier)
+                    || LocaleNamesScriptMediumLightV1::contains_key(key, tier)
+                    || LocaleNamesScriptMediumHeavyV1::contains_key(key, tier)
+                    || LocaleNamesScriptShortHeavyV1::contains_key(key, tier)
+                {
+                    return;
+                }
+
+                panic!(
+                    "Found unexpected alt, menu, and tier combination for script: {key:?} in locale: {locale:?} and tier: {tier:?}"
+                );
+            },
         );
     }
 }

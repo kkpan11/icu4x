@@ -2,9 +2,10 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+use crate::datapath::marker_to_path;
 use crate::manifest::Manifest;
-use icu_provider::prelude::*;
 use icu_provider::DynamicDryDataProvider;
+use icu_provider::prelude::*;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::fs;
@@ -24,13 +25,13 @@ use std::path::PathBuf;
 /// use writeable::assert_writeable_eq;
 ///
 /// // Create a DataProvider from data files stored in a filesystem directory:
-/// let provider =
-///     FsDataProvider::try_new("tests/data/json".into()).expect("Directory exists");
+/// let provider = FsDataProvider::try_new("tests/data/json".into())
+///     .expect("Directory exists");
 ///
 /// // Check that it works:
 /// let formatter = HelloWorldFormatter::try_new_with_buffer_provider(
 ///     &provider,
-///     &locale!("la").into(),
+///     locale!("la").into(),
 /// )
 /// .expect("locale exists");
 ///
@@ -65,35 +66,55 @@ impl FsDataProvider {
         marker: DataMarkerInfo,
         req: DataRequest,
     ) -> Result<(DataResponseMetadata, PathBuf), DataError> {
-        if marker.is_singleton && !req.id.locale.is_und() {
+        if marker.is_singleton && !req.id.locale.is_unknown() {
             return Err(DataErrorKind::InvalidRequest.with_req(marker, req));
         }
-        let mut path = self.root.join(marker.path.as_str());
+        let mut path = marker_to_path(marker.id, &self.root);
         if !path.exists() {
             return Err(DataErrorKind::MarkerNotFound.with_req(marker, req));
         }
-        if !req.id.marker_attributes.is_empty() {
-            if req.metadata.attributes_prefix_match {
-                path.push(
-                    std::fs::read_dir(&path)?
-                        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-                        .filter(|c| c.starts_with(req.id.marker_attributes.as_str()))
-                        .min()
-                        .ok_or(DataErrorKind::IdentifierNotFound.with_req(marker, req))?,
-                );
-            } else {
-                path.push(req.id.marker_attributes.as_str());
-            }
+        let checksum = if marker.is_singleton {
+            fs::read_to_string(format!("{}_checksum", path.display()))
+        } else {
+            fs::read_to_string(path.join(".checksum"))
         }
-        let mut path = path.into_os_string();
-        write!(&mut path, "/{}", req.id.locale).expect("infallible");
-        let mut path = PathBuf::from(path);
+        .ok()
+        .and_then(|s| s.parse().ok());
+        if !marker.is_singleton {
+            if !req.id.marker_attributes.is_empty() {
+                if req.metadata.attributes_prefix_match {
+                    path.push(
+                        fs::read_dir(&path)?
+                            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                            .filter(|c| c.starts_with(req.id.marker_attributes.as_str()))
+                            .min()
+                            .ok_or_else(|| {
+                                DataErrorKind::IdentifierNotFound.with_req(marker, req)
+                            })?,
+                    );
+                } else {
+                    let attr_path = req.id.marker_attributes.as_str();
+                    // Data marker attributes are validated to be alphanumeric
+                    // + underscore/dash/slash. This is defense-in-depth
+                    // against potential path traversal attacks: we ensure that
+                    // the path does not start with a slash, and does not contain
+                    // dots or backslashes.
+                    assert!(!attr_path.starts_with('/'));
+                    assert!(!attr_path.contains(['\\', '.']));
+                    path.push(attr_path);
+                }
+            }
+            let mut string_path = path.into_os_string();
+            let _infallible = write!(&mut string_path, "/{}", req.id.locale);
+            path = PathBuf::from(string_path);
+        }
         path.set_extension(self.manifest.file_extension);
         if !path.exists() {
             return Err(DataErrorKind::IdentifierNotFound.with_req(marker, req));
         }
         let mut metadata = DataResponseMetadata::default();
         metadata.buffer_format = Some(self.manifest.buffer_format);
+        metadata.checksum = checksum;
         Ok((metadata, path))
     }
 }

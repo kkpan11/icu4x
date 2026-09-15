@@ -4,40 +4,41 @@
 
 //! Options for [`CurrencyFormatter`](crate::dimension::currency::formatter::CurrencyFormatter).
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 /// A collection of configuration options that determine the formatting behavior of
 /// [`CurrencyFormatter`](crate::dimension::currency::formatter::CurrencyFormatter).
-#[derive(Copy, Debug, Eq, PartialEq, Clone, Default)]
+#[derive(Copy, Debug, Eq, PartialEq, Clone, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub struct CurrencyFormatterOptions {
-    /// The width of the currency format.
-    pub width: Width,
+    /// Whether to use standard or accounting currency patterns.
+    pub usage: CurrencyUsage,
 }
 
-impl From<Width> for CurrencyFormatterOptions {
-    fn from(width: Width) -> Self {
-        Self { width }
+impl From<CurrencyUsage> for CurrencyFormatterOptions {
+    fn from(usage: CurrencyUsage) -> Self {
+        Self { usage }
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+/// Controls whether currency formatting uses standard or accounting patterns.
+///
+/// Corresponds to ECMA-402 `currencySign`.
+#[derive(Copy, Debug, Eq, PartialEq, Clone, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
-pub enum Width {
-    /// Format the currency with the standard (short) currency symbol.
+pub enum CurrencyUsage {
+    /// Standard currency formatting (default).
     ///
-    /// For example, 1 USD formats as "$1.00" in en-US and "US$1" in most other locales.
-    Short,
+    /// Negative values typically use a leading minus sign, e.g. `-$1,234.56`.
+    #[default]
+    Standard,
 
-    /// Format the currency with the narrow currency symbol.
+    /// Accounting currency formatting.
     ///
-    /// The narrow symbol may be ambiguous, so it should be evident from context which
-    /// currency is being represented.
-    ///
-    /// For example, 1 USD formats as "$1.00" in most locales.
-    Narrow,
-}
-
-impl Default for Width {
-    fn default() -> Self {
-        Self::Short
-    }
+    /// Negative values may use locale-specific accounting patterns such as
+    /// parentheses, e.g. `($1,234.56)` in `en-US`.
+    Accounting,
 }

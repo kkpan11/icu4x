@@ -35,19 +35,25 @@ mod key;
 mod value;
 
 use core::cmp::Ordering;
+#[cfg(feature = "alloc")]
 use core::str::FromStr;
 
 pub use fields::Fields;
 #[doc(inline)]
-pub use key::{key, Key};
+pub use key::{Key, key};
 pub use value::Value;
 
+#[cfg(feature = "alloc")]
 use super::ExtensionType;
-use crate::parser::SubtagIterator;
-use crate::parser::{parse_language_identifier_from_iter, ParseError, ParserMode};
-use crate::shortvec::ShortBoxSlice;
-use crate::subtags::{self, Language};
 use crate::LanguageIdentifier;
+#[cfg(feature = "alloc")]
+use crate::parser::SubtagIterator;
+#[cfg(feature = "alloc")]
+use crate::parser::{ParseError, ParserMode, parse_language_identifier_from_iter};
+#[cfg(feature = "alloc")]
+use crate::shortvec::ShortBoxSlice;
+use crate::subtags;
+#[cfg(feature = "alloc")]
 use litemap::LiteMap;
 
 pub(crate) const TRANSFORM_EXT_CHAR: char = 't';
@@ -109,12 +115,18 @@ impl Transform {
 
     /// A constructor which takes a str slice, parses it and
     /// produces a well-formed [`Transform`].
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
     #[inline]
+    #[cfg(feature = "alloc")]
     pub fn try_from_str(s: &str) -> Result<Self, ParseError> {
         Self::try_from_utf8(s.as_bytes())
     }
 
     /// See [`Self::try_from_str`]
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    #[cfg(feature = "alloc")]
     pub fn try_from_utf8(code_units: &[u8]) -> Result<Self, ParseError> {
         let mut iter = SubtagIterator::new(code_units);
 
@@ -157,7 +169,7 @@ impl Transform {
         self.fields.clear();
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub(crate) fn as_tuple(
         &self,
     ) -> (
@@ -182,17 +194,18 @@ impl Transform {
         self.as_tuple().cmp(&other.as_tuple())
     }
 
+    #[cfg(feature = "alloc")]
     pub(crate) fn try_from_iter(iter: &mut SubtagIterator) -> Result<Self, ParseError> {
         let mut tlang = None;
         let mut tfields = LiteMap::new();
 
-        if let Some(subtag) = iter.peek() {
-            if Language::try_from_utf8(subtag).is_ok() {
-                tlang = Some(parse_language_identifier_from_iter(
-                    iter,
-                    ParserMode::Partial,
-                )?);
-            }
+        if let Some(subtag) = iter.peek()
+            && subtags::Language::try_from_utf8(subtag).is_ok()
+        {
+            tlang = Some(parse_language_identifier_from_iter(
+                iter,
+                ParserMode::Partial,
+            )?);
         }
 
         let mut current_tkey = None;
@@ -259,6 +272,8 @@ impl Transform {
     }
 }
 
+/// ✨ *Enabled with the `alloc` Cargo feature.*
+#[cfg(feature = "alloc")]
 impl FromStr for Transform {
     type Err = ParseError;
 
@@ -268,7 +283,7 @@ impl FromStr for Transform {
     }
 }
 
-writeable::impl_display_with_writeable!(Transform);
+writeable::impl_display_with_writeable!(Transform, #[cfg(feature = "alloc")]);
 
 impl writeable::Writeable for Transform {
     fn write_to<W: core::fmt::Write + ?Sized>(&self, sink: &mut W) -> core::fmt::Result {

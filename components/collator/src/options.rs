@@ -8,14 +8,62 @@
 //! This module contains the types that are part of the API for setting
 //! the options for the collator.
 
-use crate::elements::{CASE_MASK, TERTIARY_MASK};
+use crate::{
+    CollatorPreferences,
+    elements::{CASE_MASK, TERTIARY_MASK},
+    preferences::{CollationCaseFirst, CollationNumericOrdering},
+    provider::CollationMetadata,
+};
 
-/// The collation strength that indicates how many levels to compare.
+/// The collation strength that indicates how many levels to compare. The primary
+/// level considers base letters, i.e. 'a' and 'b' are unequal but 'E' and 'é'
+/// are equal, with further levels dealing with distinctions such as accents
+/// and case.
+///
+/// Note that what constitutes a base letter depends on the language and
+/// not on Unicode character properties. For example, 'ö' is analyzed as a base letter
+/// for various languages (e.g. Estonian, Finnish, Icelandic, Swedish, and Turkish),
+/// so it is distinct from 'o' even on the primary level in such languages.
+/// Inputs that are equal in fold case (as tailored for e.g. Turkish) are expected
+/// to be equal on the primary level. For example, "ß" is primary-equal with "ss".
+/// Characters that are graphically ligature-like can be primary-equal with what
+/// they appear to be ligatures of. For example, in the root collation (but not
+/// in e.g. Danish and Norwegian) "æ" is primary-equal with "ae".
+///
 /// If an earlier level isn't equal, the earlier level is decisive.
 /// If the result is equal on a level, but the strength is higher,
 /// the comparison proceeds to the next level.
 ///
-/// Note: The bit layout of `CollatorOptions` requires `Strength`
+/// Note that lowering the strength means that more user-perceptible differences
+/// compare as equal. This may make sense when sorting more complex structures
+/// where the string to be compared is just one field, and ties between strings
+/// that differ only in case, accent, or similar are resolved by comparing some
+/// secondary field in the larger structure to be sorted.
+///
+/// Therefore, if the sort is just a string sort without some other field for
+/// resolving ties, lowering the strength means that factors that don't make
+/// sense to the user (such as the order of items prior to sorting with a stable
+/// sort algorithm or the internal details of a sorting algorithm that doesn't
+/// provide the stability property) affect the relative order of strings that
+/// do have user-perceptible differences particularly in accents or case.
+///
+/// Lowering the strength is less of a perfomance optimization that it may seem
+/// directly from the above description. As described above, in the case
+/// of identical strings to be compared, the algorithm has to work though all
+/// the levels included in the strength without an early exit. However, this
+/// collator implements an identical prefix optimization, which examines the
+/// code units of the strings to be compared to skip the identical prefix before
+/// starting the actual collation algorithm. When the strings to be compared
+/// are identical on the byte level, they are found to be equal without the
+/// actual collation algorithm running at all! Therefore, the strength setting
+/// only has an effect (whether order effect or performance effect) for
+/// comparisons where the strings to be compared are not equal on the byte level
+/// but are equal on the primary level/strength. The common cases are that
+/// a comparison is decided on the primary level or the strings are byte
+/// equal, which narrows the performance effect of lowering the strength
+/// setting.
+///
+/// Note: The bit layout of `CollatorOptionsBitField` requires `Strength`
 /// to fit in 3 bits.
 #[derive(Eq, PartialEq, Debug, Copy, Clone, PartialOrd, Ord)]
 #[repr(u8)]
@@ -27,11 +75,11 @@ pub enum Strength {
     /// to ECMA-402 sensitivity "case" with [`CaseLevel::On`].
     ///
     /// ```
-    /// use icu::collator::*;
+    /// use icu::collator::{options::*, *};
     ///
-    /// let mut options = CollatorOptions::new();
+    /// let mut options = CollatorOptions::default();
     /// options.strength = Some(Strength::Primary);
-    /// let collator = Collator::try_new(&Default::default(), options).unwrap();
+    /// let collator = Collator::try_new(Default::default(), options).unwrap();
     /// assert_eq!(collator.compare("E", "é"), core::cmp::Ordering::Equal);
     /// ```
     Primary = 0,
@@ -41,11 +89,11 @@ pub enum Strength {
     /// to the ECMA-402 sensitivity "accent".
     ///
     /// ```
-    /// use icu::collator::*;
+    /// use icu::collator::{options::*, *};
     ///
-    /// let mut options = CollatorOptions::new();
+    /// let mut options = CollatorOptions::default();
     /// options.strength = Some(Strength::Secondary);
-    /// let collator = Collator::try_new(&Default::default(), options).unwrap();
+    /// let collator = Collator::try_new(Default::default(), options).unwrap();
     /// assert_eq!(collator.compare("E", "e"), core::cmp::Ordering::Equal);
     /// assert_eq!(collator.compare("e", "é"), core::cmp::Ordering::Less);
     /// assert_eq!(collator.compare("あ", "ア"), core::cmp::Ordering::Equal);
@@ -65,12 +113,13 @@ pub enum Strength {
     /// sensitivity "variant".
     ///
     /// ```
-    /// use icu::collator::*;
+    /// use icu::collator::{*, options::*};
+    /// use icu::locale::locale;
     ///
-    /// let mut options = CollatorOptions::new();
+    /// let mut options = CollatorOptions::default();
     /// options.strength = Some(Strength::Tertiary);
     /// let collator =
-    ///   Collator::try_new(&Default::default(),
+    ///   Collator::try_new(Default::default(),
     ///                     options).unwrap();
     /// assert_eq!(collator.compare("E", "e"),
     ///            core::cmp::Ordering::Greater);
@@ -85,9 +134,8 @@ pub enum Strength {
     /// assert_eq!(collator.compare("e", "ｅ"), // Full-width e
     ///            core::cmp::Ordering::Less);
     ///
-    /// let locale = icu::locale::locale!("ja").into();
     /// let ja_collator =
-    ///   Collator::try_new(&locale, options).unwrap();
+    ///   Collator::try_new(locale!("ja").into(), options).unwrap();
     /// assert_eq!(ja_collator.compare("E", "e"),
     ///            core::cmp::Ordering::Greater);
     /// assert_eq!(ja_collator.compare("e", "é"),
@@ -103,21 +151,21 @@ pub enum Strength {
     /// ```
     Tertiary = 2,
 
-    /// Compare also on the quaternary level. For Japanese, Higana
+    /// Compare also on the quaternary level. For Japanese, Hiragana
     /// and Katakana are distinguished at the quaternary level. Also,
     /// if `AlternateHandling::Shifted` is used, the collation
     /// elements whose level gets shifted are shifted to this
     /// level.
     ///
     /// ```
-    /// use icu::collator::*;
+    /// use icu::collator::{*, options::*};
+    /// use icu::locale::locale;
     ///
-    /// let mut options = CollatorOptions::new();
+    /// let mut options = CollatorOptions::default();
     /// options.strength = Some(Strength::Quaternary);
     ///
-    /// let ja_locale = icu::locale::locale!("ja").into();
     /// let ja_collator =
-    ///   Collator::try_new(&ja_locale, options).unwrap();
+    ///   Collator::try_new(locale!("ja").into(), options).unwrap();
     /// assert_eq!(ja_collator.compare("あ", "ア"),
     ///            core::cmp::Ordering::Less);
     /// assert_eq!(ja_collator.compare("ア", "ｱ"),
@@ -128,12 +176,12 @@ pub enum Strength {
     /// // Even this level doesn't distinguish everything,
     /// // e.g. Hebrew cantillation marks are still ignored.
     /// let collator =
-    ///   Collator::try_new(&Default::default(),
+    ///   Collator::try_new(Default::default(),
     ///                     options).unwrap();
     /// assert_eq!(collator.compare("דחי", "דחי֭"),
     ///            core::cmp::Ordering::Equal);
     /// ```
-    /// TODO: Thai example.
+    // TODO: Thai example.
     Quaternary = 3,
 
     /// Compare the NFD form by code point order as the quinary
@@ -146,21 +194,21 @@ pub enum Strength {
     /// distinguishing full-width and half-width forms.
     ///
     /// ```
-    /// use icu::collator::*;
+    /// use icu::collator::{*, options::*};
+    /// use icu::locale::locale;
     ///
-    /// let mut options = CollatorOptions::new();
+    /// let mut options = CollatorOptions::default();
     /// options.strength = Some(Strength::Identical);
     ///
-    /// let ja_locale = icu::locale::locale!("ja").into();
     /// let ja_collator =
-    ///   Collator::try_new(&ja_locale, options).unwrap();
+    ///   Collator::try_new(locale!("ja").into(), options).unwrap();
     /// assert_eq!(ja_collator.compare("ア", "ｱ"),
     ///            core::cmp::Ordering::Less);
     /// assert_eq!(ja_collator.compare("e", "ｅ"), // Full-width e
     ///            core::cmp::Ordering::Less);
     ///
     /// let collator =
-    ///   Collator::try_new(&Default::default(),
+    ///   Collator::try_new(Default::default(),
     ///                     options).unwrap();
     /// assert_eq!(collator.compare("דחי", "דחי֭"),
     ///            core::cmp::Ordering::Less);
@@ -183,24 +231,10 @@ pub enum AlternateHandling {
     // Possible future values: ShiftTrimmed, Blanked
 }
 
-/// Treatment of case. (Large and small kana
-/// differences are treated as case differences.)
-#[derive(Eq, PartialEq, Debug, Copy, Clone, PartialOrd, Ord)]
-#[repr(u8)]
-#[non_exhaustive]
-pub enum CaseFirst {
-    /// Use the default tertiary weights.
-    Off = 0,
-    /// Lower case first.
-    LowerFirst = 1,
-    /// Upper case first.
-    UpperFirst = 2,
-}
-
 /// What characters get shifted to the quaternary level
 /// with `AlternateHandling::Shifted`.
 #[derive(Eq, PartialEq, Debug, Copy, Clone)]
-#[repr(u8)]
+#[repr(u8)] // This repr is necessary for transmute safety
 #[non_exhaustive]
 pub enum MaxVariable {
     /// Characters classified as spaces are shifted.
@@ -214,6 +248,16 @@ pub enum MaxVariable {
     /// Characters classified as spaces, punctuation,
     /// symbols, or currency symbols are shifted.
     Currency = 3,
+}
+
+#[cfg(feature = "serde")]
+impl MaxVariable {
+    /// The number of variants in `MaxVariable` (Space, Punctuation, Symbol, Currency),
+    /// which correspond to the "real" special primaries.
+    ///
+    /// `variant_count` isn't stable yet:
+    /// <https://github.com/rust-lang/rust/issues/73662>
+    pub(crate) const VARIANT_COUNT: usize = MaxVariable::Currency as usize + 1;
 }
 
 /// Whether to distinguish case in sorting, even for sorting levels higher
@@ -233,37 +277,10 @@ pub enum CaseLevel {
     On = 1,
 }
 
-/// When set to `On`, any sequence of decimal digits is sorted at a primary level according to the numeric value.
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-#[repr(u8)]
-#[non_exhaustive]
-pub enum Numeric {
-    /// Leave off the numeric option.  Decimal digits will be treated as characters by the default
-    /// algorithm.
-    Off = 0,
-    /// Turn on numeric sorting for any sequence of decimal digits, sorting at
-    /// a primary level according to the numeric value.
-    On = 1,
-}
-
-/// Whether second level compares the last accent difference
-/// instead of the first accent difference.
-#[derive(Eq, PartialEq, Debug, Copy, Clone)]
-#[repr(u8)]
-#[non_exhaustive]
-pub enum BackwardSecondLevel {
-    /// Leave off the backward second level option. Diacritics in the second level will be ordered by
-    /// default from beginning to end.
-    Off = 0,
-    /// Turn on backward second level ordering so that the second level compares backwards, starting
-    /// from the last diacritic letter and moving towards the beginning.
-    On = 1,
-}
-
 /// Options settable by the user of the API.
 ///
 /// With the exception of reordering (BCP47 `kr`), options that can by implied by locale are
-/// also settable via [`CollatorOptions`].
+/// set via [`CollatorPreferences`].
 ///
 /// See the [spec](https://www.unicode.org/reports/tr35/tr35-collation.html#Setting_Options).
 ///
@@ -304,29 +321,14 @@ pub enum BackwardSecondLevel {
 /// See the [spec](https://www.unicode.org/reports/tr35/tr35-collation.html#Case_Parameters).
 /// This is the BCP47 key `kc`. The default is [`CaseLevel::Off`].
 ///
-/// ## Case First
-///
-/// See the [spec](https://www.unicode.org/reports/tr35/tr35-collation.html#Case_Parameters).
-/// This is the BCP47 key `kf`. Three possibilities: [`CaseFirst::Off`] (default,
-/// except for Danish and Maltese), [`CaseFirst::LowerFirst`], and [`CaseFirst::UpperFirst`]
-/// (default for Danish and Maltese).
-///
-/// ## Backward second level
-///
-/// Compare the second level in backward order. This is the BCP47 key `kb`. `kb`
-/// is prohibited by ECMA-402. The default is [`BackwardSecondLevel::Off`], except
-/// for Canadian French.
-///
-/// ## Numeric
-///
-/// This is the BCP47 key `kn`. When set to [`Numeric::On`], any sequence of decimal
-/// digits (General_Category = Nd) is sorted at the primary level according to the
-/// numeric value. The default is [`Numeric::Off`].
-///
 /// # Unsupported BCP47 options
 ///
 /// Reordering (BCP47 `kr`) currently cannot be set via the API and is implied
 /// by the locale of the collation. `kr` is prohibited by ECMA-402.
+///
+/// Backward second level (BCP47 `kb`) cannot be set via the API and is implied
+/// by the locale of the collation (in practice only `fr-CA` turns it on and it's
+/// off otherwise). `kb` is prohibited by ECMA-402.
 ///
 /// Normalization is always enabled and cannot be turned off. Therefore, there
 /// is no option corresponding to BCP47 `kk`. `kk` is prohibited by ECMA-402.
@@ -360,29 +362,20 @@ pub struct CollatorOptions {
     pub strength: Option<Strength>,
     /// User-specified alternate handling collation option.
     pub alternate_handling: Option<AlternateHandling>,
-    /// User-specified case first collation option.
-    pub case_first: Option<CaseFirst>,
     /// User-specified max variable collation option.
     pub max_variable: Option<MaxVariable>,
     /// User-specified case level collation option.
     pub case_level: Option<CaseLevel>,
-    /// User-specified numeric collation option.
-    pub numeric: Option<Numeric>,
-    /// User-specified backward second level collation option.
-    pub backward_second_level: Option<BackwardSecondLevel>,
 }
 
 impl CollatorOptions {
     /// Create a new `CollatorOptions` with the defaults.
-    pub const fn new() -> Self {
+    pub const fn default() -> Self {
         Self {
             strength: None,
             alternate_handling: None,
-            case_first: None,
             max_variable: None,
             case_level: None,
-            numeric: None,
-            backward_second_level: None,
         }
     }
 }
@@ -397,11 +390,29 @@ impl From<ResolvedCollatorOptions> for CollatorOptions {
         Self {
             strength: Some(options.strength),
             alternate_handling: Some(options.alternate_handling),
-            case_first: Some(options.case_first),
             max_variable: Some(options.max_variable),
             case_level: Some(options.case_level),
-            numeric: Some(options.numeric),
-            backward_second_level: Some(options.backward_second_level),
+        }
+    }
+}
+
+// Make it possible to easily copy the resolved preferences of
+// one collator into another collator.
+impl From<ResolvedCollatorOptions> for CollatorPreferences {
+    /// Convenience conversion for copying the preferences from an
+    /// existing collator into a new one.
+    ///
+    /// Note that some preferences may not be fully preserved when recovering them
+    /// from an already initialized collator e.g [`LocalePreferences`] and [`CollationType`], because
+    /// those are only relevant when loading the collation data.
+    ///
+    /// [`LocalePreferences`]: icu_locale_core::preferences::LocalePreferences
+    /// [`CollationType`]: crate::preferences::CollationType
+    fn from(options: ResolvedCollatorOptions) -> CollatorPreferences {
+        CollatorPreferences {
+            case_first: Some(options.case_first),
+            numeric_ordering: Some(options.numeric),
+            ..Default::default()
         }
     }
 }
@@ -417,15 +428,13 @@ pub struct ResolvedCollatorOptions {
     /// Resolved alternate handling collation option.
     pub alternate_handling: AlternateHandling,
     /// Resolved case first collation option.
-    pub case_first: CaseFirst,
+    pub case_first: CollationCaseFirst,
     /// Resolved max variable collation option.
     pub max_variable: MaxVariable,
     /// Resolved case level collation option.
     pub case_level: CaseLevel,
     /// Resolved numeric collation option.
-    pub numeric: Numeric,
-    /// Resolved backward second level collation option.
-    pub backward_second_level: BackwardSecondLevel,
+    pub numeric: CollationNumericOrdering,
 }
 
 impl From<CollatorOptionsBitField> for ResolvedCollatorOptions {
@@ -441,21 +450,23 @@ impl From<CollatorOptionsBitField> for ResolvedCollatorOptions {
                 CaseLevel::Off
             },
             numeric: if options.numeric() {
-                Numeric::On
+                CollationNumericOrdering::True
             } else {
-                Numeric::Off
+                CollationNumericOrdering::False
             },
-            backward_second_level: if options.backward_second_level() {
-                BackwardSecondLevel::On
-            } else {
-                BackwardSecondLevel::Off
-            },
+            // `options.backward_second_level()` not exposed.
         }
     }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct CollatorOptionsBitField(u32);
+
+impl Default for CollatorOptionsBitField {
+    fn default() -> Self {
+        Self::default()
+    }
+}
 
 impl CollatorOptionsBitField {
     /// Bits 0..2 : Strength
@@ -474,9 +485,9 @@ impl CollatorOptionsBitField {
     ///             other tertiary values)
     ///             unless case level is on (when they are *moved* into the separate case level).
     ///             By default, the case bits are removed from the tertiary weight (ignored).
-    ///             When CASE_FIRST is off, UPPER_FIRST must be off too, corresponding to
-    ///             the tri-value UCOL_CASE_FIRST attribute: UCOL_OFF vs. UCOL_LOWER_FIRST vs.
-    ///             UCOL_UPPER_FIRST.
+    ///             When `CASE_FIRST` is off, `UPPER_FIRST` must be off too, corresponding to
+    ///             the tri-value `UCOL_CASE_FIRST` attribute: `UCOL_OFF` vs. `UCOL_LOWER_FIRST` vs.
+    ///             `UCOL_UPPER_FIRST`.
     const CASE_FIRST_MASK: u32 = 1 << 9;
     /// Bit    10 : Insert the case level between the secondary and tertiary levels.
     const CASE_LEVEL_MASK: u32 = 1 << 10;
@@ -484,6 +495,8 @@ impl CollatorOptionsBitField {
     const BACKWARD_SECOND_LEVEL_MASK: u32 = 1 << 11;
     /// Bit    12 : Numeric
     const NUMERIC_MASK: u32 = 1 << 12;
+    /// Bit    13 : Lithuanian dot above
+    const LITHUANIAN_DOT_ABOVE_MASK: u32 = 1 << 13;
 
     /// Whether strength is explicitly set.
     const EXPLICIT_STRENGTH_MASK: u32 = 1 << 31;
@@ -500,13 +513,13 @@ impl CollatorOptionsBitField {
     /// Whether numeric is explicitly set.
     const EXPLICIT_NUMERIC_MASK: u32 = 1 << 25;
 
-    /// Create a new `CollatorOptionsBitField` with the defaults.
-    pub const fn new() -> Self {
+    /// Create a new [`CollatorOptionsBitField`] with the defaults.
+    pub const fn default() -> Self {
         Self(Strength::Tertiary as u32)
     }
 
     /// This is the BCP47 key `ks`.
-    pub fn strength(&self) -> Strength {
+    pub fn strength(self) -> Strength {
         let mut bits = self.0 & CollatorOptionsBitField::STRENGTH_MASK;
         if !(bits <= 3 || bits == 7) {
             debug_assert!(false, "Bad value for strength.");
@@ -514,13 +527,13 @@ impl CollatorOptionsBitField {
             // lower than `Identical`, clamp to `Quaternary`.
             bits = 3;
         }
-        // By construction above in range and, therefore,
-        // never UB.
-        unsafe { core::mem::transmute(bits as u8) }
+        // Safety: Strength is repr(u8) and has discriminants between 0 and 7. The
+        // above code ensures that, since the mask puts us `≤ 8`
+        unsafe { core::mem::transmute::<u8, Strength>(bits as u8) }
     }
 
     /// This is the BCP47 key `ks`. See the enum for examples.
-    pub fn set_strength(&mut self, strength: Option<Strength>) {
+    const fn set_strength(&mut self, strength: Option<Strength>) {
         self.0 &= !CollatorOptionsBitField::STRENGTH_MASK;
         if let Some(strength) = strength {
             self.0 |= CollatorOptionsBitField::EXPLICIT_STRENGTH_MASK;
@@ -532,11 +545,11 @@ impl CollatorOptionsBitField {
 
     /// The maximum character class that `AlternateHandling::Shifted`
     /// applies to.
-    pub fn max_variable(&self) -> MaxVariable {
+    pub fn max_variable(self) -> MaxVariable {
         // Safe, because we mask two bits and shift them to the low
         // two bits and the enum has values for 0 to 3, inclusive.
         unsafe {
-            core::mem::transmute(
+            core::mem::transmute::<u8, MaxVariable>(
                 ((self.0 & CollatorOptionsBitField::MAX_VARIABLE_MASK)
                     >> CollatorOptionsBitField::MAX_VARIABLE_SHIFT) as u8,
             )
@@ -545,7 +558,7 @@ impl CollatorOptionsBitField {
 
     /// The maximum character class that `AlternateHandling::Shifted`
     /// applies to. See the enum for examples.
-    pub fn set_max_variable(&mut self, max_variable: Option<MaxVariable>) {
+    const fn set_max_variable(&mut self, max_variable: Option<MaxVariable>) {
         self.0 &= !CollatorOptionsBitField::MAX_VARIABLE_MASK;
         if let Some(max_variable) = max_variable {
             self.0 |= CollatorOptionsBitField::EXPLICIT_MAX_VARIABLE_MASK;
@@ -557,7 +570,7 @@ impl CollatorOptionsBitField {
 
     /// Whether certain characters are moved from the primary level to
     /// the quaternary level.
-    pub fn alternate_handling(&self) -> AlternateHandling {
+    pub fn alternate_handling(self) -> AlternateHandling {
         if (self.0 & CollatorOptionsBitField::ALTERNATE_HANDLING_MASK) != 0 {
             AlternateHandling::Shifted
         } else {
@@ -567,11 +580,11 @@ impl CollatorOptionsBitField {
 
     /// Whether certain characters are moved from the primary level to
     /// the quaternary level. See the enum for examples.
-    pub fn set_alternate_handling(&mut self, alternate_handling: Option<AlternateHandling>) {
+    const fn set_alternate_handling(&mut self, alternate_handling: Option<AlternateHandling>) {
         self.0 &= !CollatorOptionsBitField::ALTERNATE_HANDLING_MASK;
         if let Some(alternate_handling) = alternate_handling {
             self.0 |= CollatorOptionsBitField::EXPLICIT_ALTERNATE_HANDLING_MASK;
-            if alternate_handling == AlternateHandling::Shifted {
+            if matches!(alternate_handling, AlternateHandling::Shifted) {
                 self.0 |= CollatorOptionsBitField::ALTERNATE_HANDLING_MASK;
             }
         } else {
@@ -580,7 +593,7 @@ impl CollatorOptionsBitField {
     }
 
     /// Whether there's a dedicated case level.
-    pub fn case_level(&self) -> bool {
+    pub fn case_level(self) -> bool {
         (self.0 & CollatorOptionsBitField::CASE_LEVEL_MASK) != 0
     }
 
@@ -592,7 +605,7 @@ impl CollatorOptionsBitField {
     /// "case".
     ///
     /// See [the ICU guide](https://unicode-org.github.io/icu/userguide/collation/concepts.html#caselevel).
-    pub fn set_case_level(&mut self, case_level: Option<bool>) {
+    const fn set_case_level(&mut self, case_level: Option<bool>) {
         self.0 &= !CollatorOptionsBitField::CASE_LEVEL_MASK;
         if let Some(case_level) = case_level {
             self.0 |= CollatorOptionsBitField::EXPLICIT_CASE_LEVEL_MASK;
@@ -604,7 +617,7 @@ impl CollatorOptionsBitField {
         }
     }
 
-    pub fn set_case_level_from_enum(&mut self, case_level: Option<CaseLevel>) {
+    const fn set_case_level_from_enum(&mut self, case_level: Option<CaseLevel>) {
         match case_level {
             Some(CaseLevel::On) => {
                 self.set_case_level(Some(true));
@@ -616,15 +629,15 @@ impl CollatorOptionsBitField {
         }
     }
 
-    fn case_first(&self) -> CaseFirst {
+    fn case_first(self) -> CollationCaseFirst {
         if (self.0 & CollatorOptionsBitField::CASE_FIRST_MASK) != 0 {
             if (self.0 & CollatorOptionsBitField::UPPER_FIRST_MASK) != 0 {
-                CaseFirst::UpperFirst
+                CollationCaseFirst::Upper
             } else {
-                CaseFirst::LowerFirst
+                CollationCaseFirst::Lower
             }
         } else {
-            CaseFirst::Off
+            CollationCaseFirst::False
         }
     }
 
@@ -632,19 +645,22 @@ impl CollatorOptionsBitField {
     /// level.
     ///
     /// See [the ICU guide](https://unicode-org.github.io/icu/userguide/collation/concepts.html#caselevel).
-    pub fn set_case_first(&mut self, case_first: Option<CaseFirst>) {
+    const fn set_case_first(&mut self, case_first: Option<CollationCaseFirst>) {
         self.0 &=
             !(CollatorOptionsBitField::CASE_FIRST_MASK | CollatorOptionsBitField::UPPER_FIRST_MASK);
         if let Some(case_first) = case_first {
             self.0 |= CollatorOptionsBitField::EXPLICIT_CASE_FIRST_MASK;
             match case_first {
-                CaseFirst::Off => {}
-                CaseFirst::LowerFirst => {
+                CollationCaseFirst::False => {}
+                CollationCaseFirst::Lower => {
                     self.0 |= CollatorOptionsBitField::CASE_FIRST_MASK;
                 }
-                CaseFirst::UpperFirst => {
+                CollationCaseFirst::Upper => {
                     self.0 |= CollatorOptionsBitField::CASE_FIRST_MASK;
                     self.0 |= CollatorOptionsBitField::UPPER_FIRST_MASK;
+                }
+                _ => {
+                    debug_assert!(false, "unknown variant");
                 }
             }
         } else {
@@ -654,13 +670,13 @@ impl CollatorOptionsBitField {
 
     /// Whether second level compares the last accent difference
     /// instead of the first accent difference.
-    pub fn backward_second_level(&self) -> bool {
+    pub fn backward_second_level(self) -> bool {
         (self.0 & CollatorOptionsBitField::BACKWARD_SECOND_LEVEL_MASK) != 0
     }
 
     /// Whether second level compares the last accent difference
     /// instead of the first accent difference.
-    pub fn set_backward_second_level(&mut self, backward_second_level: Option<bool>) {
+    const fn set_backward_second_level(&mut self, backward_second_level: Option<bool>) {
         self.0 &= !CollatorOptionsBitField::BACKWARD_SECOND_LEVEL_MASK;
         if let Some(backward_second_level) = backward_second_level {
             self.0 |= CollatorOptionsBitField::EXPLICIT_BACKWARD_SECOND_LEVEL_MASK;
@@ -672,30 +688,15 @@ impl CollatorOptionsBitField {
         }
     }
 
-    pub fn set_backward_second_level_from_enum(
-        &mut self,
-        backward_second_level: Option<BackwardSecondLevel>,
-    ) {
-        match backward_second_level {
-            Some(BackwardSecondLevel::On) => {
-                self.set_backward_second_level(Some(true));
-            }
-            Some(BackwardSecondLevel::Off) => {
-                self.set_backward_second_level(Some(false));
-            }
-            None => self.set_backward_second_level(None),
-        }
-    }
-
     /// Whether sequences of decimal digits are compared according
     /// to their numeric value.
-    pub fn numeric(&self) -> bool {
+    pub fn numeric(self) -> bool {
         (self.0 & CollatorOptionsBitField::NUMERIC_MASK) != 0
     }
 
     /// Whether sequences of decimal digits are compared according
     /// to their numeric value.
-    pub fn set_numeric(&mut self, numeric: Option<bool>) {
+    const fn set_numeric(&mut self, numeric: Option<bool>) {
         self.0 &= !CollatorOptionsBitField::NUMERIC_MASK;
         if let Some(numeric) = numeric {
             self.0 |= CollatorOptionsBitField::EXPLICIT_NUMERIC_MASK;
@@ -707,12 +708,16 @@ impl CollatorOptionsBitField {
         }
     }
 
-    pub fn set_numeric_from_enum(&mut self, numeric: Option<Numeric>) {
+    const fn set_numeric_from_enum(&mut self, numeric: Option<CollationNumericOrdering>) {
         match numeric {
-            Some(Numeric::On) => {
+            Some(CollationNumericOrdering::True) => {
                 self.set_numeric(Some(true));
             }
-            Some(Numeric::Off) => {
+            Some(CollationNumericOrdering::False) => {
+                self.set_numeric(Some(false));
+            }
+            Some(_) => {
+                debug_assert!(false, "unknown variant");
                 self.set_numeric(Some(false));
             }
             None => self.set_numeric(None),
@@ -721,7 +726,7 @@ impl CollatorOptionsBitField {
 
     /// If strength is <= secondary, returns `None`.
     /// Otherwise, returns the appropriate mask.
-    pub(crate) fn tertiary_mask(&self) -> Option<u16> {
+    pub(crate) fn tertiary_mask(self) -> Option<u16> {
         if self.strength() <= Strength::Secondary {
             None
         } else if (self.0
@@ -735,15 +740,26 @@ impl CollatorOptionsBitField {
     }
 
     /// Internal upper first getter
-    pub(crate) fn upper_first(&self) -> bool {
+    pub(crate) fn upper_first(self) -> bool {
         (self.0 & CollatorOptionsBitField::UPPER_FIRST_MASK) != 0
+    }
+
+    pub fn lithuanian_dot_above(self) -> bool {
+        (self.0 & CollatorOptionsBitField::LITHUANIAN_DOT_ABOVE_MASK) != 0
+    }
+
+    const fn set_lithuanian_dot_above(&mut self, lithuanian_dot_above: bool) {
+        self.0 &= !CollatorOptionsBitField::LITHUANIAN_DOT_ABOVE_MASK;
+        if lithuanian_dot_above {
+            self.0 |= CollatorOptionsBitField::LITHUANIAN_DOT_ABOVE_MASK;
+        }
     }
 
     /// For options left as defaults in this `CollatorOptions`,
     /// set the value from `other`. Values taken from `other`
     /// are marked as explicitly set if they were explicitly
     /// set in `other`.
-    pub fn set_defaults(&mut self, other: CollatorOptionsBitField) {
+    const fn set_defaults(&mut self, other: CollatorOptionsBitField) {
         if self.0 & CollatorOptionsBitField::EXPLICIT_STRENGTH_MASK == 0 {
             self.0 &= !CollatorOptionsBitField::STRENGTH_MASK;
             self.0 |= other.0 & CollatorOptionsBitField::STRENGTH_MASK;
@@ -785,16 +801,39 @@ impl CollatorOptionsBitField {
     }
 }
 
-impl From<CollatorOptions> for CollatorOptionsBitField {
-    fn from(options: CollatorOptions) -> CollatorOptionsBitField {
-        let mut result = Self::new();
-        result.set_strength(options.strength);
-        result.set_max_variable(options.max_variable);
-        result.set_alternate_handling(options.alternate_handling);
-        result.set_case_level_from_enum(options.case_level);
-        result.set_case_first(options.case_first);
-        result.set_numeric_from_enum(options.numeric);
-        result.set_backward_second_level_from_enum(options.backward_second_level);
-        result
+impl CollatorOptions {
+    /// Combines options, preferences, and metadata into a `CollatorOptionsBitField`.
+    ///
+    /// Note that some fields that are stored in this bit field are not considered
+    /// options in the API sense, but rather are resolved from the locale, through
+    /// metadata. This includes `backward_second_level` and `lithuanian_dot_above`.
+    pub(crate) const fn resolve(
+        self,
+        metadata: CollationMetadata,
+        case_first: Option<CollationCaseFirst>,
+        numeric_ordering: Option<CollationNumericOrdering>,
+    ) -> CollatorOptionsBitField {
+        let mut altered_defaults = CollatorOptionsBitField::default();
+
+        if metadata.alternate_shifted() {
+            altered_defaults.set_alternate_handling(Some(AlternateHandling::Shifted));
+        }
+        if metadata.backward_second_level() {
+            altered_defaults.set_backward_second_level(Some(true));
+        }
+
+        altered_defaults.set_case_first(Some(metadata.case_first()));
+        altered_defaults.set_max_variable(Some(metadata.max_variable()));
+
+        let mut merged_options = CollatorOptionsBitField::default();
+        merged_options.set_strength(self.strength);
+        merged_options.set_max_variable(self.max_variable);
+        merged_options.set_alternate_handling(self.alternate_handling);
+        merged_options.set_case_level_from_enum(self.case_level);
+        merged_options.set_case_first(case_first);
+        merged_options.set_numeric_from_enum(numeric_ordering);
+        merged_options.set_lithuanian_dot_above(metadata.lithuanian_dot_above());
+        merged_options.set_defaults(altered_defaults);
+        merged_options
     }
 }

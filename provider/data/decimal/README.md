@@ -4,7 +4,7 @@
 
 Data for the `icu_decimal` crate
 
-This data was generated with CLDR version 45.0.0, ICU version icu4x/2024-05-16/75.x, and
+This data was generated with CLDR version 49.0.0-ALPHA2, Unicode version 18.0.0, and
 LSTM segmenter version v0.1.0.
 
 <!-- cargo-rdme end -->

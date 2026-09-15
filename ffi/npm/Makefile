@@ -5,29 +5,22 @@
 .DEFAULT_GOAL := build
 FORCE:
 
-PINNED_CI_NIGHTLY ?= "nightly"
+FEATURES ?= "compiled_data,buffer_provider,default_components,experimental,unstable,logging"
 
 # 100 KiB, working around a bug in older rustc
 # https://github.com/unicode-org/icu4x/issues/2753
 WASM_STACK_SIZE := 100000
- 
-lib/index.mjs: FORCE
-	rm -rf lib
-	cp -r ../capi/bindings/js lib
 
-../../target/wasm32-unknown-unknown/release/icu_capi.wasm: FORCE
-	rustup toolchain install ${PINNED_CI_NIGHTLY}
-	rustup component add rust-src --toolchain ${PINNED_CI_NIGHTLY}
-	RUSTFLAGS="-Cpanic=abort -Copt-level=s -C link-args=-zstack-size=${WASM_STACK_SIZE} -Clto -Cembed-bitcode" \
-	cargo +${PINNED_CI_NIGHTLY} rustc \
-		-Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort \
-		--target wasm32-unknown-unknown \
-		--release \
-		-p icu_capi \
-		--crate-type cdylib \
-		--features buffer_provider
+icu_capi.wasm: FORCE
+	# Build the WASM library. Explanation of the flags:
+	# -Copt-level=s: optimize for size, analagous to "clang -Os"
+	# -C link-args=-zstack-size=${WASM_STACK_SIZE}: see https://github.com/unicode-org/icu4x/issues/2753
+	# -Zwasm-c-abi=spec: use the standard Rust-Wasm interface (default since Rust 1.89)
+	RUSTFLAGS="-Copt-level=s -Clink-args=-zstack-size=${WASM_STACK_SIZE} -Zwasm-c-abi=spec" \
+	TARGET="wasm32-unknown-unknown" \
+	TYPE="dynamic" \
+	OUT="$(realpath .)/icu_capi.wasm" \
+	FEATURES=${FEATURES} \
+	bash ../capi/build.sh
 
-icu_capi.wasm: ../../target/wasm32-unknown-unknown/release/icu_capi.wasm
-	cp ../../target/wasm32-unknown-unknown/release/icu_capi.wasm icu_capi.wasm
-
-build: lib/index.mjs icu_capi.wasm
+build: icu_capi.wasm

@@ -2,15 +2,13 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use core::convert::TryFrom;
 use core::fmt;
-
 use core::str::FromStr;
 
-use crate::FixedDecimal;
+use crate::Decimal;
 use crate::ParseError;
 
-/// A struct containing a [`FixedDecimal`] significand together with an exponent, representing a
+/// A struct containing a [`Decimal`] significand together with an exponent, representing a
 /// number written in compact notation (such as 1.2M).
 /// This represents a _source number_, as defined
 /// [in UTS #35](https://www.unicode.org/reports/tr35/tr35-numbers.html#Plural_rules_syntax).
@@ -21,13 +19,13 @@ use crate::ParseError;
 /// nor a sign in the exponent, and behaves differently in pluralization.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactDecimal {
-    significand: FixedDecimal,
+    significand: Decimal,
     exponent: u8,
 }
 
 impl CompactDecimal {
     /// Constructs a [`CompactDecimal`] from its significand and exponent.
-    pub fn from_significand_and_exponent(significand: FixedDecimal, exponent: u8) -> Self {
+    pub fn from_significand_and_exponent(significand: Decimal, exponent: u8) -> Self {
         Self {
             significand,
             exponent,
@@ -37,32 +35,32 @@ impl CompactDecimal {
     /// Returns a reference to the significand of `self`.
     /// ```
     /// # use fixed_decimal::CompactDecimal;
-    /// # use fixed_decimal::FixedDecimal;
+    /// # use fixed_decimal::Decimal;
     /// # use std::str::FromStr;
     /// #
     /// assert_eq!(
     ///     CompactDecimal::from_str("+1.20c6").unwrap().significand(),
-    ///     &FixedDecimal::from_str("+1.20").unwrap()
+    ///     &Decimal::from_str("+1.20").unwrap()
     /// );
     /// ```
-    pub fn significand(&self) -> &FixedDecimal {
+    pub fn significand(&self) -> &Decimal {
         &self.significand
     }
 
     /// Returns the significand of `self`.
     /// ```
     /// # use fixed_decimal::CompactDecimal;
-    /// # use fixed_decimal::FixedDecimal;
+    /// # use fixed_decimal::Decimal;
     /// # use std::str::FromStr;
     /// #
     /// assert_eq!(
     ///     CompactDecimal::from_str("+1.20c6")
     ///         .unwrap()
     ///         .into_significand(),
-    ///     FixedDecimal::from_str("+1.20").unwrap()
+    ///     Decimal::from_str("+1.20").unwrap()
     /// );
     /// ```
-    pub fn into_significand(self) -> FixedDecimal {
+    pub fn into_significand(self) -> Decimal {
         self.significand
     }
 
@@ -116,22 +114,20 @@ impl writeable::Writeable for CompactDecimal {
 
 writeable::impl_display_with_writeable!(CompactDecimal);
 
-impl FromStr for CompactDecimal {
-    type Err = ParseError;
-    fn from_str(input_str: &str) -> Result<Self, Self::Err> {
-        Self::try_from(input_str.as_bytes())
+impl CompactDecimal {
+    #[inline]
+    /// Parses a [`CompactDecimal`].
+    pub fn try_from_str(s: &str) -> Result<Self, ParseError> {
+        Self::try_from_utf8(s.as_bytes())
     }
-}
 
-/// The deprecated letter e is not accepted as a synonym for c.
-impl TryFrom<&[u8]> for CompactDecimal {
-    type Error = ParseError;
-    fn try_from(input_str: &[u8]) -> Result<Self, Self::Error> {
-        if input_str.iter().any(|&c| c == b'e' || c == b'E') {
+    /// The deprecated letter e is not accepted as a synonym for c.
+    fn try_from_utf8(code_units: &[u8]) -> Result<Self, ParseError> {
+        if code_units.iter().any(|&c| c == b'e' || c == b'E') {
             return Err(ParseError::Syntax);
         }
-        let mut parts = input_str.split(|&c| c == b'c');
-        let significand = FixedDecimal::try_from(parts.next().ok_or(ParseError::Syntax)?)?;
+        let mut parts = code_units.split(|&c| c == b'c');
+        let significand = Decimal::try_from_utf8(parts.next().ok_or(ParseError::Syntax)?)?;
         match parts.next() {
             None => Ok(CompactDecimal {
                 significand,
@@ -156,6 +152,13 @@ impl TryFrom<&[u8]> for CompactDecimal {
                 })
             }
         }
+    }
+}
+
+impl FromStr for CompactDecimal {
+    type Err = ParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from_str(s)
     }
 }
 

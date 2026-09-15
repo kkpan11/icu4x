@@ -6,11 +6,12 @@
 //! exported from ICU.
 
 use crate::SourceDataProvider;
+use crate::TrieType;
 use icu::collections::char16trie::Char16Trie;
 use icu::collections::codepointtrie::CodePointTrie;
 use icu::normalizer::provider::*;
 use icu_provider::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use zerovec::ZeroVec;
 
@@ -26,7 +27,14 @@ macro_rules! normalization_provider {
                 let $toml_data: &normalizer_serde::$serde_struct =
                     self.icuexport()?.read_and_parse_toml(&format!(
                         "norm/{}/{}.toml",
-                        self.trie_type(),
+                        if $file_name == "nfd" || $file_name == "nfkd" {
+                            // Always use fast tries for these to unblock optimizations
+                            // that depend being able to assume the fast trie type at compile
+                            // time. See https://github.com/unicode-org/icu4x/pull/7222#issuecomment-3531679175
+                            TrieType::Fast
+                        } else {
+                            self.trie_type()
+                        },
                         $file_name
                     ))?;
 
@@ -54,29 +62,8 @@ macro_rules! normalization_data_provider {
 
                 Ok(DataResponse {
                     metadata: Default::default(),
-                    payload: DataPayload::from_owned(DecompositionDataV1 { trie }),
-                })
-            },
-            toml_data // simply matches the identifier in the above block
-        );
-    };
-}
-
-macro_rules! normalization_supplement_provider {
-    ($marker:ident, $file_name:literal) => {
-        normalization_provider!(
-            $marker,
-            DecompositionSupplement,
-            $file_name,
-            {
-                let trie = CodePointTrie::<u32>::try_from(&toml_data.trie)
-                    .map_err(|e| DataError::custom("trie conversion").with_display_context(&e))?;
-
-                Ok(DataResponse {
-                    metadata: Default::default(),
-                    payload: DataPayload::from_owned(DecompositionSupplementV1 {
+                    payload: DataPayload::from_owned(DecompositionData {
                         trie,
-                        flags: toml_data.flags,
                         passthrough_cap: toml_data.cap,
                     }),
                 })
@@ -103,7 +90,7 @@ macro_rules! normalization_tables_provider {
                     .collect::<Result<Vec<char>, DataError>>()?;
                 Ok(DataResponse {
                     metadata: Default::default(),
-                    payload: DataPayload::from_owned(DecompositionTablesV1 {
+                    payload: DataPayload::from_owned(DecompositionTables {
                         scalars16: ZeroVec::alloc_from_slice(&toml_data.scalars16),
                         scalars24: ZeroVec::alloc_from_slice(&scalars24),
                     }),
@@ -123,7 +110,7 @@ macro_rules! normalization_canonical_compositions_provider {
             {
                 Ok(DataResponse {
                     metadata: Default::default(),
-                    payload: DataPayload::from_owned(CanonicalCompositionsV1 {
+                    payload: DataPayload::from_owned(CanonicalCompositions {
                         canonical_compositions: Char16Trie::new(ZeroVec::alloc_from_slice(
                             &toml_data.compositions,
                         )),
@@ -155,7 +142,7 @@ macro_rules! normalization_non_recursive_decomposition_supplement_provider {
 
                 Ok(DataResponse {
                     metadata: Default::default(),
-                    payload: DataPayload::from_owned(NonRecursiveDecompositionSupplementV1 {
+                    payload: DataPayload::from_owned(NonRecursiveDecompositionSupplement {
                         trie,
                         scalars24: ZeroVec::alloc_from_slice(&scalars24),
                     }),
@@ -166,21 +153,216 @@ macro_rules! normalization_non_recursive_decomposition_supplement_provider {
     };
 }
 
-normalization_data_provider!(CanonicalDecompositionDataV1Marker, "nfd");
+normalization_data_provider!(NormalizerNfdDataV1, "nfd");
 
-normalization_supplement_provider!(CompatibilityDecompositionSupplementV1Marker, "nfkd");
+normalization_data_provider!(NormalizerNfkdDataV1, "nfkd");
 
-normalization_supplement_provider!(Uts46DecompositionSupplementV1Marker, "uts46d");
+normalization_data_provider!(NormalizerUts46DataV1, "uts46d");
 
-normalization_tables_provider!(CanonicalDecompositionTablesV1Marker, "nfdex");
+normalization_tables_provider!(NormalizerNfdTablesV1, "nfdex");
 
-normalization_tables_provider!(CompatibilityDecompositionTablesV1Marker, "nfkdex");
+normalization_tables_provider!(NormalizerNfkdTablesV1, "nfkdex");
 
 // No uts46dex, because that data is also in nfkdex.
 
-normalization_canonical_compositions_provider!(CanonicalCompositionsV1Marker, "compositions");
+normalization_canonical_compositions_provider!(NormalizerNfcV1, "compositions");
 
 normalization_non_recursive_decomposition_supplement_provider!(
-    NonRecursiveDecompositionSupplementV1Marker,
+    NormalizerNfdSupplementV1,
     "decompositionex"
+);
+
+// These macros implement ICU4C-internal properties that we have accidentally exposed (#7892).
+// They are slated for removal, but the code might be useful for a future ICU4C-independent
+// normalization implementation, which is why they live in this file.
+
+macro_rules! impl_decomposition_inert_property {
+    ($marker:ident, $try_new_decomp:ident) => {
+        impl DataProvider<icu::properties::provider::$marker> for SourceDataProvider {
+            fn load(
+                &self,
+                _req: DataRequest,
+            ) -> Result<DataResponse<icu::properties::provider::$marker>, DataError> {
+                use icu::collections::codepointinvlist::CodePointInversionListBuilder;
+                use icu::normalizer::DecomposingNormalizer;
+                use icu::properties::{
+                    CodePointMapData, props::CanonicalCombiningClass,
+                    provider::PropertyCodePointSet,
+                };
+
+                let decomp = DecomposingNormalizer::$try_new_decomp(self)?;
+                let decomp = decomp.as_borrowed();
+                let ccc = CodePointMapData::<CanonicalCombiningClass>::try_new_unstable(self)?;
+                let ccc = ccc.as_borrowed();
+
+                let mut builder = CodePointInversionListBuilder::new();
+                // Add all code points that are starters and are not decomposable,
+                // including surrogates.
+                for cp in 0..=(char::MAX as u32) {
+                    let Some(ch) = char::from_u32(cp) else {
+                        builder.add32(cp);
+                        continue;
+                    };
+
+                    if ccc.get(ch) == CanonicalCombiningClass::NotReordered
+                        && decomp.is_normalized(ch.encode_utf8(&mut [0; 4]))
+                    {
+                        builder.add32(cp);
+                    }
+                }
+                Ok(DataResponse {
+                    metadata: Default::default(),
+                    payload: DataPayload::from_owned(PropertyCodePointSet::InversionList(
+                        builder.build(),
+                    )),
+                })
+            }
+        }
+        impl crate::IterableDataProviderCached<icu::properties::provider::$marker>
+            for SourceDataProvider
+        {
+            fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+                Ok(HashSet::from_iter([Default::default()]))
+            }
+        }
+    };
+}
+
+macro_rules! impl_composition_inert_property {
+    ($marker:ident, $try_new_decomp:ident, $try_new_comp:ident) => {
+        impl DataProvider<icu::properties::provider::$marker> for SourceDataProvider {
+            fn load(
+                &self,
+                _req: DataRequest,
+            ) -> Result<DataResponse<icu::properties::provider::$marker>, DataError> {
+                use icu::collections::codepointinvlist::CodePointInversionListBuilder;
+                use icu::normalizer::properties::{
+                    CanonicalComposition, CanonicalDecomposition, Decomposed,
+                };
+                use icu::normalizer::{ComposingNormalizer, DecomposingNormalizer};
+                use icu::properties::{
+                    CodePointMapData, props::CanonicalCombiningClass,
+                    provider::PropertyCodePointSet,
+                };
+
+                let composing_normalizer = ComposingNormalizer::$try_new_comp(self)?;
+                let composing_normalizer = composing_normalizer.as_borrowed();
+                let decomposing_normalizer = DecomposingNormalizer::$try_new_decomp(self)?;
+                let decomposing_normalizer = decomposing_normalizer.as_borrowed();
+                let nfd = DecomposingNormalizer::try_new_nfd_unstable(self)?;
+                let nfd = nfd.as_borrowed();
+
+                let canonical_comp = CanonicalComposition::try_new_unstable(self)?;
+                let canonical_comp = canonical_comp.as_borrowed();
+                let canonical_decomp = CanonicalDecomposition::try_new_unstable(self)?;
+                let canonical_decomp = canonical_decomp.as_borrowed();
+                let ccc = CodePointMapData::<CanonicalCombiningClass>::try_new_unstable(self)?;
+                let ccc = ccc.as_borrowed();
+
+                let mut combines_forwards = HashSet::new();
+                let mut canonical_comp_seconds = HashSet::new();
+                let mut composes_with_lowest_reordered_ccc = HashMap::new();
+
+                // Compute `combines_forwards`, `canonical_comp_seconds`, and
+                // `composes_with_lowest_reordered_ccc` from the canonical
+                // decompositions of all primary composites.
+                for ch in (0..=char::MAX as u32).filter_map(char::from_u32) {
+                    if let Decomposed::Expansion(starter, second) = canonical_decomp.decompose(ch)
+                        && canonical_comp.compose(starter, second) == Some(ch)
+                    {
+                        combines_forwards.insert(starter);
+                        canonical_comp_seconds.insert(second);
+                        let ccc = ccc.get(second);
+                        if ccc > CanonicalCombiningClass::NotReordered {
+                            composes_with_lowest_reordered_ccc
+                                .entry(starter)
+                                .and_modify(|c| *c = std::cmp::min(*c, ccc))
+                                .or_insert(ccc);
+                        }
+                    }
+                }
+
+                let mut combines_backwards = HashSet::new();
+                for ch in (0..=char::MAX as u32).filter_map(char::from_u32) {
+                    let nfd_first = nfd.normalize_iter([ch].into_iter()).next().unwrap();
+                    if canonical_comp_seconds.contains(&nfd_first) {
+                        combines_backwards.insert(ch);
+                    }
+                }
+
+                let mut builder = CodePointInversionListBuilder::new();
+                'cp: for cp in 0..=(char::MAX as u32) {
+                    let Some(ch) = char::from_u32(cp) else {
+                        builder.add32(cp);
+                        continue;
+                    };
+
+                    if ccc.get(ch) != CanonicalCombiningClass::NotReordered {
+                        continue;
+                    }
+
+                    if combines_forwards.contains(&ch) {
+                        continue;
+                    }
+
+                    if !composing_normalizer.is_normalized(ch.encode_utf8(&mut [0; 4])) {
+                        continue;
+                    }
+
+                    let mut decomposed = decomposing_normalizer.normalize_iter([ch].into_iter());
+
+                    let mut starter = decomposed.next().unwrap();
+
+                    if combines_backwards.contains(&starter) {
+                        continue;
+                    }
+
+                    for follow in decomposed {
+                        if let Some(&lowest_ccc) = composes_with_lowest_reordered_ccc.get(&starter)
+                            && lowest_ccc < ccc.get(follow)
+                        {
+                            // There exists a character C (with
+                            // ccc=`lowest_ccc`) which composes with `starter`
+                            // and which is not blocked from `starter` in the
+                            // sequence <`starter`, `follow`, C>, nor therefore in
+                            // <`starter`, (rest of `decomposed`), C>,
+                            // thus the decomposition of <`ch`, C> would compose
+                            // to something different and `ch` is not inert.
+                            continue 'cp;
+                        }
+
+                        starter = canonical_comp.compose(starter, follow).unwrap();
+                    }
+
+                    builder.add32(cp);
+                }
+                Ok(DataResponse {
+                    metadata: Default::default(),
+                    payload: DataPayload::from_owned(PropertyCodePointSet::InversionList(
+                        builder.build(),
+                    )),
+                })
+            }
+        }
+        impl crate::IterableDataProviderCached<icu::properties::provider::$marker>
+            for SourceDataProvider
+        {
+            fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+                Ok(HashSet::from_iter([Default::default()]))
+            }
+        }
+    };
+}
+
+impl_decomposition_inert_property!(PropertyBinaryNfdInertV1, try_new_nfd_unstable);
+impl_decomposition_inert_property!(PropertyBinaryNfkdInertV1, try_new_nfkd_unstable);
+impl_composition_inert_property!(
+    PropertyBinaryNfcInertV1,
+    try_new_nfd_unstable,
+    try_new_nfc_unstable
+);
+impl_composition_inert_property!(
+    PropertyBinaryNfkcInertV1,
+    try_new_nfkd_unstable,
+    try_new_nfkc_unstable
 );

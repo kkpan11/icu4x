@@ -29,11 +29,15 @@ This document contains a checklist for the requirements to migrate a component f
   - [ ] Compiled data constructors should say "with compiled data" in the first sentence and should have a Cargo feature alert following the above syntax.
 - [ ] The APIs should follow ICU4X style
   - [ ] All options bags should be `Copy` (and contain references if they need to). Exceptions can be made by discussion.
+  - [ ] All options bags and their relevant options must be in an `options` module ([#5991](https://github.com/unicode-org/icu4x/issues/5991))
+  - [ ] If there is a Borrowed type, then compiled data constructors like `Foo::new()` must return `FooBorrowed` ([#5440](https://github.com/unicode-org/icu4x/issues/5440))
+  - [ ] Options bag enum fields should consistently be wrapped in an `Option`, ideally with a better-named default/"auto" variant ([#5488](https://github.com/unicode-org/icu4x/issues/5488))
 - [ ] The data structs should fully follow ZeroVec style
   - [ ] Deserialization should not have a "zero-copy violation" in the [make-testdata](https://github.com/unicode-org/icu4x/blob/main/provider/source/src/tests/make_testdata.rs) test
   - [ ] Constructors should avoid allocating memory in the common case
   - [ ] Opaque blobs of data should be avoided if possible (instead use VarZeroVec, ZeroMap, etc.)
   - [ ] Data structs should not be panicky to load/deserialize and conform to [data_safety.md](https://github.com/unicode-org/icu4x/blob/main/documents/design/data_safety.md)
+  - [ ] If any data structs use a large or unbounded number of data marker attributes, they are implemented in a way that reduces stack space, file size, and construction time, such as by having only a single variable-length field
 - [ ] The component should be fully integrated with ICU4X tooling
   - [ ] There should be an overview Criterion benchmark
   - [ ] There should be individual Criterion benchmarks for interesting or performance critical code paths
@@ -44,4 +48,4 @@ This document contains a checklist for the requirements to migrate a component f
   - [ ] Where applicable, the component should be consistent with ECMA-402 and UTS#35
   - [ ] Any gaps in i18n quality should be fixed, or, if that is not possible, they should have tracking issues and a concrete, resourced path forward. The intent is to not ship components with known i18n correctness problems and no plan to fix them in an upcoming release
   - [ ] The API design should receive sign-off from a non-ICU4X i18n expert such as Markus Scherer
-- [ ] Add the new features to the changelog in the "Unreleased" section
+- [ ] Make sure the graduation PR has a comprehensive changelog entry (see [changelog.md](changelog.md))

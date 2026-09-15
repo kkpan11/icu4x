@@ -2,9 +2,6 @@
   "main": {
     "en-ZA": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "en",
         "territory": "ZA"
       },
@@ -82,6 +79,7 @@
           "BZ": "Belize",
           "CA": "Canada",
           "CC": "Cocos (Keeling) Islands",
+          "CC-alt-short": "Cocos Islands",
           "CD": "Congo - Kinshasa",
           "CD-alt-variant": "Congo (DRC)",
           "CF": "Central African Republic",
@@ -152,7 +150,8 @@
           "GY": "Guyana",
           "HK": "Hong Kong SAR China",
           "HK-alt-short": "Hong Kong",
-          "HM": "Heard & McDonald Islands",
+          "HM": "Heard Island & McDonald Islands",
+          "HM-alt-short": "Heard & McDonald Islands",
           "HN": "Honduras",
           "HR": "Croatia",
           "HT": "Haiti",
@@ -164,7 +163,6 @@
           "IM": "Isle of Man",
           "IN": "India",
           "IO": "British Indian Ocean Territory",
-          "IO-alt-biot": "British Indian Ocean Territory",
           "IO-alt-chagos": "Chagos Archipelago",
           "IQ": "Iraq",
           "IR": "Iran",
@@ -231,6 +229,7 @@
           "NO": "Norway",
           "NP": "Nepal",
           "NR": "Nauru",
+          "NR-alt-variant": "Naoero",
           "NU": "Niue",
           "NZ": "New Zealand",
           "NZ-alt-variant": "Aotearoa New Zealand",
@@ -244,6 +243,7 @@
           "PL": "Poland",
           "PM": "St Pierre & Miquelon",
           "PN": "Pitcairn Islands",
+          "PN-alt-short": "Pitcairn",
           "PR": "Puerto Rico",
           "PS": "Palestinian Territories",
           "PS-alt-short": "Palestine",
@@ -263,7 +263,8 @@
           "SD": "Sudan",
           "SE": "Sweden",
           "SG": "Singapore",
-          "SH": "St Helena",
+          "SH": "St Helena, Ascension & Tristan da Cunha",
+          "SH-alt-short": "St Helena",
           "SI": "Slovenia",
           "SJ": "Svalbard & Jan Mayen",
           "SK": "Slovakia",
@@ -282,7 +283,8 @@
           "TA": "Tristan da Cunha",
           "TC": "Turks & Caicos Islands",
           "TD": "Chad",
-          "TF": "French Southern Territories",
+          "TF": "French Southern and Antarctic Lands",
+          "TF-alt-short": "French Southern Territories",
           "TG": "Togo",
           "TH": "Thailand",
           "TJ": "Tajikistan",

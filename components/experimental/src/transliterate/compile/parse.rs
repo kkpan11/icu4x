@@ -3,15 +3,15 @@
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 use super::*;
-use crate::unicodeset_parse::{self as icu_unicodeset_parse, VariableMap, VariableValue};
 use alloc::borrow::Cow;
 use alloc::boxed::Box;
-use alloc::fmt::{Display, Formatter};
 use alloc::string::ToString;
 use alloc::vec;
+use core::fmt::{Display, Formatter};
 use core::{iter::Peekable, str::CharIndices};
 use icu_collections::codepointinvlist::CodePointInversionList;
 use icu_collections::codepointinvliststringlist::CodePointInversionListAndStringList;
+use icu_properties::unicodeset_parse::{self, VariableMap, VariableValue};
 
 type Result<T> = core::result::Result<T, CompileError>;
 
@@ -28,7 +28,7 @@ pub(crate) enum ElementKind {
     Quantifier,
     /// A segment: `(abc)`.
     Segment,
-    /// A UnicodeSet: `[a-z]`.
+    /// A `UnicodeSet`: `[a-z]`.
     UnicodeSet,
     /// A function call: `&[a-z] Remove(...)`.
     FunctionCall,
@@ -44,7 +44,7 @@ impl ElementKind {
     // returns true if the element has no effect in the location. this is not equivalent to
     // syntactically being allowed in that location.
     pub(crate) fn skipped_in(self, location: ElementLocation) -> bool {
-        #[allow(clippy::match_like_matches_macro)] // I think the explicit match is clearer here
+        #[expect(clippy::match_like_matches_macro)] // I think the explicit match is clearer here
         match (location, self) {
             (ElementLocation::Source, Self::Cursor) => true,
             (ElementLocation::Target, Self::AnchorStart | Self::AnchorEnd) => true,
@@ -52,7 +52,7 @@ impl ElementKind {
         }
     }
 
-    pub(crate) fn debug_str(&self) -> &'static str {
+    pub(crate) fn debug_str(self) -> &'static str {
         match self {
             ElementKind::Literal => "literal",
             ElementKind::VariableReference => "variable reference",
@@ -229,7 +229,6 @@ pub(crate) struct HalfRule {
 }
 
 #[derive(Debug, Clone)]
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum Rule {
     GlobalFilter(FilterSet),
     GlobalInverseFilter(FilterSet),
@@ -262,67 +261,77 @@ pub(crate) struct Parser<'a, P: ?Sized> {
 impl<'a, P> Parser<'a, P>
 where
     P: ?Sized
-        + DataProvider<AsciiHexDigitV1Marker>
-        + DataProvider<AlphabeticV1Marker>
-        + DataProvider<BidiControlV1Marker>
-        + DataProvider<BidiMirroredV1Marker>
-        + DataProvider<CaseIgnorableV1Marker>
-        + DataProvider<CasedV1Marker>
-        + DataProvider<ChangesWhenCasefoldedV1Marker>
-        + DataProvider<ChangesWhenCasemappedV1Marker>
-        + DataProvider<ChangesWhenLowercasedV1Marker>
-        + DataProvider<ChangesWhenNfkcCasefoldedV1Marker>
-        + DataProvider<ChangesWhenTitlecasedV1Marker>
-        + DataProvider<ChangesWhenUppercasedV1Marker>
-        + DataProvider<DashV1Marker>
-        + DataProvider<DefaultIgnorableCodePointV1Marker>
-        + DataProvider<DeprecatedV1Marker>
-        + DataProvider<DiacriticV1Marker>
-        + DataProvider<EmojiV1Marker>
-        + DataProvider<EmojiComponentV1Marker>
-        + DataProvider<EmojiModifierV1Marker>
-        + DataProvider<EmojiModifierBaseV1Marker>
-        + DataProvider<EmojiPresentationV1Marker>
-        + DataProvider<ExtendedPictographicV1Marker>
-        + DataProvider<ExtenderV1Marker>
-        + DataProvider<GraphemeBaseV1Marker>
-        + DataProvider<GraphemeClusterBreakV1Marker>
-        + DataProvider<GraphemeClusterBreakNameToValueV1Marker>
-        + DataProvider<GraphemeExtendV1Marker>
-        + DataProvider<HexDigitV1Marker>
-        + DataProvider<IdsBinaryOperatorV1Marker>
-        + DataProvider<IdsTrinaryOperatorV1Marker>
-        + DataProvider<IdContinueV1Marker>
-        + DataProvider<IdStartV1Marker>
-        + DataProvider<IdeographicV1Marker>
-        + DataProvider<JoinControlV1Marker>
-        + DataProvider<LogicalOrderExceptionV1Marker>
-        + DataProvider<LowercaseV1Marker>
-        + DataProvider<MathV1Marker>
-        + DataProvider<NoncharacterCodePointV1Marker>
-        + DataProvider<PatternSyntaxV1Marker>
-        + DataProvider<PatternWhiteSpaceV1Marker>
-        + DataProvider<QuotationMarkV1Marker>
-        + DataProvider<RadicalV1Marker>
-        + DataProvider<RegionalIndicatorV1Marker>
-        + DataProvider<SentenceBreakV1Marker>
-        + DataProvider<SentenceBreakNameToValueV1Marker>
-        + DataProvider<SentenceTerminalV1Marker>
-        + DataProvider<SoftDottedV1Marker>
-        + DataProvider<TerminalPunctuationV1Marker>
-        + DataProvider<UnifiedIdeographV1Marker>
-        + DataProvider<UppercaseV1Marker>
-        + DataProvider<VariationSelectorV1Marker>
-        + DataProvider<WhiteSpaceV1Marker>
-        + DataProvider<WordBreakV1Marker>
-        + DataProvider<WordBreakNameToValueV1Marker>
-        + DataProvider<XidContinueV1Marker>
-        + DataProvider<GeneralCategoryMaskNameToValueV1Marker>
-        + DataProvider<GeneralCategoryV1Marker>
-        + DataProvider<ScriptNameToValueV1Marker>
-        + DataProvider<ScriptV1Marker>
-        + DataProvider<ScriptWithExtensionsPropertyV1Marker>
-        + DataProvider<XidStartV1Marker>,
+        + DataProvider<PropertyBinaryAlphabeticV1>
+        + DataProvider<PropertyBinaryAsciiHexDigitV1>
+        + DataProvider<PropertyBinaryBidiControlV1>
+        + DataProvider<PropertyBinaryBidiMirroredV1>
+        + DataProvider<PropertyBinaryCasedV1>
+        + DataProvider<PropertyBinaryCaseIgnorableV1>
+        + DataProvider<PropertyBinaryChangesWhenCasefoldedV1>
+        + DataProvider<PropertyBinaryChangesWhenCasemappedV1>
+        + DataProvider<PropertyBinaryChangesWhenLowercasedV1>
+        + DataProvider<PropertyBinaryChangesWhenNfkcCasefoldedV1>
+        + DataProvider<PropertyBinaryChangesWhenTitlecasedV1>
+        + DataProvider<PropertyBinaryChangesWhenUppercasedV1>
+        + DataProvider<PropertyBinaryDashV1>
+        + DataProvider<PropertyBinaryDefaultIgnorableCodePointV1>
+        + DataProvider<PropertyBinaryDeprecatedV1>
+        + DataProvider<PropertyBinaryDiacriticV1>
+        + DataProvider<PropertyBinaryEmojiComponentV1>
+        + DataProvider<PropertyBinaryEmojiModifierBaseV1>
+        + DataProvider<PropertyBinaryEmojiModifierV1>
+        + DataProvider<PropertyBinaryEmojiPresentationV1>
+        + DataProvider<PropertyBinaryEmojiV1>
+        + DataProvider<PropertyBinaryExtendedPictographicV1>
+        + DataProvider<PropertyBinaryExtenderV1>
+        + DataProvider<PropertyBinaryGraphemeBaseV1>
+        + DataProvider<PropertyBinaryGraphemeExtendV1>
+        + DataProvider<PropertyBinaryHexDigitV1>
+        + DataProvider<PropertyBinaryIdContinueV1>
+        + DataProvider<PropertyBinaryIdeographicV1>
+        + DataProvider<PropertyBinaryIdsBinaryOperatorV1>
+        + DataProvider<PropertyBinaryIdStartV1>
+        + DataProvider<PropertyBinaryIdsTrinaryOperatorV1>
+        + DataProvider<PropertyBinaryJoinControlV1>
+        + DataProvider<PropertyBinaryLogicalOrderExceptionV1>
+        + DataProvider<PropertyBinaryLowercaseV1>
+        + DataProvider<PropertyBinaryMathV1>
+        + DataProvider<PropertyBinaryNoncharacterCodePointV1>
+        + DataProvider<PropertyBinaryPatternSyntaxV1>
+        + DataProvider<PropertyBinaryPatternWhiteSpaceV1>
+        + DataProvider<PropertyBinaryQuotationMarkV1>
+        + DataProvider<PropertyBinaryRadicalV1>
+        + DataProvider<PropertyBinaryRegionalIndicatorV1>
+        + DataProvider<PropertyBinarySentenceTerminalV1>
+        + DataProvider<PropertyBinarySoftDottedV1>
+        + DataProvider<PropertyBinaryTerminalPunctuationV1>
+        + DataProvider<PropertyBinaryUnifiedIdeographV1>
+        + DataProvider<PropertyBinaryUppercaseV1>
+        + DataProvider<PropertyBinaryVariationSelectorV1>
+        + DataProvider<PropertyBinaryWhiteSpaceV1>
+        + DataProvider<PropertyBinaryXidContinueV1>
+        + DataProvider<PropertyBinaryXidStartV1>
+        + DataProvider<PropertyEnumBlockV1>
+        + DataProvider<PropertyEnumCanonicalCombiningClassV1>
+        + DataProvider<PropertyEnumEastAsianWidthV1>
+        + DataProvider<PropertyEnumGeneralCategoryV1>
+        + DataProvider<PropertyEnumGraphemeClusterBreakV1>
+        + DataProvider<PropertyEnumIndicConjunctBreakV1>
+        + DataProvider<PropertyEnumLineBreakV1>
+        + DataProvider<PropertyEnumScriptV1>
+        + DataProvider<PropertyEnumSentenceBreakV1>
+        + DataProvider<PropertyEnumWordBreakV1>
+        + DataProvider<PropertyNameParseBlockV1>
+        + DataProvider<PropertyNameParseCanonicalCombiningClassV1>
+        + DataProvider<PropertyNameParseEastAsianWidthV1>
+        + DataProvider<PropertyNameParseGeneralCategoryMaskV1>
+        + DataProvider<PropertyNameParseGraphemeClusterBreakV1>
+        + DataProvider<PropertyNameParseIndicConjunctBreakV1>
+        + DataProvider<PropertyNameParseLineBreakV1>
+        + DataProvider<PropertyNameParseScriptV1>
+        + DataProvider<PropertyNameParseSentenceBreakV1>
+        + DataProvider<PropertyNameParseWordBreakV1>
+        + DataProvider<PropertyScriptWithExtensionsV1>,
 {
     // initiates a line comment
     const COMMENT: char = '#';
@@ -410,8 +419,6 @@ where
         loop {
             self.skip_whitespace();
             if let Some(start) = self.peek_index() {
-                // the returned index comes from `self.source`'s `char_indices`.
-                #[allow(clippy::indexing_slicing)]
                 let start_source = &self.source[start..];
                 if start_source.starts_with("use variable range 0x") {
                     let conv_idx = start_source.find(['>', '<', '→', '←', '↔']);
@@ -472,12 +479,12 @@ where
         ) {
             (true, false, false, false) => {
                 // by match, forward_filter.is_some() is true
-                #[allow(clippy::unwrap_used)]
+                #[expect(clippy::unwrap_used)]
                 return Ok(Rule::GlobalFilter(forward_filter.unwrap()));
             }
             (false, false, true, false) => {
                 // by match, reverse_filter.is_some() is true
-                #[allow(clippy::unwrap_used)]
+                #[expect(clippy::unwrap_used)]
                 return Ok(Rule::GlobalInverseFilter(reverse_filter.unwrap()));
             }
             _ => {}
@@ -515,9 +522,9 @@ where
         }
 
         // an empty forward rule, such as ":: (R) ;" is equivalent to ":: Any-Null (R) ;"
-        let forward_basic_id = forward_basic_id.unwrap_or(BasicId::default());
+        let forward_basic_id = forward_basic_id.unwrap_or_else(BasicId::default);
         // an empty reverse rule, such as ":: F () ;" is equivalent to ":: F (Any-Null) ;"
-        let reverse_basic_id = reverse_basic_id.unwrap_or(BasicId::default());
+        let reverse_basic_id = reverse_basic_id.unwrap_or_else(BasicId::default);
 
         let forward_single_id = SingleId {
             basic_id: forward_basic_id,
@@ -532,7 +539,7 @@ where
     }
 
     // consumes everything between '::' and ';', exclusive.
-    #[allow(clippy::type_complexity)] // used internally in one place only
+    #[expect(clippy::type_complexity)] // used internally in one place only
     fn parse_filter_or_transform_rule_parts(
         &mut self,
     ) -> Result<(
@@ -633,10 +640,10 @@ where
     }
 
     fn try_parse_basic_id(&mut self) -> Result<Option<BasicId>> {
-        if let Some(c) = self.peek_char() {
-            if self.xid_start.contains(c) {
-                return Ok(Some(self.parse_basic_id()?));
-            }
+        if let Some(c) = self.peek_char()
+            && self.xid_start.contains(c)
+        {
+            return Ok(Some(self.parse_basic_id()?));
         }
         Ok(None)
     }
@@ -877,7 +884,6 @@ where
         // first_offset is valid by `Chars`, and the inclusive end_offset
         // is valid because we only set it to the indices of ASCII chars,
         // which are all exactly 1 UTF-8 byte
-        #[allow(clippy::indexing_slicing)]
         self.source[first_offset..=end_offset]
             .parse()
             .map_err(|_| CompileErrorKind::InvalidNumber.with_offset(end_offset))
@@ -886,7 +892,6 @@ where
     fn parse_literal(&mut self) -> Result<String> {
         let mut buf = String::new();
         loop {
-            self.skip_whitespace();
             let c = self.must_peek_char()?;
             if c == Self::ESCAPE {
                 self.parse_escaped_char_into_buf(&mut buf)?;
@@ -921,7 +926,7 @@ where
         Ok(buf)
     }
 
-    // parses all supported escapes. code is somewhat duplicated from icu_unicodeset_parse
+    // parses all supported escapes. code is somewhat duplicated from unicodeset_parse
     // might want to deduplicate this with unicodeset_parse somehow
     fn parse_escaped_char_into_buf(&mut self, buf: &mut String) -> Result<()> {
         self.consume(Self::ESCAPE)?;
@@ -992,7 +997,6 @@ where
 
         // validate_hex_digits ensures that chars (including the last one) are ascii hex digits,
         // which are all exactly one UTF-8 byte long, so slicing on these offsets always respects char boundaries
-        #[allow(clippy::indexing_slicing)]
         let hex_source = &self.source[first_offset..=end_offset];
         let num = u32::from_str_radix(hex_source, 16)
             .map_err(|_| CompileErrorKind::Internal("expected valid hex escape"))?;
@@ -1039,9 +1043,8 @@ where
         let pre_offset = self.must_peek_index()?;
         // pre_offset is a valid index because self.iter (used in must_peek_index)
         // was created from self.source
-        #[allow(clippy::indexing_slicing)]
         let set_source = &self.source[pre_offset..];
-        let (set, consumed_bytes) = icu_unicodeset_parse::parse_unstable_with_variables(
+        let (set, consumed_bytes) = unicodeset_parse::parse_unstable_with_variables(
             set_source,
             &self.variable_map,
             self.property_provider,
@@ -1068,7 +1071,7 @@ where
             Some(set) => Ok(set.clone()),
             None => {
                 let (set, _) =
-                    icu_unicodeset_parse::parse_unstable(Self::DOT_SET, self.property_provider)
+                    unicodeset_parse::parse_unstable(Self::DOT_SET, self.property_provider)
                         .map_err(|_| CompileErrorKind::Internal("dot set syntax not valid"))?;
                 self.dot_set = Some(set.clone());
                 Ok(set)
@@ -1228,7 +1231,9 @@ where
 
     // use this whenever an empty iterator would imply an Eof error
     fn must_next(&mut self) -> Result<(usize, char)> {
-        self.iter.next().ok_or(CompileErrorKind::Eof.into())
+        self.iter
+            .next()
+            .ok_or(CompileErrorKind::Eof.without_offset())
     }
 
     // see must_next
@@ -1241,7 +1246,7 @@ where
         self.iter
             .peek()
             .copied()
-            .ok_or(CompileErrorKind::Eof.into())
+            .ok_or(CompileErrorKind::Eof.without_offset())
     }
 
     // see must_peek
@@ -1284,15 +1289,16 @@ where
 
 #[cfg(test)]
 pub(super) fn parse(source: &str) -> Result<Vec<Rule>> {
+    use icu_properties::CodePointSetData;
     Parser::run(
         source,
-        &sets::xid_start()
+        &CodePointSetData::new::<XidStart>()
             .static_to_owned()
             .to_code_point_inversion_list(),
-        &sets::xid_continue()
+        &CodePointSetData::new::<XidContinue>()
             .static_to_owned()
             .to_code_point_inversion_list(),
-        &sets::pattern_white_space()
+        &CodePointSetData::new::<PatternWhiteSpace>()
             .static_to_owned()
             .to_code_point_inversion_list(),
         &icu_properties::provider::Baked,
@@ -1420,7 +1426,7 @@ fn test_variable_rules_err() {
 
     for source in sources {
         if let Ok(rules) = parse(source) {
-            panic!("Parsed invalid source {:?}: {:?}", source, rules);
+            panic!("Parsed invalid source {source:?}: {rules:?}");
         }
     }
 }
@@ -1464,7 +1470,7 @@ fn test_global_filters_err() {
 
     for source in sources {
         if let Ok(rules) = parse(source) {
-            panic!("Parsed invalid source {:?}: {:?}", source, rules);
+            panic!("Parsed invalid source {source:?}: {rules:?}");
         }
     }
 }
@@ -1496,7 +1502,7 @@ fn test_function_calls_err() {
 
     for source in sources {
         if let Ok(rules) = parse(source) {
-            panic!("Parsed invalid source {:?}: {:?}", source, rules);
+            panic!("Parsed invalid source {source:?}: {rules:?}");
         }
     }
 }
@@ -1542,7 +1548,7 @@ fn test_transform_rules_err() {
 
     for source in sources {
         if let Ok(rules) = parse(source) {
-            panic!("Parsed invalid source {:?}: {:?}", source, rules);
+            panic!("Parsed invalid source {source:?}: {rules:?}");
         }
     }
 }

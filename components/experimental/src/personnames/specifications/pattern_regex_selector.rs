@@ -22,14 +22,14 @@ pub struct PersonNamePattern<'lt> {
     pub name_fields: Vec<(NameField, Cow<'lt, str>)>,
 }
 
-impl<'lt> PersonNamePattern<'lt> {}
+impl PersonNamePattern<'_> {}
 
 impl PersonNamePattern<'_> {
     #[cfg(test)]
-    fn get_field(&self, lookup_name_field: &NameField) -> Option<Cow<str>> {
+    fn get_field(&self, lookup_name_field: NameField) -> Option<Cow<'_, str>> {
         self.name_fields
             .iter()
-            .find(|(k, _)| k == lookup_name_field)
+            .find(|&&(k, _)| k == lookup_name_field)
             .map(|(_, v)| v.clone())
     }
 
@@ -40,12 +40,14 @@ impl PersonNamePattern<'_> {
         })
     }
 
-    fn contains_key(&self, lookup_name_field: &NameField) -> bool {
-        self.name_fields.iter().any(|(k, _)| k == lookup_name_field)
+    fn contains_key(&self, lookup_name_field: NameField) -> bool {
+        self.name_fields
+            .iter()
+            .any(|&(k, _)| k == lookup_name_field)
     }
 
     /// Returns the how many fields can be matched using the current build pattern.
-    pub fn match_info(&self, available_name_fields: &[&NameField]) -> (usize, usize) {
+    pub fn match_info(&self, available_name_fields: &[NameField]) -> (usize, usize) {
         let available_fields = available_name_fields.iter().fold(0, |count, &name_field| {
             if self.contains_key(name_field) {
                 count + 1
@@ -53,11 +55,8 @@ impl PersonNamePattern<'_> {
                 count
             }
         });
-        let missing_fields = self.name_fields.iter().fold(0, |count, (name_field, _)| {
-            if available_name_fields
-                .iter()
-                .any(|&field| field == name_field)
-            {
+        let missing_fields = self.name_fields.iter().fold(0, |count, &(name_field, _)| {
+            if available_name_fields.contains(&name_field) {
                 count
             } else {
                 count + 1
@@ -69,7 +68,7 @@ impl PersonNamePattern<'_> {
     fn fetch_pattern_data_replacement<'lt>(
         &'lt self,
         person_name: &'lt dyn PersonName,
-        requested_name_field: &'lt NameField,
+        requested_name_field: NameField,
         initial_pattern: &'lt str,
         initial_sequence_pattern: &'lt str,
     ) -> Vec<String> {
@@ -79,9 +78,9 @@ impl PersonNamePattern<'_> {
             requested_name_field,
         );
 
-        return effective_name_field
+        effective_name_field
             .iter()
-            .flat_map(|field| {
+            .flat_map(|&field| {
                 specifications::derive_missing_surname(
                     &available_name_field,
                     field,
@@ -91,12 +90,12 @@ impl PersonNamePattern<'_> {
             .map(|field| {
                 specifications::derive_missing_initials(
                     person_name,
-                    &field,
+                    field,
                     initial_pattern,
                     initial_sequence_pattern,
                 )
             })
-            .collect();
+            .collect()
     }
 
     pub fn format_person_name(
@@ -107,7 +106,7 @@ impl PersonNamePattern<'_> {
     ) -> String {
         self.name_fields
             .iter()
-            .flat_map(|(k, v)| {
+            .flat_map(|&(k, ref v)| {
                 let p_name = self
                     .fetch_pattern_data_replacement(
                         person_name,
@@ -136,10 +135,7 @@ impl FromStr for NameFieldKind {
             "credentials" => Ok(NameFieldKind::Credentials),
 
             _ => {
-                icu_provider::_internal::log::warn!(
-                    "Invalid NameFieldKind value matched [{}]",
-                    value
-                );
+                icu_provider::log::warn!("Invalid NameFieldKind value matched [{value}]");
                 Err(PersonNamesFormatterError::InvalidCldrData)
             }
         }
@@ -159,10 +155,7 @@ impl FromStr for FieldModifier {
             "initial" => Ok(FieldModifier::Initial),
             "monogram" => Ok(FieldModifier::Monogram),
             _ => {
-                icu_provider::_internal::log::warn!(
-                    "Invalid FieldModifier value matched [{}]",
-                    value
-                );
+                icu_provider::log::warn!("Invalid FieldModifier value matched [{value}]");
                 Err(PersonNamesFormatterError::InvalidCldrData)
             }
         }
@@ -178,7 +171,7 @@ impl FromStr for NameField {
             .next()
             .map(NameFieldKind::from_str)
             .unwrap_or_else(|| {
-                icu_provider::_internal::log::warn!("unable to match");
+                icu_provider::log::warn!("unable to match");
                 Err(PersonNamesFormatterError::InvalidCldrData)
             })?;
 
@@ -212,10 +205,12 @@ impl FromStr for NameField {
     }
 }
 
-pub fn to_person_name_pattern(value: &str) -> Result<PersonNamePattern, PersonNamesFormatterError> {
+pub fn to_person_name_pattern(
+    value: &str,
+) -> Result<PersonNamePattern<'_>, PersonNamesFormatterError> {
     let mut name_fields_map: Vec<(NameField, Cow<str>)> = Vec::new();
 
-    let parsed_pattern = MultiNamedPlaceholderPattern::from_str(value)?;
+    let parsed_pattern = MultiNamedPlaceholderPattern::try_from_str(value, Default::default())?;
 
     let mut current_name_field = None;
     let mut current_literal = None;
@@ -266,25 +261,25 @@ mod tests {
         let person_name_pattern = to_person_name_pattern(pattern)?;
         let nb_captures = person_name_pattern.name_fields.len();
         let trailing_end = person_name_pattern
-            .get_field(&NameField {
+            .get_field(NameField {
                 kind: NameFieldKind::Credentials,
                 modifier: Default::default(),
             })
             .unwrap();
-        assert_eq!(nb_captures, 6, "{}", nb_captures);
+        assert_eq!(nb_captures, 6, "{nb_captures}");
         assert_eq!(
             trailing_end, "",
             "should be a empty at the end space matched"
         );
         let trailing_comma = person_name_pattern
-            .get_field(&NameField {
+            .get_field(NameField {
                 kind: NameFieldKind::Generation,
                 modifier: Default::default(),
             })
             .unwrap();
         assert_eq!(trailing_comma, ", ", "should be a comma after generation");
         let trailing_space = person_name_pattern
-            .get_field(&NameField {
+            .get_field(NameField {
                 kind: NameFieldKind::Title,
                 modifier: Default::default(),
             })
@@ -299,9 +294,9 @@ mod tests {
         let person_name_pattern = to_person_name_pattern(pattern)?;
         let captures = person_name_pattern.name_fields.len();
 
-        assert_eq!(captures, 3, "{}", captures);
+        assert_eq!(captures, 3, "{captures}");
         assert!(
-            person_name_pattern.contains_key(&NameField {
+            person_name_pattern.contains_key(NameField {
                 kind: NameFieldKind::Surname,
                 modifier: FieldModifierSet::new(
                     FieldCapsStyle::AllCaps,
@@ -313,7 +308,7 @@ mod tests {
             "didn't properly match surname-monogram-allCaps"
         );
         assert!(
-            person_name_pattern.contains_key(&NameField {
+            person_name_pattern.contains_key(NameField {
                 kind: NameFieldKind::Given,
                 modifier: FieldModifierSet::new(
                     FieldCapsStyle::AllCaps,
@@ -325,7 +320,7 @@ mod tests {
             "didn't properly match given-monogram-allCaps"
         );
         assert!(
-            person_name_pattern.contains_key(&NameField {
+            person_name_pattern.contains_key(NameField {
                 kind: NameFieldKind::Given2,
                 modifier: FieldModifierSet::new(
                     FieldCapsStyle::AllCaps,
@@ -338,7 +333,7 @@ mod tests {
         );
 
         let trailing = person_name_pattern
-            .get_field(&NameField {
+            .get_field(NameField {
                 kind: NameFieldKind::Given2,
                 modifier: FieldModifierSet::new(
                     FieldCapsStyle::AllCaps,

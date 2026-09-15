@@ -47,7 +47,7 @@ fn test_locale_parsing() {
 }
 
 #[test]
-fn test_langid_invalid() {
+fn test_locale_invalid() {
     let data = serde_json::from_str(include_str!("fixtures/invalid-extensions.json"))
         .expect("Failed to read a fixture");
 
@@ -56,14 +56,14 @@ fn test_langid_invalid() {
 
 #[test]
 fn test_locale_is_empty() {
-    let locale: Locale = Locale::default();
+    let locale: Locale = Locale::UNKNOWN;
     assert!(locale.extensions.is_empty());
     assert_writeable_eq!(locale, "und");
 }
 
 #[test]
 fn test_locale_conversions() {
-    let locale: Locale = Locale::default();
+    let locale: Locale = Locale::UNKNOWN;
     let langid: LanguageIdentifier = locale.clone().into();
     let locale2: Locale = langid.into();
     assert_eq!(locale, locale2);
@@ -116,4 +116,19 @@ fn test_locale_strict_cmp() {
             assert_eq!(string_cmp, test_cmp, "{a:?}/{b:?}");
         }
     }
+}
+
+#[test]
+fn test_locale_total_cmp() {
+    let l_1_bar = "und-1-bar".parse::<Locale>().unwrap();
+    let l_a_foo = "und-a-foo".parse::<Locale>().unwrap();
+    let l_2_baz = "und-2-baz".parse::<Locale>().unwrap();
+
+    assert_eq!(l_1_bar.total_cmp(&l_a_foo), std::cmp::Ordering::Less);
+    assert_eq!(l_1_bar.total_cmp(&l_2_baz), std::cmp::Ordering::Less);
+    assert_eq!(l_2_baz.total_cmp(&l_a_foo), std::cmp::Ordering::Less);
+
+    let l_en_1 = "en-1-ext-value".parse::<Locale>().unwrap();
+    let l_en_a = "en-a-ext-value".parse::<Locale>().unwrap();
+    assert_eq!(l_en_1.total_cmp(&l_en_a), std::cmp::Ordering::Less);
 }

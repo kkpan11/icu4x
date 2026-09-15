@@ -2,564 +2,467 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::cldr_serde;
-use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
-use either::Either;
-use icu::datetime::provider::calendar::*;
-use icu::locale::extensions::unicode::Value;
-use icu::locale::extensions::unicode::{key, value};
-use icu::locale::LanguageIdentifier;
+use crate::cldr_serde;
+use icu::calendar::AnyCalendarKind;
+use icu::datetime::provider::fields::{Field, components};
+use icu::datetime::provider::packed_pattern::{
+    GenericLengthElements, GenericPackedPatternsBuilder,
+};
+use icu::datetime::provider::pattern::CoarseHourCycle;
+use icu::datetime::provider::skeleton::SkeletonError;
+use icu::datetime::provider::skeleton::reference::Skeleton;
+use icu_locale_core::preferences::extensions::unicode::keywords::HourCycle;
+
+use icu::datetime::pattern::FixedCalendarDateTimeNames;
+use icu::datetime::provider::packed_pattern::GenericPackedPatterns;
 use icu_provider::prelude::*;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::collections::{BTreeMap, HashSet};
+use zerovec::ule::VarULE;
 
-mod neo;
-mod neo_skeleton;
-mod patterns;
-mod skeletons;
-mod symbols;
-pub(crate) mod week_data;
+mod available_formats;
+mod day_periods;
+mod names;
+mod range_patterns;
+mod semantic_skeletons;
+use semantic_skeletons::Trio;
+mod week_data;
 
-pub(crate) static SUPPORTED_CALS: OnceLock<
-    HashMap<icu::locale::extensions::unicode::Value, &'static str>,
-> = OnceLock::new();
+/// These are the calendars that datetime needs names for. They are roughly the
+/// CLDR calendars, with the Hijri calendars merged.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) enum DatagenCalendar {
+    Buddhist,
+    Chinese,
+    Coptic,
+    Dangi,
+    Ethiopic,
+    Gregorian,
+    Hebrew,
+    Indian,
+    Hijri,
+    Japanese,
+    Persian,
+    Roc,
+}
 
-fn supported_cals() -> &'static HashMap<icu::locale::extensions::unicode::Value, &'static str> {
-    SUPPORTED_CALS.get_or_init(|| {
-        [
-            (value!("buddhist"), "buddhist"),
-            (value!("chinese"), "chinese"),
-            (value!("coptic"), "coptic"),
-            (value!("dangi"), "dangi"),
-            (value!("ethiopic"), "ethiopic"),
-            (value!("gregory"), "gregorian"),
-            (value!("hebrew"), "hebrew"),
-            (value!("indian"), "indian"),
-            (value!("islamic"), "islamic"),
-            (value!("islamicc"), "islamic"),
-            (value!("japanese"), "japanese"),
-            (value!("japanext"), "japanese"),
-            (value!("persian"), "persian"),
-            (value!("roc"), "roc"),
-            (value!("tbla"), "islamic"),
-            (value!("umalqura"), "islamic"),
-        ]
-        .into_iter()
-        .collect()
-    })
+impl DatagenCalendar {
+    pub(crate) fn cldr_name(self) -> &'static str {
+        use DatagenCalendar::*;
+        match self {
+            Buddhist => "buddhist",
+            Chinese => "chinese",
+            Coptic => "coptic",
+            Dangi => "dangi",
+            Ethiopic => "ethiopic",
+            Gregorian => "gregorian",
+            Hebrew => "hebrew",
+            Indian => "indian",
+            Hijri => "islamic",
+            Japanese => "japanese",
+            Persian => "persian",
+            Roc => "roc",
+        }
+    }
+
+    pub(crate) fn from_cldr_name(s: &str) -> Self {
+        use DatagenCalendar::*;
+        match s {
+            "buddhist" => Buddhist,
+            "chinese" => Chinese,
+            "coptic" => Coptic,
+            "dangi" => Dangi,
+            "ethiopic" | "ethiopic-amete-alem" => Ethiopic,
+            "gregorian" => Gregorian,
+            "hebrew" => Hebrew,
+            "indian" => Indian,
+            "islamic" | "islamic-civil" | "islamic-umalqura" | "islamic-rgsa" | "islamic-tbla" => {
+                Hijri
+            }
+            "japanese" => Japanese,
+            "persian" => Persian,
+            "roc" => Roc,
+            c => panic!("{c}"),
+        }
+    }
+
+    pub(crate) fn canonical_any_calendar_kind(self) -> AnyCalendarKind {
+        use DatagenCalendar::*;
+        match self {
+            Buddhist => AnyCalendarKind::Buddhist,
+            Chinese => AnyCalendarKind::Chinese,
+            Coptic => AnyCalendarKind::Coptic,
+            Dangi => AnyCalendarKind::Dangi,
+            Ethiopic => AnyCalendarKind::Ethiopian, // also covers EthiopianAmeteAlem
+            Gregorian => AnyCalendarKind::Gregorian,
+            Hebrew => AnyCalendarKind::Hebrew,
+            Indian => AnyCalendarKind::Indian,
+            Hijri => AnyCalendarKind::HijriUmmAlQura, // also covers HijriTabular*, HijriSimulatedMecca
+            Japanese => AnyCalendarKind::Japanese,
+            Persian => AnyCalendarKind::Persian,
+            Roc => AnyCalendarKind::Roc,
+        }
+    }
 }
 
 impl SourceDataProvider {
-    fn get_datetime_resources(
+    pub(crate) fn get_dates_resource(
         &self,
-        langid: &LanguageIdentifier,
-        calendar: Either<&Value, &str>,
-    ) -> Result<cldr_serde::ca::Dates, DataError> {
-        let is_japanext = calendar == Either::Left(&value!("japanext"));
-        let cldr_cal = match calendar {
-            Either::Left(value) => supported_cals()
-                .get(value)
-                .ok_or_else(|| DataErrorKind::IdentifierNotFound.into_error())?,
-            Either::Right(s) => s,
-        };
+        locale: &DataLocale,
+        calendar: Option<DatagenCalendar>,
+    ) -> Result<&cldr_serde::ca::Dates, DataError> {
+        let cldr_cal = calendar
+            .map(DatagenCalendar::cldr_name)
+            .unwrap_or("generic");
 
-        let resource: &cldr_serde::ca::Resource = self
+        let resource = self
             .cldr()?
-            .dates(cldr_cal)
-            .read_and_parse(langid, &format!("ca-{}.json", cldr_cal))?;
-
-        let mut data = resource
+            .dates(calendar)
+            .read_and_parse::<cldr_serde::ca::Resource>(locale, &format!("ca-{cldr_cal}.json"))?
             .main
             .value
             .dates
             .calendars
             .get(cldr_cal)
-            .expect("CLDR file contains the expected calendar")
-            .clone();
+            .expect("CLDR file contains the expected calendar");
 
-        // CLDR treats ethiopian and ethioaa as separate calendars; however we treat them as a single resource key that
-        // supports symbols for both era patterns based on the settings on the date. Load in ethioaa data as well when dealing with
-        // ethiopian.
-        if cldr_cal == "ethiopic" {
-            let ethioaa: &cldr_serde::ca::Resource = self
+        // load other ca-islamic-*.json files and verify that they match
+        if calendar == Some(DatagenCalendar::Hijri) {
+            for variant in &["civil", "rgsa", "tbla", "umalqura"] {
+                let variant_resource = self
+                    .cldr()?
+                    .dates(calendar)
+                    .read_and_parse::<cldr_serde::ca::Resource>(
+                        locale,
+                        &format!("ca-islamic-{variant}.json"),
+                    )?
+                    .main
+                    .value
+                    .dates
+                    .calendars
+                    .get(&format!("islamic-{variant}"))
+                    .expect("CLDR file contains the expected calendar");
+
+                if variant_resource != resource {
+                    log::warn!("islamic/islamic-{variant} data mismatch: {locale}");
+                }
+            }
+        }
+
+        // load ca-ethiopic-amete-alem.json and verify that it matches
+        if calendar == Some(DatagenCalendar::Ethiopic) {
+            let alem = self
                 .cldr()?
-                .dates("ethiopic")
-                .read_and_parse(langid, "ca-ethiopic-amete-alem.json")?;
-
-            let ethioaa_data = ethioaa
+                .dates(calendar)
+                .read_and_parse::<cldr_serde::ca::Resource>(locale, "ca-ethiopic-amete-alem.json")?
                 .main
                 .value
                 .dates
                 .calendars
                 .get("ethiopic-amete-alem")
-                .expect("CLDR ca-ethiopic-amete-alem.json contains the expected calendar")
-                .clone();
+                .expect("CLDR file contains the expected calendar");
 
-            let ethioaa_eras = ethioaa_data.eras.as_ref().expect("ethioaa must have eras");
-            let mundi_name = ethioaa_eras
-                .names
-                .get("0")
-                .expect("ethiopic-amete-alem calendar must have 0 era");
-            let mundi_abbr = ethioaa_eras
-                .abbr
-                .get("0")
-                .expect("ethiopic-amete-alem calendar must have 0 era");
-            let mundi_narrow = ethioaa_eras
-                .narrow
-                .get("0")
-                .expect("ethiopic-amete-alem calendar must have 0 era");
-
-            let eras = data.eras.as_mut().expect("ethiopic must have eras");
-            eras.names.insert("2".to_string(), mundi_name.clone());
-            eras.abbr.insert("2".to_string(), mundi_abbr.clone());
-            eras.narrow.insert("2".to_string(), mundi_narrow.clone());
-        }
-
-        if cldr_cal == "japanese" {
-            let eras = data.eras.as_mut().expect("japanese must have eras");
-            // Filter out non-modern eras
-            if !is_japanext {
-                let modern_japanese_eras = self.cldr()?.modern_japanese_eras()?;
-                eras.names.retain(|e, _| modern_japanese_eras.contains(e));
-                eras.abbr.retain(|e, _| modern_japanese_eras.contains(e));
-                eras.narrow.retain(|e, _| modern_japanese_eras.contains(e));
+            if (
+                &alem.cyclic_name_sets,
+                &alem.date_formats,
+                &alem.date_skeletons,
+                &alem.datetime_formats,
+                &alem.datetime_formats_at_time,
+                &alem.day_periods,
+                &alem.days,
+                &alem
+                    .eras
+                    .as_ref()
+                    .map(|e| (e.abbr.get("0"), e.names.get("0"), e.narrow.get("0"))),
+                &alem.month_patterns,
+                &alem.months,
+                &alem.time_formats,
+                &alem.time_skeletons,
+            ) != (
+                &resource.cyclic_name_sets,
+                &resource.date_formats,
+                &resource.date_skeletons,
+                &resource.datetime_formats,
+                &resource.datetime_formats_at_time,
+                &resource.day_periods,
+                &resource.days,
+                &resource
+                    .eras
+                    .as_ref()
+                    .map(|e| (e.abbr.get("0"), e.names.get("0"), e.narrow.get("0"))),
+                &resource.month_patterns,
+                &resource.months,
+                &resource.time_formats,
+                &resource.time_skeletons,
+            ) {
+                log::warn!("ethiopic/ethiopic-amete-alem data mismatch: {locale}");
             }
-
-            // Splice in gregorian data for pre-meiji
-            let greg_resource: &cldr_serde::ca::Resource = self
-                .cldr()?
-                .dates("gregorian")
-                .read_and_parse(langid, "ca-gregorian.json")?;
-
-            let greg = greg_resource
-                .main
-                .value
-                .dates
-                .calendars
-                .get("gregorian")
-                .expect("CLDR file contains a gregorian calendar")
-                .clone();
-
-            let greg_eras = greg.eras.as_ref().expect("gregorian must have eras");
-
-            eras.names.insert(
-                "-2".into(),
-                greg_eras
-                    .names
-                    .get("0")
-                    .expect("Gregorian calendar must have data for BC")
-                    .into(),
-            );
-            eras.names.insert(
-                "-1".into(),
-                greg_eras
-                    .names
-                    .get("1")
-                    .expect("Gregorian calendar must have data for AD")
-                    .into(),
-            );
-            eras.abbr.insert(
-                "-2".into(),
-                greg_eras
-                    .abbr
-                    .get("0")
-                    .expect("Gregorian calendar must have data for BC")
-                    .into(),
-            );
-            eras.abbr.insert(
-                "-1".into(),
-                greg_eras
-                    .abbr
-                    .get("1")
-                    .expect("Gregorian calendar must have data for AD")
-                    .into(),
-            );
-            eras.narrow.insert(
-                "-2".into(),
-                greg_eras
-                    .narrow
-                    .get("0")
-                    .expect("Gregorian calendar must have data for BC")
-                    .into(),
-            );
-            eras.narrow.insert(
-                "-1".into(),
-                greg_eras
-                    .narrow
-                    .get("1")
-                    .expect("Gregorian calendar must have data for AD")
-                    .into(),
-            );
         }
 
-        Ok(data)
+        Ok(resource)
     }
 }
 
-macro_rules! impl_data_provider {
-    ($marker:ident, $expr:expr, $calendar:expr) => {
-        impl DataProvider<$marker> for SourceDataProvider {
-            fn load(&self, req: DataRequest) -> Result<DataResponse<$marker>, DataError> {
-                self.check_req::<$marker>(req)?;
-
-                let langid = req.id.locale.get_langid();
-
-                let calendar = if DateSkeletonPatternsV1Marker::INFO == $marker::INFO {
-                    req.id
-                        .locale
-                        .get_unicode_ext(&key!("ca"))
-                        .ok_or_else(|| DataErrorKind::IdentifierNotFound.into_error())?
-                } else {
-                    value!($calendar)
-                };
-
-                let data = self.get_datetime_resources(&langid, Either::Left(&calendar))?;
-
-                #[allow(clippy::redundant_closure_call)]
-                Ok(DataResponse {
-                    metadata: Default::default(),
-                    payload: DataPayload::from_owned(($expr)(&data, &calendar.to_string())),
-                })
-            }
-        }
-
-        impl IterableDataProviderCached<$marker> for SourceDataProvider {
-            fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
-                let mut r = HashSet::new();
-                if DateSkeletonPatternsV1Marker::INFO == $marker::INFO {
-                    for (cal_value, cldr_cal) in supported_cals() {
-                        r.extend(self.cldr()?.dates(cldr_cal).list_langs()?.map(|lid| {
-                            let mut locale = DataLocale::from(lid);
-                            locale.set_unicode_ext(key!("ca"), cal_value.clone());
-                            DataIdentifierCow::from_locale(locale)
-                        }));
-                    }
-                } else {
-                    let cldr_cal = supported_cals()
-                        .get(&value!($calendar))
-                        .ok_or_else(|| DataErrorKind::IdentifierNotFound.into_error())?;
-                    r.extend(
-                        self.cldr()?
-                            .dates(cldr_cal)
-                            .list_langs()?
-                            .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l))),
-                    );
-                }
-
-                // TODO(#3212): Remove
-                if $marker::INFO == TimeLengthsV1Marker::INFO {
-                    r.retain(|id| {
-                        id.locale.get_langid() != icu::locale::langid!("byn")
-                            && id.locale.get_langid() != icu::locale::langid!("ssy")
-                    });
-                }
-
-                Ok(r)
-            }
-        }
-    };
+/// Iterates over all supported locales for a given calendar and generates
+/// `DataIdentifierCow` keys for all combinations of the provided fieldset attributes.
+///
+/// This is a shared helper used by both standard and range skeleton providers to
+/// generate the set of supported locales they can serve.
+///
+/// # Arguments
+/// * `provider` - The source data provider to load CLDR data from.
+/// * `calendar` - The calendar to load locales for (e.g., Gregorian, Buddhist). If `None`, uses "generic".
+/// * `fieldset_attributes` - A list of slices of data marker attributes to combine with each locale.
+pub(crate) fn iter_skeleton_supported_locales(
+    provider: &SourceDataProvider,
+    calendar: Option<DatagenCalendar>,
+    fieldset_attributes: &[&[&'static DataMarkerAttributes]],
+) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
+    Ok(provider
+        .cldr()?
+        .dates(calendar)
+        .list_locales()?
+        .flat_map(|locale| {
+            fieldset_attributes
+                .iter()
+                .flat_map(|list| list.iter())
+                .map(move |attrs| DataIdentifierCow::from_borrowed_and_owned(attrs, locale))
+        })
+        .collect())
 }
 
-impl_data_provider!(
-    BuddhistDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "buddhist"
-);
-impl_data_provider!(
-    BuddhistDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "buddhist"
-);
-impl_data_provider!(
-    ChineseDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "chinese"
-);
-impl_data_provider!(
-    ChineseDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "chinese"
-);
-impl_data_provider!(
-    CopticDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "coptic"
-);
-impl_data_provider!(CopticDateSymbolsV1Marker, symbols::convert_dates, "coptic");
-impl_data_provider!(
-    DangiDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "dangi"
-);
-impl_data_provider!(DangiDateSymbolsV1Marker, symbols::convert_dates, "dangi");
-impl_data_provider!(
-    EthiopianDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "ethiopic"
-);
-impl_data_provider!(
-    EthiopianDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "ethiopic"
-);
-impl_data_provider!(
-    GregorianDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "gregory"
-);
-impl_data_provider!(
-    GregorianDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "gregory"
-);
-impl_data_provider!(
-    HebrewDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "hebrew"
-);
-impl_data_provider!(HebrewDateSymbolsV1Marker, symbols::convert_dates, "hebrew");
-impl_data_provider!(
-    IndianDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "indian"
-);
-impl_data_provider!(IndianDateSymbolsV1Marker, symbols::convert_dates, "indian");
-impl_data_provider!(
-    IslamicDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "islamicc"
-);
-impl_data_provider!(
-    IslamicDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "islamicc"
-);
-impl_data_provider!(
-    JapaneseDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "japanese"
-);
-impl_data_provider!(
-    JapaneseDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "japanese"
-);
-impl_data_provider!(
-    JapaneseExtendedDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "japanext"
-);
-impl_data_provider!(
-    JapaneseExtendedDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "japanext"
-);
-impl_data_provider!(
-    PersianDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "persian"
-);
-impl_data_provider!(
-    PersianDateSymbolsV1Marker,
-    symbols::convert_dates,
-    "persian"
-);
-impl_data_provider!(
-    RocDateLengthsV1Marker,
-    |dates, _| DateLengthsV1::from(dates),
-    "roc"
-);
-impl_data_provider!(RocDateSymbolsV1Marker, symbols::convert_dates, "roc");
+/// Parses a collection of raw CLDR skeleton strings and their associated values into a `BTreeMap`.
+///
+/// Skeletons that fail to parse via [`Skeleton::try_from`] are silently ignored.
+/// If a duplicate skeleton is encountered after normalization (e.g. due to 'E' vs 'c' forms),
+/// it will overwrite the previous value and log a warning.
+///
+/// # Example Input
+/// This function is designed to parse maps like:
+/// ```json
+/// {
+///   "yMd": "y/M/d",
+///   "yMMMMd": "y MMMM d",
+///   "invalid_skeleton": "pattern"
+/// }
+/// ```
+/// For `"yMd"`, it parses it into a `Skeleton` and calls `map_fn` with it and `"y/M/d"`.
+/// `"invalid_skeleton"` will be skipped.
+///
+/// # Arguments
+/// * `raw_patterns` - An iterator over `(skeleton_string, value)` pairs.
+/// * `map_fn` - A closure that maps the parsed `Skeleton` and the raw value into the desired result type `R`.
+pub(crate) fn parse_cldr_skeletons<'a, K, V: 'a, R, I, F>(
+    raw_patterns: I,
+    mut map_fn: F,
+) -> BTreeMap<Skeleton, R>
+where
+    K: AsRef<str> + 'a,
+    I: IntoIterator<Item = (&'a K, &'a V)>,
+    F: FnMut(&Skeleton, &'a V) -> Option<R>,
+{
+    let mut result = BTreeMap::new();
+    for (skeleton_str, value) in raw_patterns {
+        let skeleton = match Skeleton::try_from(skeleton_str.as_ref()) {
+            Ok(s) => s,
+            Err(SkeletonError::SymbolUnimplemented(_)) => continue,
+            Err(SkeletonError::SkeletonHasVariant) => continue,
+            Err(err) => panic!(
+                "Unexpected skeleton error while parsing skeleton {} {err}",
+                skeleton_str.as_ref()
+            ),
+        };
+        if let Some(mapped) = map_fn(&skeleton, value) {
+            // CLDR seems to be moving away from `c` in `availableFormats` skeleta.
+            // We don't expect to see both `E` and `c` for the same skeleton, but if we do,
+            // we warn and prefer the one that appeared later in the map (arbitrary).
+            if let Some(_old) = result.insert(skeleton.clone(), mapped) {
+                log::warn!(
+                    "Duplicate skeleton found after normalization: {}. This might happen if CLDR has both 'E' and 'c' forms.",
+                    skeleton
+                );
+            }
+        }
+    }
+    result
+}
 
-impl_data_provider!(
-    TimeLengthsV1Marker,
-    |dates, _| TimeLengthsV1::from(dates),
-    "gregory"
-);
-impl_data_provider!(
-    TimeSymbolsV1Marker,
-    |dates, _| { symbols::convert_times(dates) },
-    "gregory"
-);
+/// Transposes a length-major structure of pattern trios into a variant-major builder structure,
+/// performing fallback using `to_builder_item` to avoid cloning.
+///
+/// Converts `GenericLengthElements<Trio<T::FinalItem>>` (patterns grouped by length, containing standard/variants)
+/// into `GenericPackedPatternsBuilder<T::BuilderItem<'b>>` (patterns grouped by standard/variants, containing lengths).
+pub(crate) fn transpose_with_fallback<'b, T: PackedPatternItem>(
+    group: &'b GenericLengthElements<Trio<T::FinalItem>>,
+) -> GenericPackedPatternsBuilder<T::BuilderItem<'b>> {
+    let variant0 = if group.long.variant0.is_some()
+        || group.medium.variant0.is_some()
+        || group.short.variant0.is_some()
+    {
+        Some(GenericLengthElements {
+            long: T::to_builder_item(group.long.variant0.as_ref().unwrap_or(&group.long.standard)),
+            medium: T::to_builder_item(
+                group
+                    .medium
+                    .variant0
+                    .as_ref()
+                    .unwrap_or(&group.medium.standard),
+            ),
+            short: T::to_builder_item(
+                group
+                    .short
+                    .variant0
+                    .as_ref()
+                    .unwrap_or(&group.short.standard),
+            ),
+        })
+    } else {
+        None
+    };
+    let variant1 = if group.long.variant1.is_some()
+        || group.medium.variant1.is_some()
+        || group.short.variant1.is_some()
+    {
+        Some(GenericLengthElements {
+            long: T::to_builder_item(group.long.variant1.as_ref().unwrap_or(&group.long.standard)),
+            medium: T::to_builder_item(
+                group
+                    .medium
+                    .variant1
+                    .as_ref()
+                    .unwrap_or(&group.medium.standard),
+            ),
+            short: T::to_builder_item(
+                group
+                    .short
+                    .variant1
+                    .as_ref()
+                    .unwrap_or(&group.short.standard),
+            ),
+        })
+    } else {
+        None
+    };
+    GenericPackedPatternsBuilder {
+        standard: GenericLengthElements {
+            long: T::to_builder_item(&group.long.standard),
+            medium: T::to_builder_item(&group.medium.standard),
+            short: T::to_builder_item(&group.short.standard),
+        },
+        variant0,
+        variant1,
+    }
+}
 
-impl_data_provider!(
-    DateSkeletonPatternsV1Marker,
-    |dates, _| { DateSkeletonPatternsV1::from(dates) },
-    "unused"
-);
+pub(crate) trait PackedPatternItem: Sized {
+    /// The context required to match fields for this pattern item.
+    type MatchFieldsContext;
+    /// The final item type after finalization (e.g. stripping distance).
+    type FinalItem: PartialEq;
+    /// The borrowed item type used for building the packed structure.
+    type BuilderItem<'a>: PartialEq
+    where
+        Self: 'a;
+    /// The ULE type for packing.
+    type Ule: VarULE + ?Sized + 'static;
+    /// The distance type used to sort patterns by match quality.
+    type MatchQuality: Ord;
+
+    /// Attempts to find a matching pattern for the given fields in the context.
+    ///
+    /// Generates a reasonable fallback if it can't find one.
+    fn match_fields(
+        context: &Self::MatchFieldsContext,
+        components_bag: &components::Bag,
+        hour_cycle: HourCycle,
+        fields: &[Field],
+    ) -> Self;
+
+    /// Returns the match quality (distance) of this pattern item.
+    fn match_quality(&self) -> Self::MatchQuality;
+
+    /// Finalizes the item (e.g., converts from a internal representation to the provider one).
+    fn finalize_item(self) -> Self::FinalItem;
+
+    /// Converts a reference to the final item into the borrowed builder item.
+    fn to_builder_item<'b>(item: &'b Self::FinalItem) -> Self::BuilderItem<'b>;
+
+    /// Builds the packed structure from the builder.
+    fn build_packed<'b>(
+        builder: GenericPackedPatternsBuilder<Self::BuilderItem<'b>>,
+    ) -> GenericPackedPatterns<'static, Self::Ule>
+    where
+        Self: 'b;
+
+    /// Applies numeric overrides to the pattern items.
+    fn apply_numeric_overrides(&mut self, lp: &cldr_serde::ca::LengthPattern);
+
+    /// Enforces consistent field lengths in the patterns.
+    ///
+    /// This is only needed for date patterns which have some bugs in CLDR. It
+    /// can be removed when CLDR bugs are fixed, or replaced with a pure non-mutating warning.
+    fn enforce_consistency(
+        &mut self,
+        names: &mut FixedCalendarDateTimeNames<()>,
+        locale: &DataLocale,
+        calendar: Option<DatagenCalendar>,
+        attributes: &DataMarkerAttributes,
+    );
+}
+
+/// A generic helper to resolve a pattern from a components bag, handling hour cycle and fallback.
+pub(crate) fn select_pattern<T: PackedPatternItem>(
+    context: &T::MatchFieldsContext,
+    components_bag: components::Bag,
+    preferred_hour_cycle: CoarseHourCycle,
+) -> T {
+    let default_hour_cycle = match preferred_hour_cycle {
+        CoarseHourCycle::H11H12 => HourCycle::H12,
+        CoarseHourCycle::H23 => HourCycle::H23,
+    };
+    let fields = components_bag.to_vec_fields(default_hour_cycle);
+    T::match_fields(context, &components_bag, default_hour_cycle, &fields)
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use icu::locale::langid;
+    use icu::{
+        datetime::provider::skeleton::reference::Skeleton, locale::data_locale,
+        plurals::PluralElements,
+    };
 
     #[test]
-    fn test_basic_patterns() {
-        let provider = SourceDataProvider::new_testing();
-
-        let cs_dates: DataResponse<GregorianDateLengthsV1Marker> = provider
-            .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("cs").into()),
-                ..Default::default()
-            })
-            .expect("Failed to load payload");
-
-        assert_eq!("d. M. y", cs_dates.payload.get().date.medium.to_string());
-    }
-
-    #[test]
-    fn test_with_numbering_system() {
-        let provider = SourceDataProvider::new_testing();
-
-        let cs_dates: DataResponse<GregorianDateLengthsV1Marker> = provider
-            .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("haw").into()),
-                ..Default::default()
-            })
-            .expect("Failed to load payload");
-
-        assert_eq!("d MMM y", cs_dates.payload.get().date.medium.to_string());
-        // TODO(#308): Support numbering system variations. We currently throw them away.
-        assert_eq!("d/M/yy", cs_dates.payload.get().date.short.to_string());
-    }
-
-    #[test]
+    #[ignore] // TODO(#5643)
     fn test_datetime_skeletons() {
-        use icu::datetime::pattern::runtime::{Pattern, PluralPattern};
-        use icu::plurals::PluralCategory;
-        use std::convert::TryFrom;
-
         let provider = SourceDataProvider::new_testing();
-
-        let skeletons: DataResponse<DateSkeletonPatternsV1Marker> = provider
-            .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&"fil-u-ca-gregory".parse().unwrap()),
-                ..Default::default()
-            })
-            .expect("Failed to load payload");
-        let skeletons = &skeletons.payload.get().0;
+        let skeletons = provider
+            .get_dates_resource(&data_locale!("fil"), Some(DatagenCalendar::Gregorian))
+            .unwrap()
+            .datetime_formats
+            .available_formats
+            .parse_skeletons(provider.datetime_ascii_preference());
 
         assert_eq!(
-            Some(
-                &"L".parse::<Pattern>()
-                    .expect("Failed to create pattern")
-                    .into()
-            ),
-            skeletons.get(&SkeletonV1::try_from("M").expect("Failed to create Skeleton"))
+            Some(&PluralElements::new(
+                "L".parse().expect("Failed to create pattern")
+            )),
+            skeletons.get(&Skeleton::try_from("M").expect("Failed to create Skeleton"))
         );
 
-        let mut expected = PluralPattern::new(
+        let expected = PluralElements::new(
             "'linggo' w 'ng' Y"
                 .parse()
                 .expect("Failed to create pattern"),
         )
-        .expect("Failed to create PatternPlurals");
-        expected.maybe_set_variant(
-            PluralCategory::One,
+        .with_one_value(Some(
             "'ika'-w 'linggo' 'ng' Y"
                 .parse()
                 .expect("Failed to create pattern"),
-        );
+        ));
         assert_eq!(
-            Some(&expected.into()),
-            skeletons.get(&SkeletonV1::try_from("yw").expect("Failed to create Skeleton"))
+            Some(&expected),
+            skeletons.get(&Skeleton::try_from("yw").expect("Failed to create Skeleton"))
         );
-    }
-
-    #[test]
-    fn test_basic_symbols() {
-        use icu::calendar::types::MonthCode;
-        use tinystr::tinystr;
-        let provider = SourceDataProvider::new_testing();
-
-        let cs_dates: DataResponse<GregorianDateSymbolsV1Marker> = provider
-            .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("cs").into()),
-                ..Default::default()
-            })
-            .unwrap();
-
-        assert_eq!(
-            "srpna",
-            cs_dates
-                .payload
-                .get()
-                .months
-                .format
-                .wide
-                .get(MonthCode(tinystr!(4, "M08")))
-                .unwrap()
-        );
-
-        assert_eq!(
-            "po",
-            cs_dates
-                .payload
-                .get()
-                .weekdays
-                .format
-                .short
-                .as_ref()
-                .unwrap()
-                .0[1]
-        );
-    }
-
-    #[test]
-    fn unalias_contexts() {
-        let provider = SourceDataProvider::new_testing();
-
-        let cs_dates: DataResponse<GregorianDateSymbolsV1Marker> = provider
-            .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("cs").into()),
-                ..Default::default()
-            })
-            .unwrap();
-
-        // Czech months are not unaliased because `wide` differs.
-        assert!(cs_dates.payload.get().months.stand_alone.is_some());
-
-        // Czech months are not unaliased because `wide` differs.
-        assert!(cs_dates
-            .payload
-            .get()
-            .months
-            .stand_alone
-            .as_ref()
-            .unwrap()
-            .abbreviated
-            .is_none());
-        assert!(cs_dates
-            .payload
-            .get()
-            .months
-            .stand_alone
-            .as_ref()
-            .unwrap()
-            .short
-            .is_none());
-        assert!(cs_dates
-            .payload
-            .get()
-            .months
-            .stand_alone
-            .as_ref()
-            .unwrap()
-            .narrow
-            .is_none());
-        assert!(cs_dates
-            .payload
-            .get()
-            .months
-            .stand_alone
-            .as_ref()
-            .unwrap()
-            .wide
-            .is_some());
-
-        // Czech weekdays are unaliased because they completely overlap.
-        assert!(cs_dates.payload.get().weekdays.stand_alone.is_none());
     }
 }

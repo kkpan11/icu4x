@@ -201,11 +201,9 @@ There are several types of invisible code points in Unicode, including whitespac
 - In docs tests: users are more interested in the end result, so favor rendering the invisible characters. When invisible characters could cause confusion, it is suggested to leave an unrendered docs comment, such as `# // The following line contains an invisible code point.`
 - In source code and unit tests: being explicit about invisible characters makes reading and modifying code more explicit for ICU4X developers, so favor using escape sequences.
 
-# Structs and Traits
+## Private vs Public
 
 For ICU4X we should be looking to keep code consistent and very unsurprising, especially for layout and behavior of data structures.
-
-## Private vs Public
 
 Rust offers a compelling model for encapsulating implementation details based on a hierarchical view of privacy; see [Visibility and Privacy - The Rust Reference](https://doc.rust-lang.org/reference/visibility-and-privacy.html). This should allow ICU4X to encapsulate all of its implementation details neatly from applications using the library and avoid too many cases of [Hyrum's Law](https://www.hyrumslaw.com/).
 
@@ -287,6 +285,18 @@ One suggested situation in which public fields would be acceptable is for user-f
 
 See [this issue](https://github.com/unicode-org/rust-discuss/issues/15) for more.
 
+### Cross-crate internal APIs :: suggested
+
+Cross-crate internal APIs (public APIs marked `#[doc(hidden)]` in ICU4X component crates for use by other ICU4X component crates) allow sharing functionality between crates. If used, they must adhere to the following guidelines:
+
+- **Test and document as if stable:** A change to an internal API in one crate can break assumptions in another ("action at a distance"). To mitigate this, cross-crate internal APIs should be documented and tested to a similar level of scrutiny as public APIs.
+- **Design for graceful upgrades:** When clients update one crate at a time, they may experience ephemeral build breakages if these APIs change. Spend time designing the API shape to reduce the potential that you need to change it in the next release, which can cause friction for clients, or such that it is easy to "duplicate" the API instead of editing the existing one. (Note: anything using a trait impl is trickier to duplicate.)
+    - For **core crates** (e.g., `icu_provider`, `icu_locale_core`) that are not used with `~` dependencies, internal APIs _must not_ be changed in breaking ways, since doing so violates Cargo semver. If you need to change something, make a new internal API and keep the old one working.
+    - For **other crates**, internal APIs _should not_ be changed in breaking ways, since non-Cargo clients may still upgrade the crates out-of-sync, but exceptions can be made on a case-by-case basis.
+- **Take steps to reduce usage outside ICU4X:** Exported APIs can be discovered and used by clients. To discourage this, name such APIs explicitly (e.g., including `unstable` or `internal` in the name).
+
+In other words, spend time on the design of these APIs, treating them with the same care as public APIs even if they are not yet stabilized.
+
 ## Derived Traits
 
 ### Debug Trait on Public Types :: suggested
@@ -327,7 +337,7 @@ In ICU4X, we have a convention of making error types implement `Copy`. This is p
 To associate additional metadata with errors, such as file paths, use a logging macro. In binaries, including the `log` dependency directly and gate logs with a `"logging"` feature. In component library code, utilize the macros exported by the `icu_provider` crate, as shown below. For more discussion, see [#2648](https://github.com/unicode-org/icu4x/issues/2648).
 
 ```rust
-icu_provider::_internal::log::warn!("This is a warning");
+icu_provider::log::warn!("This is a warning");
 ```
 
 The logs are forwarded to one of three places:
@@ -373,11 +383,9 @@ This adds weight to the idea that we should avoid traits and any other unsized t
 
 For example, in general we should avoid returning an abstract trait to the user (intermediate traits like Iterator might be fine though since a user is expected to consume those fairly immediately).
 
-# Idiomatic Code
+## Pass by Reference vs Pass by Value
 
 A lot of this section just boils down to "[Read the Book](https://doc.rust-lang.org/book/)", but I'm highlighting a few things I personally found useful while learning.
-
-## Pass by Reference vs Pass by Value
 
 There is something a bit subtle about how Rust handles "pass by value" which means you should not just apply standard C++ best-practice. In particular, in C++ you would might expect a method like:
 
@@ -395,7 +403,7 @@ fn function_name(param: ParamType) -> ReturnType { … }
 
 may still have parameters "passed by reference" when it can determine that the reference is no longer subsequently used by the calling code (this is a "move" in Rust parlance).
 
-Furthermore, it will often [ellide the copy](https://en.wikipedia.org/wiki/Copy_elision) of the return value if it determines the returned object would otherwise go out of scope. It will allocate the space for the return value on the caller's stack or use the memory in a destination struct, to directly write the "returned" value in its final destination with no copying whatsoever. This is called Return Value Optimization (RVO) and while it is now available in C++ as well, it's a relatively new feature there.
+Furthermore, it will often [elide the copy](https://en.wikipedia.org/wiki/Copy_elision) of the return value if it determines the returned object would otherwise go out of scope. It will allocate the space for the return value on the caller's stack or use the memory in a destination struct, to directly write the "returned" value in its final destination with no copying whatsoever. This is called Return Value Optimization (RVO) and while it is now available in C++ as well, it's a relatively new feature there.
 
 It is still often better (for reasons of borrowing and ownership) to pass structs by non-mutable reference, but returning **newly created** results by value (even potentially large structures) is not expected to cause performance issues.
 
@@ -560,8 +568,6 @@ let x = match number {
 ```
 
 Obviously where an if-statement is simply there to do optional work, and not cover every case, it may well be more suitable to just use that.
-
-# Structs
 
 ## Structs with Private Fields
 
@@ -731,7 +737,7 @@ Keep the following in mind when using exotic types:
 
 If it is not possible to obey these requirements in an exotic type, use a standard type instead, but make sure that it requires minimal parsing and post-processing.
 
-# Error Handling
+## Error Handling
 
 See also the [Error Handling](https://doc.rust-lang.org/book/ch09-00-error-handling.html) chapter in the Rust Book.
 
@@ -761,7 +767,7 @@ A couple of crates by `@dtolnay` and `@yaahc` that are considered "new wave of g
 Other links on error handling:
 
 * https://blog.yoshuawuyts.com/error-handling-survey/
-* http://sled.rs/errors
+* https://sled.rs/errors
 * https://boats.gitlab.io/blog/post/failure-to-fehler/
 * https://boats.gitlab.io/blog/post/why-ok-wrapping/
 * https://vorner.github.io/2020/04/09/wrapping-mental-models.html
@@ -789,8 +795,6 @@ If data access is expected to fail occasionally (e.g. looking up properties in a
 
 If missing data signals a "hard" error from which the function cannot recover (e.g. user supplies incorrect input) then any returned `Option` should be [propagated into a `Result` immediately](https://doc.rust-lang.org/std/option/enum.Option.html#method.ok_or), with an appropriate error value.
 
-## Best Practice
-
 ### Don't Panic :: required
 
 Call non-panicking data access APIs whenever data is not guaranteed to be safe.
@@ -801,24 +805,7 @@ See also: the [Panics](#Panics--required) section of this document.
 
 #### Special Case: `split_at`
 
-The standard library functions such as `slice::split_at` are panicky, but they are not covered by our Clippy lints.
-
-Instead of using `slice::split_at` directly, it is recommended to use a helper function, which can be saved in the file in which it is being used. Example:
-
-```rust
-/// Like slice::split_at but returns an Option instead of panicking
-#[inline]
-fn debug_split_at(slice: &[u8], mid: usize) -> Option<(&[u8], &[u8])> {
-    if mid > slice.len() {
-        debug_assert!(false, "debug_split_at: index expected to be in range");
-        None
-    } else {
-        // Note: We're trusting the compiler to inline this and remove the assertion
-        // hiding on the top of slice::split_at: `assert(mid <= self.len())`
-        Some(slice.split_at(mid))
-    }
-}
-```
+The standard library functions such as `slice::split_at` are panicky, but they are not covered by our Clippy lints. Be careful to use `slice::split_at_checked` instead.
 
 #### Exception: Poison
 
@@ -928,13 +915,13 @@ where
 }
 ```
 
-# Lints
+## Lints
 
 Some lints should be enabled at the crate level for primary ICU4X crates. This guidance need not extend to utils.
 
-## Exhaustiveness :: required
+### Exhaustiveness :: required
 
-Crates should deny the `clippy::exhaustive_structs, clippy::exhaustive_enums` lints at the top-level so that our types default to being `#[non_exhaustive]`.
+Enforced by the workspace-level `clippy::exhaustive_structs, clippy::exhaustive_enums` lints so that our types default to being `#[non_exhaustive]`.
 
 These kinds of types _must_ be `#[non_exhaustive]`:
 
@@ -948,7 +935,7 @@ Most public newtypes and marker types should also be allowed to be exhaustive.
 
 Miscellaneous types with public fields may or may not be exhaustive based on need: if they are expected to be stable, they should be marked with an allow attribute and a comment explaining why. Otherwise, default to `#[non_exhaustive]`.
 
-## Panics :: required
+### Panics :: required
 
 Crates should deny the `clippy::indexing_slicing, clippy::unwrap_used, clippy::expect_used, clippy::panic` lints at the top-level to greatly reduce the number of panicky call sites in our code.
 
@@ -963,13 +950,11 @@ In general, non-panicky APIs that return `Result`s or `Option`s should be prefer
 
 `#[allow()]`s should be documented with a comment.
 
-## Debug :: required
+### Debug :: required
 
-Crates should deny the `missing_debug_implementations` lint at the top-level so that our types all have `Debug` implementations.
+Enforced by the workspace-level `missing_debug_implementations` lint so that our types all have `Debug` implementations.
 
-# Imports and Configurations
-
-## Features
+## Crate Features
 
 ### Use no_std :: suggested
 
@@ -992,7 +977,7 @@ the end user to control the code size of their compilation as follows:
 
 [features]: https://doc.rust-lang.org/cargo/reference/features.html
 
-## Dependencies
+## Crate Dependencies
 
 ### Avoid heavy dependencies :: suggested
 
@@ -1016,8 +1001,6 @@ fn insert_sorted<A>(vec: &mut Vec<A>, item: A) {
   }
 }
 ```
-
-# Advanced Features
 
 ## Operator Overloading
 
@@ -1071,9 +1054,9 @@ for w in s.unicode_words() {
 
 Thus we could provide one or more ICU4X traits bound to things like `str` to provide a low friction way to access the libraries (obvious questions like naming notwithstanding).
 
-# Appendix
+## Appendix
 
-## Sources
+### Sources
 
 * [Learn Rust](https://doc.rust-lang.org/)
   * The canonical source for Rust information, but it doesn't offer advice on all aspects of code design.
@@ -1083,10 +1066,10 @@ Thus we could provide one or more ICU4X traits bound to things like `str` to pro
   * This has a lot of good points and is well worth a read, but be warned that some of the details about implementation are somewhat out of date (2017). It has a video too.
 * [Good Practices for Writing Rust Libraries](https://pascalhertleif.de/artikel/good-practices-for-writing-rust-libraries/)
   * Shorter and more focused on the act of coding the libraries, and less about API design. Also potentially out of date in places.
-* [Strategies for Returning References in Rust](http://bryce.fisher-fleig.org/blog/strategies-for-returning-references-in-rust/index.html)
+* [Strategies for Returning References in Rust](https://bryce.fisher-fleig.org/strategies-for-returning-references-in-rust/)
   * Though I don't believe we should be doing this, it's still an interesting read.
 
-## Other Useful Links
+### Other Useful Links
 
 * Write and run Rust snippets: https://play.rust-lang.org
   * You can save snippets in permantent links and incluce them as working examples in docs.

@@ -6,7 +6,7 @@
 use libfuzzer_sys::fuzz_target;
 use rust_icu_ustring::UChar;
 use rust_icu_unorm2::UNormalizer;
-use icu_normalizer::DecomposingNormalizer;
+use icu_normalizer::DecomposingNormalizerBorrowed;
 
 // Sadly, UNormalizer doesn't take slices
 fn slice_to_icu4c(slice: &[u16]) -> UChar {
@@ -19,11 +19,11 @@ fn is_utf16(buffer: &[u16]) -> bool {
 
 fn slice_from_icu4c(string: &UChar) -> &[u16] {
     // Can't find this on `UChar` itself.
-    unsafe { core::slice::from_raw_parts(string.as_c_ptr(), string.len()) }
+    unsafe { slice::from_raw_parts(string.as_c_ptr(), string.len()) }
 }
 
 fn normalize_icu4x(buffer: &[u16]) -> Vec<u16> {
-    let normalizer = DecomposingNormalizer::new_nfd();
+    let normalizer = DecomposingNormalizerBorrowed::new_nfd();
     normalizer.normalize_utf16(buffer)
 }
 

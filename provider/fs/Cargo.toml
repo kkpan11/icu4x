@@ -5,9 +5,10 @@
 [package]
 name = "icu_provider_fs"
 description = "ICU4X data provider that reads from structured data files"
+categories.workspace = true
+keywords = []
 
 authors.workspace = true
-categories.workspace = true
 edition.workspace = true
 homepage.workspace = true
 include.workspace = true
@@ -20,20 +21,17 @@ version.workspace = true
 all-features = true
 
 [dependencies]
-displaydoc = { workspace = true }
-icu_provider = { workspace = true, features = ["serde", "std"] }
+icu_provider = { workspace = true, features = ["serde", "std", "export"] }
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde-json-core = { workspace = true, features = ["std"] }
 
 # Dependencies for the export feature
 bincode = { workspace = true, optional = true }
 crlify = { workspace = true, optional = true }
-log = {workspace = true, optional = true }
 postcard = { workspace = true, features = ["alloc"], optional = true }
 serde_json = { workspace = true, features = ["std"], optional = true }
 
 [dev-dependencies]
-icu_benchmark_macros = { path = "../../tools/benchmark/macros" }
 icu_locale_core = { path = "../../components/locale_core", default-features = false, features = ["serde"] }
 icu_provider = { path = "../../provider/core", default-features = false, features = ["deserialize_json", "deserialize_bincode_1", "deserialize_postcard_1", "export"] }
 icu_provider_export = { path = "../../provider/export", default-features = false }
@@ -47,7 +45,6 @@ criterion = { workspace = true }
 export = [
     "dep:bincode",
     "dep:crlify",
-    "dep:log",
     "dep:postcard",
     "dep:serde_json",
     "icu_provider/export",
@@ -55,12 +52,10 @@ export = [
     "icu_provider/deserialize_json",
     "icu_provider/deserialize_postcard_1",
 ]
-bench = []
-
-[package.metadata.cargo-all-features]
-# Bench feature gets tested separately and is only relevant for CI
-denylist = ["bench"]
 
 [[bench]]
 name = "provider_fs"
 harness = false
+
+[lints]
+workspace = true

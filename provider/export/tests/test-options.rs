@@ -8,6 +8,7 @@ mod testutil;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+use icu_locale::{LanguageIdentifier, langid};
 use icu_provider::export::*;
 use icu_provider::hello_world::*;
 use icu_provider::prelude::*;
@@ -25,12 +26,12 @@ impl TestingProvider {
         Self::new([
             (("ar", ""), "c3f15eb63fa35608"),
             (("ar-EG", ""), "c3f15eb63fa35608"),
-            (("ar-EG-u-nu-latn", ""), "29e2dc764329c56"),
-            (("ar-u-nu-latn", ""), "29e2dc764329c56"),
+            (("ar-EG", "latn"), "29e2dc764329c56"),
+            (("ar", "latn"), "29e2dc764329c56"),
             (("bn", ""), "31828215dcef2fcb"),
-            (("bn-u-nu-latn", ""), "1be94084ee7dcfbf"),
+            (("bn", "latn"), "1be94084ee7dcfbf"),
             (("ccp", ""), "c39715a84718596"),
-            (("ccp-u-nu-latn", ""), "1be94084ee7dcfbf"),
+            (("ccp", "latn"), "1be94084ee7dcfbf"),
             (("en", ""), "8df59f98704d3b0c"),
             (("en-001", ""), "8df59f98704d3b0c"),
             (("en-ZA", ""), "8df59f98704d3b0c"),
@@ -41,20 +42,24 @@ impl TestingProvider {
             (("ja", ""), "8df59f98704d3b0c"),
             (("ru", ""), "8f773f51e85a65c1"),
             (("sr", ""), "3ec76252c7ed8d8c"),
+            // Note: Both sr-ME and sr-RO are Latn locales.
+            // We will set one equal to sr and the other different.
+            (("sr-Cyrl-ME", ""), "9b2814eab238196e"),
+            (("sr-Cyrl-RO", ""), "3ec76252c7ed8d8c"),
             (("sr-Latn", ""), "3ec76252c7ed8d8c"),
             (("th", ""), "8df59f98704d3b0c"),
-            (("th-u-nu-thai", ""), "db1d187d375ccfd2"),
+            (("th", "thai"), "db1d187d375ccfd2"),
             (("tr", ""), "3ec76252c7ed8d8c"),
             (("und", ""), "8df59f98704d3b0c"),
         ])
     }
 }
 
-impl DataProvider<HelloWorldV1Marker> for TestingProvider {
-    fn load(&self, req: DataRequest) -> Result<DataResponse<HelloWorldV1Marker>, DataError> {
+impl DataProvider<HelloWorldV1> for TestingProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<HelloWorldV1>, DataError> {
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(HelloWorldV1 {
+            payload: DataPayload::from_owned(HelloWorld {
                 message: (*self
                     .0
                     .get(&(
@@ -68,8 +73,8 @@ impl DataProvider<HelloWorldV1Marker> for TestingProvider {
     }
 }
 
-impl IterableDataProvider<HelloWorldV1Marker> for TestingProvider {
-    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+impl IterableDataProvider<HelloWorldV1> for TestingProvider {
+    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         Ok(self
             .0
             .keys()
@@ -83,12 +88,16 @@ impl IterableDataProvider<HelloWorldV1Marker> for TestingProvider {
     }
 }
 
-make_exportable_provider!(TestingProvider, [HelloWorldV1Marker,]);
+extern crate alloc;
+make_exportable_provider!(TestingProvider, [HelloWorldV1,]);
 
 fn families(
     langids: impl IntoIterator<Item = LanguageIdentifier>,
-) -> impl IntoIterator<Item = LocaleFamily> {
-    langids.into_iter().map(LocaleFamily::with_descendants)
+) -> impl IntoIterator<Item = DataLocaleFamily> {
+    langids
+        .into_iter()
+        .map(Into::into)
+        .map(DataLocaleFamily::with_descendants)
 }
 
 fn export_to_map(driver: ExportDriver, provider: &TestingProvider) -> BTreeMap<String, Vec<u8>> {
@@ -107,7 +116,7 @@ fn export_to_map(driver: ExportDriver, provider: &TestingProvider) -> BTreeMap<S
 fn all_preferred() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::FULL],
+            [DataLocaleFamily::FULL],
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -118,12 +127,12 @@ fn all_preferred() {
     let locales = [
         "ar",
         "ar-EG",
-        "ar-EG-u-nu-latn",
-        "ar-u-nu-latn",
+        "ar-EG/latn",
+        "ar/latn",
         "bn",
-        "bn-u-nu-latn",
+        "bn/latn",
         "ccp",
-        "ccp-u-nu-latn",
+        "ccp/latn",
         "en",
         "en-001",
         "en-ZA",
@@ -134,10 +143,11 @@ fn all_preferred() {
         "ja",
         "ru",
         "sr",
-        // "sr-Cyrl", (normalizes to 'sr')
+        "sr-Cyrl-ME",
+        "sr-Cyrl-RO",
         "sr-Latn",
         "th",
-        "th-u-nu-thai",
+        "th/thai",
         "tr",
         "und",
     ];
@@ -150,7 +160,7 @@ fn all_preferred() {
 fn all_hybrid() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::FULL],
+            [DataLocaleFamily::FULL],
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -161,12 +171,12 @@ fn all_hybrid() {
     let locales = [
         "ar",
         "ar-EG",
-        "ar-EG-u-nu-latn",
-        "ar-u-nu-latn",
+        "ar-EG/latn",
+        "ar/latn",
         "bn",
-        "bn-u-nu-latn",
+        "bn/latn",
         "ccp",
-        "ccp-u-nu-latn",
+        "ccp/latn",
         "en",
         "en-001",
         "en-ZA",
@@ -177,10 +187,11 @@ fn all_hybrid() {
         "ja",
         "ru",
         "sr",
-        // "sr-Cyrl", (normalizes to 'sr')
+        "sr-Cyrl-ME",
+        "sr-Cyrl-RO",
         "sr-Latn",
         "th",
-        "th-u-nu-thai",
+        "th/thai",
         "tr",
         "und",
     ];
@@ -193,7 +204,7 @@ fn all_hybrid() {
 fn all_runtime() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::FULL],
+            [DataLocaleFamily::FULL],
             DeduplicationStrategy::Maximal.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -201,15 +212,16 @@ fn all_runtime() {
     );
 
     // These are all of the supported locales with deduplication applied.
+    #[rustfmt::skip]
     let locales = [
         "ar",
         // "ar-EG", (same as 'ar')
-        "ar-EG-u-nu-latn", // (same as 'ar-u-nu-latn' but DIFFERENT than 'ar-EG')
-        "ar-u-nu-latn",
+        // "ar-EG/latn", (same as 'ar/latn')
+        "ar/latn",
         "bn",
-        "bn-u-nu-latn",
+        "bn/latn",
         "ccp",
-        "ccp-u-nu-latn",
+        "ccp/latn",
         // "en", (same as 'und')
         // "en-001", (same as 'und')
         // "en-ZA", (same as 'und')
@@ -219,10 +231,13 @@ fn all_runtime() {
         "fr",
         // "ja", (same as 'und')
         "ru",
-        "sr", // Note: 'sr' and 'sr-Latn' are the same, but they don't inherit
+        "sr",
+        "sr-Cyrl-ME",
+        // Note: 'sr-Cyrl-RO' inherits from sr
+        // Note: 'sr' and 'sr-Latn' have the same data, but they don't inherit
         "sr-Latn",
         // "th", (same as 'und')
-        "th-u-nu-thai",
+        "th/thai",
         "tr",
         "und",
     ];
@@ -235,7 +250,7 @@ fn all_runtime() {
 fn all_runtime_retain_base() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::FULL],
+            [DataLocaleFamily::FULL],
             DeduplicationStrategy::RetainBaseLanguages.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -243,15 +258,16 @@ fn all_runtime_retain_base() {
     );
 
     // These are all of the supported locales with deduplication applied.
+    #[rustfmt::skip]
     let locales = [
         "ar",
         // "ar-EG", (same as 'ar')
-        "ar-EG-u-nu-latn", // (same as 'ar-u-nu-latn' but DIFFERENT than 'ar-EG')
-        "ar-u-nu-latn",
+        // "ar-EG/latn", (same as 'ar/latn')
+        "ar/latn",
         "bn",
-        "bn-u-nu-latn",
+        "bn/latn",
         "ccp",
-        "ccp-u-nu-latn",
+        "ccp/latn",
         "en", // (same as 'und', but retained)
         // "en-001", (same as 'en')
         // "en-ZA", (same as 'en-001')
@@ -261,10 +277,13 @@ fn all_runtime_retain_base() {
         "fr",
         "ja", // (same as 'und', but retained)
         "ru",
-        "sr", // Note: 'sr' and 'sr-Latn' are the same, but they don't inherit
+        "sr",
+        "sr-Cyrl-ME",
+        // Note: 'sr-Cyrl-RO' inherits from sr
+        // Note: 'sr' and 'sr-Latn' have the same data, but they don't inherit
         "sr-Latn",
         "th", // (same as 'und', but retained)
-        "th-u-nu-thai",
+        "th/thai",
         "tr",
         "und",
     ];
@@ -275,7 +294,7 @@ fn all_runtime_retain_base() {
 
 #[test]
 fn explicit_preferred() {
-    const SELECTED_LOCALES: [LanguageIdentifier; 7] = [
+    const SELECTED_LOCALES: [LanguageIdentifier; 8] = [
         langid!("arc"), // Aramaic, not in supported list
         langid!("ar-EG"),
         langid!("ar-SA"),
@@ -283,6 +302,7 @@ fn explicit_preferred() {
         langid!("es"),
         langid!("sr-ME"),
         langid!("ru-Cyrl-RU"),
+        langid!("tlh-001"), // Klingon, not in supported list
     ];
     let exported = export_to_map(
         ExportDriver::new(
@@ -293,18 +313,18 @@ fn explicit_preferred() {
         &TestingProvider::with_decimal_symbol_like_data(),
     );
 
-    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
+    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU", "tlh-001"
     let locales = [
-        "ar",              // ancestor of ar-EG
-        "ar-EG",           // explicit locale
-        "ar-EG-u-nu-latn", // descendant of ar-EG
-        "ar-SA",           // explicit locale, inheriting from ar
-        "ar-SA-u-nu-latn", // extensions should be included (#4533)
-        "ar-u-nu-latn",    // extensions should be included (#4533)
-        "arc",             // Aramaic, inheriting from und
-        "en",              // ancestor of en-GB
-        "en-001",          // ancestor of en-GB
-        "en-GB",           // explicit locale not in supported locales
+        "ar",         // ancestor of ar-EG
+        "ar-EG",      // explicit locale
+        "ar-EG/latn", // descendant of ar-EG
+        "ar-SA",      // explicit locale, inheriting from ar
+        "ar-SA/latn", // extensions should be included (#4533)
+        "ar/latn",    // extensions should be included (#4533)
+        "arc",        // Aramaic, inheriting from und
+        "en",         // ancestor of en-GB
+        "en-001",     // ancestor of en-GB
+        "en-GB",      // explicit locale not in supported locales
         // "en-ZA", // not reachable
         "es",         // explicit and supported
         "es-AR",      // descendant of es
@@ -313,6 +333,7 @@ fn explicit_preferred() {
         // "sr", // not reachable from sr-ME
         "sr-Latn", // ancestor of sr-ME
         "sr-ME",   // explicit locale not in supported locales
+        "tlh-001", // Earth Klingon, inheriting from Klingon inheriting from und
         "und",     // ancestor of everything
     ];
 
@@ -322,7 +343,7 @@ fn explicit_preferred() {
 
 #[test]
 fn explicit_hybrid() {
-    const SELECTED_LOCALES: [LanguageIdentifier; 7] = [
+    const SELECTED_LOCALES: [LanguageIdentifier; 8] = [
         langid!("arc"), // Aramaic, not in supported list
         langid!("ar-EG"),
         langid!("ar-SA"),
@@ -330,6 +351,7 @@ fn explicit_hybrid() {
         langid!("es"),
         langid!("sr-ME"),
         langid!("ru-Cyrl-RU"),
+        langid!("tlh-001"), // Klingon, not in supported list
     ];
     let exported = export_to_map(
         ExportDriver::new(
@@ -340,26 +362,29 @@ fn explicit_hybrid() {
         &TestingProvider::with_decimal_symbol_like_data(),
     );
 
-    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
+    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU", "tlh-001"
     let locales = [
-        "ar",              // ancestor of ar-EG
-        "ar-EG",           // explicit locale
-        "ar-EG-u-nu-latn", // descendant of ar-EG
-        "ar-SA",           // explicit locale, inheriting from ar
-        "ar-SA-u-nu-latn", // extensions should be included (#4533)
-        "ar-u-nu-latn",    // extensions should be included (#4533)
-        "arc",             // Aramaic, inheriting from und
-        "en",              // ancestor of en-GB
-        "en-001",          // ancestor of en-GB
-        "en-GB",           // explicit locale not in supported locales
+        "ar",         // ancestor of ar-EG
+        "ar-EG",      // explicit locale
+        "ar-EG/latn", // descendant of ar-EG
+        "ar-SA",      // explicit locale, inheriting from ar
+        "ar-SA/latn", // extensions should be included (#4533)
+        "ar/latn",    // extensions should be included (#4533)
+        "arc",        // Aramaic, inheriting from und
+        "en",         // ancestor of en-GB
+        "en-001",     // ancestor of en-GB
+        "en-GB",      // explicit locale not in supported locales
         // "en-ZA", // not reachable
         "es",         // explicit and supported
         "es-AR",      // descendant of es
         "ru",         // ancestor of ru-Cyrl-RU
         "ru-Cyrl-RU", // explicit locale, even though it is not normalized
         // "sr", // not reachable from sr-ME
+        // "sr-Cyrl-ME", // not in the sr-ME family
+        // "sr-Cyrl-RO", // not in the sr-ME family
         "sr-Latn", // ancestor of sr-ME
         "sr-ME",   // explicit locale not in supported locales
+        "tlh-001", // Earth Klingon, inheriting from Klingon inheriting from und
         "und",     // ancestor of everything
     ];
 
@@ -369,14 +394,15 @@ fn explicit_hybrid() {
 
 #[test]
 fn explicit_runtime() {
-    const SELECTED_LOCALES: [LanguageIdentifier; 7] = [
+    const SELECTED_LOCALES: [LanguageIdentifier; 8] = [
         langid!("arc"), // Aramaic, not in supported list
         langid!("ar-EG"),
         langid!("ar-SA"),
         langid!("en-GB"),
         langid!("es"),
-        langid!("sr-ME"),
+        langid!("sr"),
         langid!("ru-Cyrl-RU"),
+        langid!("tlh-001"), // Klingon, not in supported list
     ];
     let exported = export_to_map(
         ExportDriver::new(
@@ -387,15 +413,16 @@ fn explicit_runtime() {
         &TestingProvider::with_decimal_symbol_like_data(),
     );
 
-    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
+    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU", "tlh-001"
+    #[rustfmt::skip]
     let locales = [
         "ar",
         // "ar-Arab-EG", (same as 'ar')
         // "ar-EG", (same as 'ar')
-        "ar-EG-u-nu-latn",
+        // "ar-EG/latn", (same as 'ar/latn')
         // "ar-SA", (same as 'ar')
-        // "ar-SA-u-nu-latn", (same as 'ar-u-nu-latn')
-        "ar-u-nu-latn",
+        // "ar-SA/latn", (same as 'ar/latn')
+        "ar/latn",
         // "arc", (same as 'und')
         // "en", (same as 'und')
         // "en-001", (same as 'und')
@@ -404,8 +431,11 @@ fn explicit_runtime() {
         "es-AR",
         "ru",
         // "ru-Cyrl-RU", (same as 'ru')
-        "sr-Latn",
-        // "sr-ME", (same as 'sr-Latn')
+        "sr",
+        "sr-Cyrl-ME",
+        // "sr-Cyrl-RO", (same as 'sr')
+        // "sr-Latn", (is not included in the 'sr' family)
+        // "tlh-001", (same as 'und', not retained since it is not a base language)
         "und",
     ];
 
@@ -415,7 +445,7 @@ fn explicit_runtime() {
 
 #[test]
 fn explicit_runtime_retain_base() {
-    const SELECTED_LOCALES: [LanguageIdentifier; 7] = [
+    const SELECTED_LOCALES: [LanguageIdentifier; 8] = [
         langid!("arc"), // Aramaic, not in supported list
         langid!("ar-EG"),
         langid!("ar-SA"),
@@ -423,6 +453,7 @@ fn explicit_runtime_retain_base() {
         langid!("es"),
         langid!("sr-ME"),
         langid!("ru-Cyrl-RU"),
+        langid!("tlh-001"), // Klingon, not in supported list
     ];
     let exported = export_to_map(
         ExportDriver::new(
@@ -433,15 +464,16 @@ fn explicit_runtime_retain_base() {
         &TestingProvider::with_decimal_symbol_like_data(),
     );
 
-    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
+    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU", "tlh-001"
+    #[rustfmt::skip]
     let locales = [
         "ar",
         // "ar-Arab-EG", (same as 'ar')
         // "ar-EG", (same as 'ar')
-        "ar-EG-u-nu-latn",
+        // "ar-EG/latn", (same as 'ar/latn')
         // "ar-SA", (same as 'ar')
-        // "ar-SA-u-nu-latn", (same as 'ar-u-nu-latn')
-        "ar-u-nu-latn",
+        // "ar-SA/latn", (same as 'ar/latn')
+        "ar/latn",
         "arc", // (same as 'und', but retained)
         "en",  // (same as 'und', but retained)
         // "en-001", (same as 'en')
@@ -452,6 +484,7 @@ fn explicit_runtime_retain_base() {
         // "ru-Cyrl-RU", (same as 'ru')
         "sr-Latn",
         // "sr-ME", (same as 'sr-Latn')
+        "tlh-001", // no matching ancestor locale in responses before 'und'; retained since RetainBaseLanguages does not deduplicate against 'und'
         "und",
     ];
 
@@ -461,7 +494,7 @@ fn explicit_runtime_retain_base() {
 
 #[test]
 fn explicit_preresolved() {
-    const SELECTED_LOCALES: [LanguageIdentifier; 7] = [
+    const SELECTED_LOCALES: [LanguageIdentifier; 8] = [
         langid!("arc"), // Aramaic, not in supported list
         langid!("ar-EG"),
         langid!("ar-SA"),
@@ -469,27 +502,32 @@ fn explicit_preresolved() {
         langid!("es"),
         langid!("sr-ME"),
         langid!("ru-Cyrl-RU"),
+        langid!("tlh-001"), // Klingon, not in supported list
     ];
     let exported = export_to_map(
         ExportDriver::new(
-            SELECTED_LOCALES.into_iter().map(LocaleFamily::single),
+            SELECTED_LOCALES
+                .into_iter()
+                .map(Into::into)
+                .map(DataLocaleFamily::single),
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
         &TestingProvider::with_decimal_symbol_like_data(),
     );
 
-    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
+    // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU", "tlh-001"
     let locales = [
         "ar-EG",
-        "ar-EG-u-nu-latn", // extensions included even in preresolved mode
+        "ar-EG/latn", // extensions included even in preresolved mode
         "ar-SA",
-        "ar-SA-u-nu-latn", // extensions included even in preresolved mode
+        "ar-SA/latn", // extensions included even in preresolved mode
         "arc",
         "en-GB",
         "es",
         "ru-Cyrl-RU",
         "sr-ME",
+        "tlh-001",
     ];
 
     // Should return the exact explicit locales set.
@@ -498,18 +536,18 @@ fn explicit_preresolved() {
 
 #[test]
 fn explicit_hybrid_without_descendants() {
-    const SELECTED_LOCALES: [LocaleFamily; 7] = [
-        LocaleFamily::without_descendants(langid!("arc")), // Aramaic, not in supported list
-        LocaleFamily::without_descendants(langid!("ar-EG")),
-        LocaleFamily::without_descendants(langid!("ar-SA")),
-        LocaleFamily::without_descendants(langid!("en-GB")),
-        LocaleFamily::without_descendants(langid!("es")),
-        LocaleFamily::without_descendants(langid!("sr-ME")),
-        LocaleFamily::without_descendants(langid!("ru-Cyrl-RU")),
+    let selected_locales = [
+        DataLocaleFamily::without_descendants(data_locale!("arc")), // Aramaic, not in supported list
+        DataLocaleFamily::without_descendants(data_locale!("ar-EG")),
+        DataLocaleFamily::without_descendants(data_locale!("ar-SA")),
+        DataLocaleFamily::without_descendants(data_locale!("en-GB")),
+        DataLocaleFamily::without_descendants(data_locale!("es")),
+        DataLocaleFamily::without_descendants(data_locale!("sr-ME")),
+        DataLocaleFamily::without_descendants(data_locale!("ru-Cyrl-RU")),
     ];
     let exported = export_to_map(
         ExportDriver::new(
-            SELECTED_LOCALES,
+            selected_locales,
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -518,16 +556,16 @@ fn explicit_hybrid_without_descendants() {
 
     // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
     let locales = [
-        "ar",              // ancestor of ar-EG
-        "ar-EG",           // explicit locale
-        "ar-EG-u-nu-latn", // explicit with extensions
-        "ar-SA",           // explicit locale, inheriting from ar
-        "ar-SA-u-nu-latn", // extensions should be included (#4533)
-        "ar-u-nu-latn",    // extensions should be included (#4533)
-        "arc",             // Aramaic, inheriting from und
-        "en",              // ancestor of en-GB
-        "en-001",          // ancestor of en-GB
-        "en-GB",           // explicit locale not in supported locales
+        "ar",         // ancestor of ar-EG
+        "ar-EG",      // explicit locale
+        "ar-EG/latn", // explicit with extensions
+        "ar-SA",      // explicit locale, inheriting from ar
+        "ar-SA/latn", // extensions should be included (#4533)
+        "ar/latn",    // extensions should be included (#4533)
+        "arc",        // Aramaic, inheriting from und
+        "en",         // ancestor of en-GB
+        "en-001",     // ancestor of en-GB
+        "en-GB",      // explicit locale not in supported locales
         // "en-ZA",        // not reachable
         "es", // explicit and supported
         // "es-AR",        // excluded: descendant of es
@@ -545,18 +583,18 @@ fn explicit_hybrid_without_descendants() {
 
 #[test]
 fn explicit_hybrid_without_ancestors() {
-    const SELECTED_LOCALES: [LocaleFamily; 7] = [
-        LocaleFamily::without_ancestors(langid!("arc")), // Aramaic, not in supported list
-        LocaleFamily::without_ancestors(langid!("ar-EG")),
-        LocaleFamily::without_ancestors(langid!("ar-SA")),
-        LocaleFamily::without_ancestors(langid!("en-GB")),
-        LocaleFamily::without_ancestors(langid!("es")),
-        LocaleFamily::without_ancestors(langid!("sr-ME")),
-        LocaleFamily::without_ancestors(langid!("ru-Cyrl-RU")),
+    let selected_locales = [
+        DataLocaleFamily::without_ancestors(data_locale!("arc")), // Aramaic, not in supported list
+        DataLocaleFamily::without_ancestors(data_locale!("ar-EG")),
+        DataLocaleFamily::without_ancestors(data_locale!("ar-SA")),
+        DataLocaleFamily::without_ancestors(data_locale!("en-GB")),
+        DataLocaleFamily::without_ancestors(data_locale!("es")),
+        DataLocaleFamily::without_ancestors(data_locale!("sr-ME")),
+        DataLocaleFamily::without_ancestors(data_locale!("ru-Cyrl-RU")),
     ];
     let exported = export_to_map(
         ExportDriver::new(
-            SELECTED_LOCALES,
+            selected_locales,
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -566,11 +604,11 @@ fn explicit_hybrid_without_ancestors() {
     // Explicit locales are "arc", "ar-EG", "ar-SA", "en-GB", "es", "sr-ME", "ru-Cyrl-RU"
     let locales = [
         // "ar",           // excluded: ancestor of ar-EG
-        "ar-EG",           // explicit locale
-        "ar-EG-u-nu-latn", // explicit with extensions
-        "ar-SA",           // explicit locale, inheriting from ar
-        "ar-SA-u-nu-latn", // extensions should be included (#4533)
-        // "ar-u-nu-latn",    // excluded: ancestor of ar-EG
+        "ar-EG",      // explicit locale
+        "ar-EG/latn", // explicit with extensions
+        "ar-SA",      // explicit locale, inheriting from ar
+        "ar-SA/latn", // extensions should be included (#4533)
+        // "ar/latn",    // excluded: ancestor of ar-EG
         "arc", // Aramaic, inheriting from und
         // "en",              // excluded: ancestor of en-GB
         // "en-001",          // excluded: ancestor of en-GB
@@ -592,19 +630,19 @@ fn explicit_hybrid_without_ancestors() {
 
 #[test]
 fn explicit_hybrid_mixed_families() {
-    const SELECTED_LOCALES: [LocaleFamily; 8] = [
-        LocaleFamily::without_ancestors(langid!("arc")), // Aramaic, not in supported list
-        LocaleFamily::with_descendants(langid!("ar-EG")),
-        LocaleFamily::without_ancestors(langid!("ar-EG")), // duplicate entry for ar-EG
-        LocaleFamily::with_descendants(langid!("en")),
-        LocaleFamily::single(langid!("en")), // duplicate entry for en
-        LocaleFamily::without_ancestors(langid!("en-GB")),
-        LocaleFamily::without_descendants(langid!("es")),
-        LocaleFamily::with_descendants(langid!("es")), // duplicate entry for es
+    let selected_locales = [
+        DataLocaleFamily::without_ancestors(data_locale!("arc")), // Aramaic, not in supported list
+        DataLocaleFamily::with_descendants(data_locale!("ar-EG")),
+        DataLocaleFamily::without_ancestors(data_locale!("ar-EG")), // duplicate entry for ar-EG
+        DataLocaleFamily::with_descendants(data_locale!("en")),
+        DataLocaleFamily::single(data_locale!("en")), // duplicate entry for en
+        DataLocaleFamily::without_ancestors(data_locale!("en-GB")),
+        DataLocaleFamily::without_descendants(data_locale!("es")),
+        DataLocaleFamily::with_descendants(data_locale!("es")), // duplicate entry for es
     ];
     let exported = export_to_map(
         ExportDriver::new(
-            SELECTED_LOCALES,
+            selected_locales,
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -613,11 +651,11 @@ fn explicit_hybrid_mixed_families() {
 
     let locales = [
         // "ar",              // excluded: ancestor of ar-EG
-        "ar-EG",           // explicit locale
-        "ar-EG-u-nu-latn", // explicit with extensions
+        "ar-EG",      // explicit locale
+        "ar-EG/latn", // explicit with extensions
         // "ar-SA",           // explicit locale, inheriting from ar
-        // "ar-SA-u-nu-latn", // not reachable
-        // "ar-u-nu-latn",    // not reachable
+        // "ar-SA/latn", // not reachable
+        // "ar/latn",    // not reachable
         "arc", // Aramaic, inheriting from und
         "en",  // included as a singleton
         // "en-001",          // excluded: ancestor of en-GB
@@ -641,7 +679,7 @@ fn explicit_hybrid_mixed_families() {
 fn explicit_runtime_und() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::with_descendants(langid!("und"))],
+            [DataLocaleFamily::with_descendants(Default::default())],
             DeduplicationStrategy::Maximal.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -659,7 +697,7 @@ fn explicit_runtime_und() {
 fn explicit_runtime_und_retain_base() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::with_descendants(langid!("und"))],
+            [DataLocaleFamily::with_descendants(Default::default())],
             DeduplicationStrategy::RetainBaseLanguages.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -677,7 +715,7 @@ fn explicit_runtime_und_retain_base() {
 fn explicit_hybrid_und() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::with_descendants(langid!("und"))],
+            [DataLocaleFamily::with_descendants(Default::default())],
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),
@@ -695,7 +733,7 @@ fn explicit_hybrid_und() {
 fn explicit_preresolved_und() {
     let exported = export_to_map(
         ExportDriver::new(
-            [LocaleFamily::single(langid!("und"))],
+            [DataLocaleFamily::single(Default::default())],
             DeduplicationStrategy::None.into(),
             LocaleFallbacker::new().static_to_owned(),
         ),

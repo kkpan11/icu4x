@@ -4,8 +4,8 @@
 
 mod fixtures;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use fixed_decimal::FixedDecimal;
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use fixed_decimal::Decimal;
 use icu_plurals::PluralOperands;
 
 fn operands(c: &mut Criterion) {
@@ -27,13 +27,16 @@ fn operands(c: &mut Criterion) {
                     .expect("Failed to parse a number into an operands.");
             }
             for s in &data.fixed_decimals {
-                let f: FixedDecimal = FixedDecimal::from(s.value).multiplied_pow10(s.exponent);
+                let f: Decimal = {
+                    let mut dec = Decimal::from(s.value);
+                    dec.multiply_pow10(s.exponent);
+                    dec
+                };
                 let _: PluralOperands = PluralOperands::from(black_box(&f));
             }
         })
     });
 
-    #[cfg(feature = "bench")]
     {
         use criterion::BenchmarkId;
 
@@ -74,7 +77,7 @@ fn operands(c: &mut Criterion) {
             }
         }
         c.bench_function("plurals/operands/eq/mostly_unequal", |b| {
-            let p: PluralOperands = "1".parse().expect("Parse successful");
+            let p: PluralOperands = 1.into();
             b.iter(|| {
                 for s in &data.isize {
                     let q: PluralOperands = black_box(*s).into();
@@ -96,7 +99,11 @@ fn operands(c: &mut Criterion) {
         c.bench_function("plurals/operands/create/from_fixed_decimal", |b| {
             b.iter(|| {
                 for s in &data.fixed_decimals {
-                    let f: FixedDecimal = FixedDecimal::from(s.value).multiplied_pow10(s.exponent);
+                    let f: Decimal = {
+                        let mut dec = Decimal::from(s.value);
+                        dec.multiply_pow10(s.exponent);
+                        dec
+                    };
                     let _: PluralOperands = PluralOperands::from(black_box(&f));
                 }
             });
@@ -104,14 +111,26 @@ fn operands(c: &mut Criterion) {
 
         {
             let samples = [
-                FixedDecimal::from(1_i128).multiplied_pow10(0),
-                FixedDecimal::from(123450_i128).multiplied_pow10(-4),
-                FixedDecimal::from(2500_i128).multiplied_pow10(-2),
+                {
+                    let mut dec = Decimal::from(1_i128);
+                    dec.multiply_pow10(0);
+                    dec
+                },
+                {
+                    let mut dec = Decimal::from(123450_i128);
+                    dec.multiply_pow10(-4);
+                    dec
+                },
+                {
+                    let mut dec = Decimal::from(2500_i128);
+                    dec.multiply_pow10(-2);
+                    dec
+                },
             ];
             let mut group = c.benchmark_group("plurals/operands/create/from_fixed_decimal/samples");
             for s in samples.iter() {
                 group.bench_with_input(
-                    BenchmarkId::from_parameter(format!("{:?}", &s)),
+                    BenchmarkId::from_parameter(format!("{:?}", s)),
                     s,
                     |b, f| b.iter(|| PluralOperands::from(black_box(f))),
                 );

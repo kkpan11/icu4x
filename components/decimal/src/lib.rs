@@ -15,65 +15,66 @@
 //! ## Format a number with Bangla digits
 //!
 //! ```
-//! use fixed_decimal::FixedDecimal;
-//! use icu::decimal::FixedDecimalFormatter;
+//! use icu::decimal::DecimalFormatter;
+//! use icu::decimal::input::Decimal;
 //! use icu::locale::locale;
 //! use writeable::assert_writeable_eq;
 //!
-//! let fdf = FixedDecimalFormatter::try_new(
-//!     &locale!("bn").into(),
-//!     Default::default(),
-//! )
-//! .expect("locale should be present");
+//! let formatter =
+//!     DecimalFormatter::try_new(locale!("bn").into(), Default::default())
+//!         .expect("locale should be present");
 //!
-//! let fixed_decimal = FixedDecimal::from(1000007);
+//! let decimal = Decimal::from(1000007);
 //!
-//! assert_writeable_eq!(fdf.format(&fixed_decimal), "১০,০০,০০৭");
+//! assert_writeable_eq!(formatter.format(&decimal), "১০,০০,০০৭");
 //! ```
 //!
 //! ## Format a number with digits after the decimal separator
 //!
 //! ```
-//! use fixed_decimal::FixedDecimal;
-//! use icu::decimal::FixedDecimalFormatter;
+//! use icu::decimal::DecimalFormatter;
+//! use icu::decimal::input::Decimal;
 //! use icu::locale::Locale;
 //! use writeable::assert_writeable_eq;
 //!
-//! let fdf =
-//!     FixedDecimalFormatter::try_new(&Locale::UND.into(), Default::default())
+//! let formatter =
+//!     DecimalFormatter::try_new(Default::default(), Default::default())
 //!         .expect("locale should be present");
 //!
-//! let fixed_decimal = FixedDecimal::from(200050).multiplied_pow10(-2);
+//! let decimal = {
+//!     let mut decimal = Decimal::from(200050);
+//!     decimal.multiply_pow10(-2);
+//!     decimal
+//! };
 //!
-//! assert_writeable_eq!(fdf.format(&fixed_decimal), "2,000.50");
+//! assert_writeable_eq!(formatter.format(&decimal), "2,000.50");
 //! ```
 //!
-//! ### Format a number using an alternative numbering system
+//! ## Format a number using an alternative numbering system
 //!
-//! Numbering systems specified in the `-u-nu` subtag will be followed as long as the locale has
-//! symbols for that numbering system.
+//! Numbering systems specified in the `-u-nu` subtag will be followed.
 //!
 //! ```
-//! use fixed_decimal::FixedDecimal;
-//! use icu::decimal::FixedDecimalFormatter;
+//! use icu::decimal::DecimalFormatter;
+//! use icu::decimal::input::Decimal;
 //! use icu::locale::locale;
 //! use writeable::assert_writeable_eq;
 //!
-//! let fdf = FixedDecimalFormatter::try_new(
-//!     &locale!("th-u-nu-thai").into(),
+//! let formatter = DecimalFormatter::try_new(
+//!     locale!("th-u-nu-thai").into(),
 //!     Default::default(),
 //! )
 //! .expect("locale should be present");
 //!
-//! let fixed_decimal = FixedDecimal::from(1000007);
+//! let decimal = Decimal::from(1000007);
 //!
-//! assert_writeable_eq!(fdf.format(&fixed_decimal), "๑,๐๐๐,๐๐๗");
+//! assert_writeable_eq!(formatter.format(&decimal), "๑,๐๐๐,๐๐๗");
 //! ```
 //!
-//! [`FixedDecimalFormatter`]: FixedDecimalFormatter
+//! [`DecimalFormatter`]: DecimalFormatter
 
 // https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
-#![cfg_attr(not(any(test, feature = "std")), no_std)]
+#![cfg_attr(not(any(test, doc)), no_std)]
 #![cfg_attr(
     not(test),
     deny(
@@ -81,81 +82,69 @@
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::panic,
-        clippy::exhaustive_structs,
-        clippy::exhaustive_enums,
-        missing_debug_implementations,
     )
 )]
 #![warn(missing_docs)]
 
+#[cfg(feature = "alloc")]
 extern crate alloc;
 
-mod format;
-mod grouper;
-pub mod options;
-pub mod provider;
+#[cfg(feature = "alloc")]
+#[doc(hidden)] // TODO(#3647): should be private
+pub use alloc::borrow::Cow;
 
-pub use format::FormattedFixedDecimal;
-
-use alloc::string::String;
-use fixed_decimal::FixedDecimal;
-use icu_provider::prelude::*;
-use writeable::Writeable;
-
-/// A formatter for [`FixedDecimal`], rendering decimal digits in an i18n-friendly way.
-///
-/// [`FixedDecimalFormatter`] supports:
-///
-/// 1. Rendering in the local numbering system
-/// 2. Locale-sensitive grouping separator positions
-/// 3. Locale-sensitive plus and minus signs
-///
-/// Read more about the options in the [`options`] module.
-///
-/// See the crate-level documentation for examples.
-#[derive(Debug)]
-pub struct FixedDecimalFormatter {
-    options: options::FixedDecimalFormatterOptions,
-    symbols: DataPayload<provider::DecimalSymbolsV1Marker>,
+#[cfg(not(feature = "alloc"))]
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[doc(hidden)] // TODO(#3647): should be private
+pub enum Cow<'a, T> {
+    Borrowed(&'a T),
+    Owned(T),
 }
 
-impl FixedDecimalFormatter {
-    icu_provider::gen_any_buffer_data_constructors!(
+#[cfg(not(feature = "alloc"))]
+impl<'a, T> core::ops::Deref for Cow<'a, T> {
+    type Target = T;
 
-        (locale, options: options::FixedDecimalFormatterOptions) -> error: DataError,
-        /// Creates a new [`FixedDecimalFormatter`] from compiled data and an options bag.
-        ///
-        /// ✨ *Enabled with the `compiled_data` Cargo feature.*
-        ///
-        /// [📚 Help choosing a constructor](icu_provider::constructors)
-    );
-
-    #[doc = icu_provider::gen_any_buffer_unstable_docs!(UNSTABLE, Self::try_new)]
-    pub fn try_new_unstable<D: DataProvider<provider::DecimalSymbolsV1Marker> + ?Sized>(
-        provider: &D,
-        locale: &DataLocale,
-        options: options::FixedDecimalFormatterOptions,
-    ) -> Result<Self, DataError> {
-        let symbols = provider
-            .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(locale),
-                ..Default::default()
-            })?
-            .payload;
-        Ok(Self { options, symbols })
-    }
-
-    /// Formats a [`FixedDecimal`], returning a [`FormattedFixedDecimal`].
-    pub fn format<'l>(&'l self, value: &'l FixedDecimal) -> FormattedFixedDecimal<'l> {
-        FormattedFixedDecimal {
-            value,
-            options: &self.options,
-            symbols: self.symbols.get(),
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Borrowed(r) => r,
+            Self::Owned(r) => r,
         }
     }
+}
 
-    /// Formats a [`FixedDecimal`], returning a [`String`].
-    pub fn format_to_string(&self, value: &FixedDecimal) -> String {
-        self.format(value).write_to_string().into_owned()
-    }
+#[cfg(feature = "unstable")]
+mod abstract_formatter;
+#[cfg(feature = "unstable")]
+mod compact_formatter;
+mod decimal_formatter;
+#[cfg(feature = "unstable")]
+pub mod error;
+mod grouper;
+pub mod options;
+pub mod parts;
+pub mod preferences;
+pub mod provider;
+mod size_test_macro;
+
+pub use decimal_formatter::{
+    DecimalFormatter, FormattedDecimal, FormattedSign, FormattedUnsignedDecimal,
+};
+
+#[cfg(feature = "unstable")]
+pub use compact_formatter::{CompactDecimalFormatter, FormattedUnsignedCompactDecimal};
+
+#[cfg(feature = "unstable")]
+pub use abstract_formatter::AbstractFormatter;
+
+pub use preferences::DecimalFormatterPreferences;
+
+/// Types that can be fed to [`DecimalFormatter`] and their utilities
+///
+/// This module contains re-exports from the [`fixed_decimal`] crate.
+pub mod input {
+    pub use fixed_decimal::Decimal;
+    #[cfg(feature = "ryu")]
+    pub use fixed_decimal::FloatPrecision;
+    pub use fixed_decimal::SignDisplay;
 }

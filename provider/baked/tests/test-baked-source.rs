@@ -14,7 +14,7 @@ const _: () = {
     #[path = "data/mod.rs"]
     mod baked_data;
     baked_data::make_provider!(Baked);
-    baked_data::impl_hello_world_v1_marker!(Baked, ITER);
+    baked_data::impl_hello_world_v1!(Baked, DRY, ITER);
 };
 
 #[test]
@@ -27,23 +27,32 @@ fn iter() {
 
 #[test]
 fn load() {
-    use icu_provider::hello_world::HelloWorldProvider;
+    use icu_provider::hello_world::{HelloWorldProvider, HelloWorldV1};
     use icu_provider::prelude::*;
 
-    for id in HelloWorldProvider.iter_ids().unwrap().iter() {
+    for id in HelloWorldProvider
+        .iter_ids()
+        .unwrap()
+        .into_iter()
+        .chain([DataIdentifierCow::default()])
+    {
         let req = DataRequest {
             id: id.as_borrowed(),
             ..Default::default()
         };
-        let expected = HelloWorldProvider.load(req).unwrap().payload;
-        let baked = Baked.load(req).unwrap().payload;
+        let expected = HelloWorldProvider.load(req);
+        let baked = DataProvider::load(&Baked, req);
+        assert_eq!(baked.map(|r| r.payload), expected.map(|r| r.payload));
+
+        let expected = HelloWorldProvider.dry_load(req);
+        let baked = DryDataProvider::<HelloWorldV1>::dry_load(&Baked, req);
         assert_eq!(baked, expected);
     }
 }
 
 #[test]
 fn prefix_match() {
-    use icu_provider::hello_world::HelloWorldV1Marker;
+    use icu_provider::hello_world::HelloWorldV1;
     use icu_provider::prelude::*;
 
     let id = DataIdentifierCow::from_owned(
@@ -51,43 +60,49 @@ fn prefix_match() {
         "ja".parse().unwrap(),
     );
 
-    assert!(DataProvider::<HelloWorldV1Marker>::load(
-        &Baked,
-        DataRequest {
-            id: id.as_borrowed(),
-            ..Default::default()
-        }
-    )
-    .is_err());
-
-    assert!(DataProvider::<HelloWorldV1Marker>::load(
-        &Baked,
-        DataRequest {
-            id: id.as_borrowed(),
-            metadata: {
-                let mut metadata = DataRequestMetadata::default();
-                metadata.attributes_prefix_match = true;
-                metadata
+    assert!(
+        DataProvider::<HelloWorldV1>::load(
+            &Baked,
+            DataRequest {
+                id: id.as_borrowed(),
+                ..Default::default()
             }
-        }
-    )
-    .is_ok());
+        )
+        .is_err()
+    );
+
+    assert!(
+        DataProvider::<HelloWorldV1>::load(
+            &Baked,
+            DataRequest {
+                id: id.as_borrowed(),
+                metadata: {
+                    let mut metadata = DataRequestMetadata::default();
+                    metadata.attributes_prefix_match = true;
+                    metadata
+                }
+            }
+        )
+        .is_ok()
+    );
 
     let id = DataIdentifierCow::from_owned(
         DataMarkerAttributes::from_str_or_panic("non-existent").to_owned(),
         "ja".parse().unwrap(),
     );
 
-    assert!(DataProvider::<HelloWorldV1Marker>::load(
-        &Baked,
-        DataRequest {
-            id: id.as_borrowed(),
-            metadata: {
-                let mut metadata = DataRequestMetadata::default();
-                metadata.attributes_prefix_match = true;
-                metadata
+    assert!(
+        DataProvider::<HelloWorldV1>::load(
+            &Baked,
+            DataRequest {
+                id: id.as_borrowed(),
+                metadata: {
+                    let mut metadata = DataRequestMetadata::default();
+                    metadata.attributes_prefix_match = true;
+                    metadata
+                }
             }
-        }
-    )
-    .is_err());
+        )
+        .is_err()
+    );
 }

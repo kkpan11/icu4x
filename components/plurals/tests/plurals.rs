@@ -2,14 +2,14 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use icu_locale_core::{langid, locale};
-use icu_plurals::{provider::CardinalV1Marker, PluralCategory, PluralRuleType, PluralRules};
+use icu_locale_core::{data_locale, locale};
+use icu_plurals::{PluralCategory, PluralRules, provider::PluralsCardinalV1};
 use icu_provider::prelude::*;
 
 #[test]
 fn test_plural_rules() {
     assert_eq!(
-        PluralRules::try_new(&locale!("en").into(), PluralRuleType::Cardinal)
+        PluralRules::try_new(locale!("en").into(), Default::default())
             .unwrap()
             .category_for(5_usize),
         PluralCategory::Other
@@ -18,10 +18,10 @@ fn test_plural_rules() {
 
 #[test]
 fn test_static_load_works() {
-    DataProvider::<CardinalV1Marker>::load(
+    DataProvider::<PluralsCardinalV1>::load(
         &icu_plurals::provider::Baked,
         DataRequest {
-            id: DataIdentifierBorrowed::for_locale(&langid!("en").into()),
+            id: DataIdentifierBorrowed::for_locale(&data_locale!("en")),
             ..Default::default()
         },
     )

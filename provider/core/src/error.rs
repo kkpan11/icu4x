@@ -2,8 +2,8 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::_internal::log;
-use crate::{marker::DataMarkerPath, prelude::*};
+use crate::log;
+use crate::{marker::DataMarkerId, prelude::*};
 use core::fmt;
 use displaydoc::Display;
 
@@ -27,7 +27,9 @@ pub enum DataErrorKind {
     InvalidRequest,
 
     /// The data for two [`DataMarker`]s is not consistent.
-    #[displaydoc("The data for two markers is not consistent: {0:?} (were they generated in different datagen invocations?)")]
+    #[displaydoc(
+        "The data for two markers is not consistent: {0:?} (were they generated in different datagen invocations?)"
+    )]
     InconsistentData(DataMarkerInfo),
 
     /// An error occured during [`Any`](core::any::Any) downcasting.
@@ -58,7 +60,7 @@ pub enum DataErrorKind {
 ///
 /// # Example
 ///
-/// Create a IdentifierNotFound error and attach a data request for context:
+/// Create a [`DataErrorKind::IdentifierNotFound`] error and attach a data request for context:
 ///
 /// ```no_run
 /// # use icu_provider::prelude::*;
@@ -80,7 +82,7 @@ pub struct DataError {
     pub kind: DataErrorKind,
 
     /// The data marker of the request, if available.
-    pub marker_path: Option<DataMarkerPath>,
+    pub marker: Option<DataMarkerId>,
 
     /// Additional context, if available.
     pub str_context: Option<&'static str>,
@@ -95,8 +97,8 @@ impl fmt::Display for DataError {
         if self.kind != DataErrorKind::Custom {
             write!(f, ": {}", self.kind)?;
         }
-        if let Some(marker) = self.marker_path {
-            write!(f, " (marker: {})", marker.as_str())?;
+        if let Some(marker) = self.marker {
+            write!(f, " (marker: {marker:?})")?;
         }
         if let Some(str_context) = self.str_context {
             write!(f, ": {str_context}")?;
@@ -106,38 +108,38 @@ impl fmt::Display for DataError {
 }
 
 impl DataErrorKind {
-    /// Converts this DataErrorKind into a DataError.
+    /// Converts this [`DataErrorKind`] into a [`DataError`].
     ///
     /// If possible, you should attach context using a `with_` function.
     #[inline]
     pub const fn into_error(self) -> DataError {
         DataError {
             kind: self,
-            marker_path: None,
+            marker: None,
             str_context: None,
             silent: false,
         }
     }
 
-    /// Creates a DataError with a data marker context.
+    /// Creates a [`DataError`] with a data marker context.
     #[inline]
     pub const fn with_marker(self, marker: DataMarkerInfo) -> DataError {
         self.into_error().with_marker(marker)
     }
 
-    /// Creates a DataError with a string context.
+    /// Creates a [`DataError`] with a string context.
     #[inline]
     pub const fn with_str_context(self, context: &'static str) -> DataError {
         self.into_error().with_str_context(context)
     }
 
-    /// Creates a DataError with a type name context.
+    /// Creates a [`DataError`] with a type name context.
     #[inline]
     pub fn with_type_context<T>(self) -> DataError {
         self.into_error().with_type_context::<T>()
     }
 
-    /// Creates a DataError with a request context.
+    /// Creates a [`DataError`] with a request context.
     #[inline]
     pub fn with_req(self, marker: DataMarkerInfo, req: DataRequest) -> DataError {
         self.into_error().with_req(marker, req)
@@ -145,40 +147,40 @@ impl DataErrorKind {
 }
 
 impl DataError {
-    /// Returns a new, empty DataError with kind Custom and a string error message.
+    /// Returns a new, empty [`DataError`] with kind Custom and a string error message.
     #[inline]
     pub const fn custom(str_context: &'static str) -> Self {
         Self {
             kind: DataErrorKind::Custom,
-            marker_path: None,
+            marker: None,
             str_context: Some(str_context),
             silent: false,
         }
     }
 
-    /// Sets the data marker of a DataError, returning a modified error.
+    /// Sets the data marker of a [`DataError`], returning a modified error.
     #[inline]
     pub const fn with_marker(self, marker: DataMarkerInfo) -> Self {
         Self {
             kind: self.kind,
-            marker_path: Some(marker.path),
+            marker: Some(marker.id),
             str_context: self.str_context,
             silent: self.silent,
         }
     }
 
-    /// Sets the string context of a DataError, returning a modified error.
+    /// Sets the string context of a [`DataError`], returning a modified error.
     #[inline]
     pub const fn with_str_context(self, context: &'static str) -> Self {
         Self {
             kind: self.kind,
-            marker_path: self.marker_path,
+            marker: self.marker,
             str_context: Some(context),
             silent: self.silent,
         }
     }
 
-    /// Sets the string context of a DataError to the given type name, returning a modified error.
+    /// Sets the string context of a [`DataError`] to the given type name, returning a modified error.
     #[inline]
     pub fn with_type_context<T>(self) -> Self {
         if !self.silent {
@@ -222,7 +224,7 @@ impl DataError {
     #[inline]
     pub fn with_display_context<D: fmt::Display + ?Sized>(self, context: &D) -> Self {
         if !self.silent {
-            log::warn!("{}: {}", self, context);
+            log::warn!("{self}: {context}");
         }
         self
     }
@@ -235,7 +237,7 @@ impl DataError {
     #[inline]
     pub fn with_debug_context<D: fmt::Debug + ?Sized>(self, context: &D) -> Self {
         if !self.silent {
-            log::warn!("{}: {:?}", self, context);
+            log::warn!("{self}: {context:?}");
         }
         self
     }
@@ -244,20 +246,38 @@ impl DataError {
     pub(crate) fn for_type<T>() -> DataError {
         DataError {
             kind: DataErrorKind::Downcast(core::any::type_name::<T>()),
-            marker_path: None,
+            marker: None,
             str_context: None,
             silent: false,
         }
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for DataError {}
+impl core::error::Error for DataError {}
 
 #[cfg(feature = "std")]
 impl From<std::io::Error> for DataError {
     fn from(e: std::io::Error) -> Self {
-        log::warn!("I/O error: {}", e);
+        log::warn!("I/O error: {e}");
         DataErrorKind::Io(e.kind()).into_error()
+    }
+}
+
+/// Extension trait for `Result<T, DataError>`.
+pub trait ResultDataError<T>: Sized {
+    /// Propagates all errors other than [`DataErrorKind::IdentifierNotFound`], and returns `None` in that case.
+    fn allow_identifier_not_found(self) -> Result<Option<T>, DataError>;
+}
+
+impl<T> ResultDataError<T> for Result<T, DataError> {
+    fn allow_identifier_not_found(self) -> Result<Option<T>, DataError> {
+        match self {
+            Ok(t) => Ok(Some(t)),
+            Err(DataError {
+                kind: DataErrorKind::IdentifierNotFound,
+                ..
+            }) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }

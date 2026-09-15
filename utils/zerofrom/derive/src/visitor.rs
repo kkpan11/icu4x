@@ -18,7 +18,7 @@ struct TypeVisitor<'a> {
     found_lifetimes: bool,
 }
 
-impl<'a, 'ast> Visit<'ast> for TypeVisitor<'a> {
+impl<'ast> Visit<'ast> for TypeVisitor<'_> {
     fn visit_lifetime(&mut self, lt: &'ast Lifetime) {
         if lt.ident != "static" {
             self.found_lifetimes = true;
@@ -43,7 +43,7 @@ impl<'a, 'ast> Visit<'ast> for TypeVisitor<'a> {
 }
 
 /// Checks if a type has type or lifetime parameters, given the local context of
-/// named type parameters. Returns (has_type_params, has_lifetime_params)
+/// named type parameters. Returns `(has_type_params, has_lifetime_params)`
 pub fn check_type_for_parameters(
     ty: &Type,
     typarams: &HashMap<Ident, Option<Ident>>,

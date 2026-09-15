@@ -1,0 +1,8 @@
+{
+  "defaults": {
+    "77": "JST"
+  },
+  "overrides": {
+    "utc": "UTC"
+  }
+}

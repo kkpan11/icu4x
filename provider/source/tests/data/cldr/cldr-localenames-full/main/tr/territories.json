@@ -2,9 +2,6 @@
   "main": {
     "tr": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "tr"
       },
       "localeDisplayNames": {
@@ -94,6 +91,7 @@
           "CN": "Çin",
           "CO": "Kolombiya",
           "CP": "Clipperton Adası",
+          "CQ": "Sark",
           "CR": "Kosta Rika",
           "CU": "Küba",
           "CV": "Cabo Verde",
@@ -160,7 +158,6 @@
           "IM": "Man Adası",
           "IN": "Hindistan",
           "IO": "Britanya Hint Okyanusu Toprakları",
-          "IO-alt-biot": "Britanya Hint Okyanusu Toprakları",
           "IO-alt-chagos": "Chagos Takımadaları",
           "IQ": "Irak",
           "IR": "İran",
@@ -288,7 +285,6 @@
           "TN": "Tunus",
           "TO": "Tonga",
           "TR": "Türkiye",
-          "TR-alt-variant": "Türkiye",
           "TT": "Trinidad ve Tobago",
           "TV": "Tuvalu",
           "TW": "Tayvan",

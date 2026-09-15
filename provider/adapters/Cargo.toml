@@ -5,9 +5,10 @@
 [package]
 name = "icu_provider_adapters"
 description = "Adapters for composing and manipulating data providers."
+categories.workspace = true
+keywords = []
 
 authors.workspace = true
-categories.workspace = true
 edition.workspace = true
 homepage.workspace = true
 include.workspace = true
@@ -17,15 +18,21 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-icu_locale = { workspace = true }
-icu_provider = { workspace = true, features = ["macros"] }
-tinystr = { workspace = true, features = ["zerovec"] }
-zerovec = { workspace = true, features = ["yoke"] }
-
-databake = { workspace = true, features = ["derive"], optional = true}
-serde = { workspace = true, features = ["derive", "alloc"], optional = true }
+icu_locale_fallback = { workspace = true }
+icu_provider = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
-icu_provider = { path = "../../provider/core", features = ["macros", "deserialize_json"] }
+icu_provider = { path = "../../provider/core", features = ["deserialize_json"] }
 icu_locale = { path = "../../components/locale" }
+icu_locale_fallback = { path = "../../components/locale_fallback" }
 writeable = { path = "../../utils/writeable" }
+
+[features]
+export = ["icu_provider/export"]
+serde = []
+
+# added by accident
+databake = []
+
+[lints]
+workspace = true

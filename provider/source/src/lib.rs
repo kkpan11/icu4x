@@ -2,6 +2,19 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+// https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
+// #![cfg_attr(not(any(test, doc)), no_std)]
+// #![cfg_attr(
+//     not(test),
+//     deny(
+//         clippy::indexing_slicing,
+//         clippy::unwrap_used,
+//         clippy::expect_used,
+//         clippy::panic,
+//     )
+// )]
+#![warn(missing_docs)]
+
 //! `icu_provider_source` defines [`SourceDataProvider`], the authorative ICU4X [`DataProvider`] that produces data from
 //! CLDR and ICU sources.
 //!
@@ -14,48 +27,56 @@
 //!   * enables networking support to download CLDR and ICU source data from GitHub
 //! * `use_wasm` / `use_icu4c`
 //!   * see the documentation on [`icu_codepointtrie_builder`](icu_codepointtrie_builder#build-configuration)
-//! * `experimental`
-//!   * enables markers defined in the unstable `icu::experimental` module
+//! * `unstable`
+//!   * enables unstable data markers
+
+#![cfg_attr(
+    not(any(feature = "use_wasm", feature = "use_icu4c")),
+    allow(dead_code, unused_imports)
+)]
 
 use cldr_cache::CldrCache;
 use elsa::sync::FrozenMap;
+use icu::calendar::{Date, Iso};
+use icu::time::Time;
+use icu::time::zone::UtcOffset;
 use icu_provider::prelude::*;
-use source::{AbstractFs, SerdeCache};
+use source::{AbstractFs, RscdCache, SerdeCache, TzdbCache};
 use std::collections::{BTreeSet, HashSet};
 use std::fmt::Debug;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 mod calendar;
+mod casemap;
 mod characters;
 mod cldr_serde;
 mod collator;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod currency;
 mod datetime;
+mod debug_provider;
 mod decimal;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod displaynames;
-#[cfg(feature = "experimental")]
 mod duration;
-mod fallback;
+mod helpers;
 mod list;
-mod locale_canonicalizer;
+mod locale;
 mod normalizer;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod percent;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod personnames;
 mod plurals;
 mod properties;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod relativetime;
 mod segmenter;
 mod time_zones;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod transforms;
-mod ucase;
-#[cfg(feature = "experimental")]
+#[cfg(feature = "unstable")]
 mod units;
 
 mod cldr_cache;
@@ -74,15 +95,21 @@ mod tests;
 /// * [`is_missing_cldr_error`](Self::is_missing_cldr_error)
 /// * [`is_missing_icuexport_error`](Self::is_missing_icuexport_error)
 /// * [`is_missing_segmenter_lstm_error`](Self::is_missing_segmenter_lstm_error)
+/// * [`is_missing_rscd_error`](Self::is_missing_rscd_error)
+/// * [`is_missing_tzdb_error`](Self::is_missing_tzdb_error)
 #[allow(clippy::exhaustive_structs)] // any information will be added to SourceData
 #[derive(Debug, Clone)]
 pub struct SourceDataProvider {
     cldr_paths: Option<Arc<CldrCache>>,
     icuexport_paths: Option<Arc<SerdeCache>>,
     segmenter_lstm_paths: Option<Arc<SerdeCache>>,
+    tzdb_paths: Option<Arc<TzdbCache>>,
+    rscd_paths: Option<Arc<RscdCache>>,
     trie_type: TrieType,
-    collation_han_database: CollationHanDatabase,
-    #[allow(clippy::type_complexity)] // not as complex as it appears
+    collation_root_han: CollationRootHan,
+    alt_variants: HashSet<AltVariantKind>,
+    pub(crate) timezone_horizon: time_zones::Timestamp,
+    #[expect(clippy::type_complexity)] // not as complex as it appears
     requests_cache: Arc<
         FrozenMap<
             DataMarkerInfo,
@@ -92,50 +119,60 @@ pub struct SourceDataProvider {
 }
 
 macro_rules! cb {
-    ($($marker:path = $path:literal,)+ #[experimental] $($emarker:path = $epath:literal,)+) => {
+    ($($marker_ty:ty:$marker:ident,)+ #[unstable] $($emarker_ty:ty:$emarker:ident,)+) => {
         icu_provider::export::make_exportable_provider!(SourceDataProvider, [
-            $($marker,)+
-            $(#[cfg(feature = "experimental")] $emarker,)+
+            $($marker_ty,)+
+            $(#[cfg(feature = "unstable")] $emarker_ty,)+
         ]);
-
-        #[cfg(test)]
-        icu_provider::dynutil::impl_dynamic_data_provider!(SourceDataProvider, [
-            $($marker,)+
-            $(#[cfg(feature = "experimental")] $emarker,)+
-        ], icu_provider::any::AnyMarker);
     }
 }
+extern crate alloc;
 icu_provider_registry::registry!(cb);
 
 icu_provider::marker::impl_data_provider_never_marker!(SourceDataProvider);
 
 impl SourceDataProvider {
-    /// The latest CLDR JSON tag that has been verified to work with this version of `SourceDataProvider`.
-    pub const LATEST_TESTED_CLDR_TAG: &'static str = "45.0.0";
+    /// The CLDR JSON tag that has been verified to work with this version of `SourceDataProvider`.
+    pub const TESTED_CLDR_TAG: &'static str = "49.0.0-ALPHA2";
 
-    /// The latest ICU export tag that has been verified to work with this version of `SourceDataProvider`.
-    pub const LATEST_TESTED_ICUEXPORT_TAG: &'static str = "icu4x/2024-05-16/75.x";
+    /// The ICU export tag that has been verified to work with this version of `SourceDataProvider`.
+    pub const TESTED_ICUEXPORT_TAG: &'static str = "icu4x/2026-08-31/79.x";
 
-    /// The latest segmentation LSTM model tag that has been verified to work with this version of `SourceDataProvider`.
-    pub const LATEST_TESTED_SEGMENTER_LSTM_TAG: &'static str = "v0.1.0";
+    /// The segmentation LSTM model tag that has been verified to work with this version of `SourceDataProvider`.
+    pub const TESTED_SEGMENTER_LSTM_TAG: &'static str = "v0.1.0";
 
-    /// A provider using the latest data that has been verified to work with this version of `SourceDataProvider`.
+    /// The Unicode version tag that has been verified to work with this version of `SourceDataProvider`.
+    pub const TESTED_UNICODE_TAG: &'static str = "18.0.0";
+
+    /// Deprecated, see [`Self::TESTED_UNICODE_TAG`].
+    #[deprecated(since = "2.3.0", note = "use `TESTED_UNICODE_TAG`")]
+    pub const TESTED_UCD_TAG: &'static str = Self::TESTED_UNICODE_TAG;
+
+    /// The TZDB tag that has been verified to work with this version of `SourceDataProvider`.
+    pub const TESTED_TZDB_TAG: &'static str = "2026c";
+
+    /// A provider using the data that has been verified to work with this version of `SourceDataProvider`.
     ///
-    /// See [`LATEST_TESTED_CLDR_TAG`](Self::LATEST_TESTED_CLDR_TAG),
-    /// [`LATEST_TESTED_ICUEXPORT_TAG`](Self::LATEST_TESTED_ICUEXPORT_TAG),
-    /// [`LATEST_TESTED_SEGMENTER_LSTM_TAG`](Self::LATEST_TESTED_SEGMENTER_LSTM_TAG).
+    /// See [`TESTED_CLDR_TAG`](Self::TESTED_CLDR_TAG),
+    /// [`TESTED_ICUEXPORT_TAG`](Self::TESTED_ICUEXPORT_TAG),
+    /// [`TESTED_SEGMENTER_LSTM_TAG`](Self::TESTED_SEGMENTER_LSTM_TAG),
+    /// [`TESTED_UNICODE_TAG`](Self::TESTED_UNICODE_TAG),
+    /// [`TESTED_TZDB_TAG`](Self::TESTED_TZDB_TAG).
     ///
     /// ✨ *Enabled with the `networking` Cargo feature.*
     #[cfg(feature = "networking")]
-    pub fn new_latest_tested() -> Self {
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
         // Singleton so that all instantiations share the same cache.
-        static SINGLETON: std::sync::OnceLock<SourceDataProvider> = std::sync::OnceLock::new();
+        static SINGLETON: OnceLock<SourceDataProvider> = OnceLock::new();
         SINGLETON
             .get_or_init(|| {
                 Self::new_custom()
-                    .with_cldr_for_tag(Self::LATEST_TESTED_CLDR_TAG)
-                    .with_icuexport_for_tag(Self::LATEST_TESTED_ICUEXPORT_TAG)
-                    .with_segmenter_lstm_for_tag(Self::LATEST_TESTED_SEGMENTER_LSTM_TAG)
+                    .with_cldr_for_tag(Self::TESTED_CLDR_TAG)
+                    .with_icuexport_for_tag(Self::TESTED_ICUEXPORT_TAG)
+                    .with_segmenter_lstm_for_tag(Self::TESTED_SEGMENTER_LSTM_TAG)
+                    .with_tzdb_for_tag(Self::TESTED_TZDB_TAG)
+                    .with_unicode_rscd_for_tag(Self::TESTED_UNICODE_TAG)
             })
             .clone()
     }
@@ -150,8 +187,16 @@ impl SourceDataProvider {
             cldr_paths: None,
             icuexport_paths: None,
             segmenter_lstm_paths: None,
+            tzdb_paths: None,
+            rscd_paths: None,
             trie_type: Default::default(),
-            collation_han_database: Default::default(),
+            timezone_horizon: time_zones::Timestamp::try_offset_only_from_str(
+                "2015-01-01T00:00:00Z",
+                Default::default(),
+            )
+            .unwrap(),
+            collation_root_han: Default::default(),
+            alt_variants: Default::default(),
             requests_cache: Default::default(),
         }
     }
@@ -161,9 +206,7 @@ impl SourceDataProvider {
     /// [GitHub releases](https://github.com/unicode-org/cldr-json/releases)).
     pub fn with_cldr(self, root: &Path) -> Result<Self, DataError> {
         Ok(Self {
-            cldr_paths: Some(Arc::new(CldrCache::from_serde_cache(SerdeCache::new(
-                AbstractFs::new(root)?,
-            )))),
+            cldr_paths: Some(Arc::new(CldrCache::new(AbstractFs::new(root)?))),
             ..self
         })
     }
@@ -188,54 +231,152 @@ impl SourceDataProvider {
         })
     }
 
+    /// Deprecated, see [`Self::with_unicode_rscd`].
+    #[deprecated(since = "2.3.0", note = "use .with_unicode_rscd")]
+    pub fn with_unihan(self, _root: &Path) -> Result<Self, DataError> {
+        panic!(
+            "Use `.with_unicode_rscd` to set Repertoire-synchronized Character Data, which includes Unihan data."
+        );
+    }
+
+    /// Deprecated
+    #[deprecated(since = "2.3.0", note = "use .with_unicode_rscd")]
+    pub fn with_ucd(self, _root: &Path) -> Result<Self, DataError> {
+        panic!(
+            "Use `.with_unicode_rscd` to set Repertoire-synchronized Character Data, which includes UCD data."
+        );
+    }
+
+    /// Adds a Unicode Repertoire-synchronized Character Data source data to the provider. The path should
+    /// point to a directory structure matching as described in <https://www.unicode.org/reports/tr44/tr44-37.html#Directory_Structure>.
+    pub fn with_unicode_rscd(self, root: &Path) -> Result<Self, DataError> {
+        Ok(Self {
+            rscd_paths: Some(Arc::new(RscdCache::new(AbstractFs::new(root)?))),
+            ..self
+        })
+    }
+
+    /// Adds timezone database source data to the provider. The path should point to a local
+    /// `tz` directory or ZIP file (see [GitHub](https://github.com/eggert/tz)).
+    pub fn with_tzdb(self, root: &Path) -> Result<Self, DataError> {
+        Ok(Self {
+            tzdb_paths: Some(Arc::new(TzdbCache::new(AbstractFs::new(root)?))),
+            ..self
+        })
+    }
+
     /// Adds CLDR source data to the provider. The data will be downloaded from GitHub
     /// using the given tag (see [GitHub releases](https://github.com/unicode-org/cldr-json/releases)).
     ///
-    /// Also see: [`LATEST_TESTED_CLDR_TAG`](Self::LATEST_TESTED_CLDR_TAG)
+    /// Also see: [`TESTED_CLDR_TAG`](Self::TESTED_CLDR_TAG)
     ///
     /// ✨ *Enabled with the `networking` Cargo feature.*
     #[cfg(feature = "networking")]
     pub fn with_cldr_for_tag(self, tag: &str) -> Self {
         Self {
-                cldr_paths: Some(Arc::new(CldrCache::from_serde_cache(SerdeCache::new(AbstractFs::new_from_url(format!(
+            cldr_paths: Some(Arc::new(CldrCache::new(AbstractFs::new_zip_from_url(
+                format!(
                     "https://github.com/unicode-org/cldr-json/releases/download/{tag}/cldr-{tag}-json-full.zip",
-                )))))),
-                ..self
+                ),
+            )))),
+            ..self
         }
     }
 
     /// Adds ICU export source data to the provider. The data will be downloaded from GitHub
-    /// using the given tag. (see [GitHub releases](https://github.com/unicode-org/icu/releases)).
+    /// using the given tag (see [GitHub releases](https://github.com/unicode-org/icu/releases)).
     ///
-    /// Also see: [`LATEST_TESTED_ICUEXPORT_TAG`](Self::LATEST_TESTED_ICUEXPORT_TAG)
+    /// Also see: [`TESTED_ICUEXPORT_TAG`](Self::TESTED_ICUEXPORT_TAG)
     ///
     /// ✨ *Enabled with the `networking` Cargo feature.*
     #[cfg(feature = "networking")]
-    pub fn with_icuexport_for_tag(self, mut tag: &str) -> Self {
-        if tag == "release-71-1" {
-            tag = "icu4x/2022-08-17/71.x";
-        }
+    pub fn with_icuexport_for_tag(self, tag: &str) -> Self {
+        let url = if (tag.starts_with("release") && tag < "release-78.1")
+            || (tag.starts_with("icu4x/") && tag < "icu4x/2026-01-01")
+        {
+            // Legacy naming scheme
+            format!(
+                "https://github.com/unicode-org/icu/releases/download/{tag}/icuexportdata_{}.zip",
+                tag.replace('/', "-")
+            )
+        } else {
+            format!(
+                "https://github.com/unicode-org/icu/releases/download/{tag}/icu4x-icuexportdata-{}.zip",
+                tag.replace("release-", "")
+                    .replace("icu4x/", "")
+                    .replace('/', "-")
+            )
+        };
         Self {
-                icuexport_paths: Some(Arc::new(SerdeCache::new(AbstractFs::new_from_url(format!(
-                    "https://github.com/unicode-org/icu/releases/download/{tag}/icuexportdata_{}.zip",
-                    tag.replace('/', "-")
-                ))))),
-                ..self
+            icuexport_paths: Some(Arc::new(SerdeCache::new(AbstractFs::new_zip_from_url(url)))),
+            ..self
         }
     }
 
     /// Adds segmenter LSTM source data to the provider. The data will be downloaded from GitHub
-    /// using the given tag. (see [GitHub releases](https://github.com/unicode-org/lstm_word_segmentation/releases)).
+    /// using the given tag (see [GitHub releases](https://github.com/unicode-org/lstm_word_segmentation/releases)).
     ///
-    /// Also see: [`LATEST_TESTED_SEGMENTER_LSTM_TAG`](Self::LATEST_TESTED_SEGMENTER_LSTM_TAG)
+    /// Also see: [`TESTED_SEGMENTER_LSTM_TAG`](Self::TESTED_SEGMENTER_LSTM_TAG)
     ///
     /// ✨ *Enabled with the `networking` Cargo feature.*
     #[cfg(feature = "networking")]
     pub fn with_segmenter_lstm_for_tag(self, tag: &str) -> Self {
         Self {
-            segmenter_lstm_paths: Some(Arc::new(SerdeCache::new(AbstractFs::new_from_url(format!(
-                "https://github.com/unicode-org/lstm_word_segmentation/releases/download/{tag}/models.zip"
+            segmenter_lstm_paths: Some(Arc::new(SerdeCache::new(AbstractFs::new_zip_from_url(
+                format!(
+                    "https://github.com/unicode-org/lstm_word_segmentation/releases/download/{tag}/models.zip"
+                ),
+            )))),
+            ..self
+        }
+    }
+
+    /// Deprecated, see [`Self::with_unicode_rscd_for_tag`].
+    ///
+    /// ✨ *Enabled with the `networking` Cargo feature.*
+    #[cfg(feature = "networking")]
+    #[deprecated(since = "2.3.0", note = "use .with_unicode_rscd_for_tag")]
+    pub fn with_unihan_for_tag(self, _tag: &str) -> Self {
+        panic!("Use `.with_unicode_rscd_for_tag` to set UCD data, which includes Unihan data.");
+    }
+
+    /// Deprecated, see [`Self::with_unicode_rscd_for_tag`].
+    ///
+    /// ✨ *Enabled with the `networking` Cargo feature.*
+    #[cfg(feature = "networking")]
+    #[deprecated(since = "2.3.0", note = "use .with_unicode_rscd_for_tag")]
+    pub fn with_ucd_for_tag(self, tag: &str) -> Self {
+        self.with_unicode_rscd_for_tag(tag)
+    }
+
+    /// Adds Unicode source data to the provider. The data will be downloaded from
+    /// <https://unicode.org/Public> using the given version tag.
+    ///
+    /// Also see: [`TESTED_UNICODE_TAG`](Self::TESTED_UNICODE_TAG)
+    ///
+    /// ✨ *Enabled with the `networking` Cargo feature.*
+    #[cfg(feature = "networking")]
+    pub fn with_unicode_rscd_for_tag(self, tag: &str) -> Self {
+        Self {
+            rscd_paths: Some(Arc::new(RscdCache::new(AbstractFs::new_from_url(format!(
+                "https://www.unicode.org/Public/{tag}/"
             ))))),
+            ..self
+        }
+    }
+
+    /// Adds timezone database source data to the provider. The data will be downloaded from GitHub
+    /// using the given tag (see [GitHub](https://github.com/eggert/tz)).
+    ///
+    /// Also see: [`TESTED_SEGMENTER_LSTM_TAG`](Self::TESTED_SEGMENTER_LSTM_TAG)
+    ///
+    /// ✨ *Enabled with the `networking` Cargo feature.*
+    #[cfg(feature = "networking")]
+    pub fn with_tzdb_for_tag(self, tag: &str) -> Self {
+        Self {
+            tzdb_paths: Some(Arc::new(TzdbCache::new(AbstractFs::new_tar_from_url(
+                format!("https://www.iana.org/time-zones/repository/releases/tzdata{tag}.tar.gz",),
+            )))),
             ..self
         }
     }
@@ -250,22 +391,53 @@ impl SourceDataProvider {
         "Missing segmenter data. Use `.with_segmenter_lstm[_for_tag]` to set segmenter data.",
     );
 
+    const MISSING_RSCD_ERROR: DataError = DataError::custom(
+        "Missing Unicode RSCD data. Use `.with_unicode_rscd[_for_tag]` to set Unicode RSCD data.",
+    );
+
+    const MISSING_TZDB_ERROR: DataError =
+        DataError::custom("Missing tzdb data. Use `.with_tzdb[_for_tag]` to set tzdb data.");
+
     /// Identifies errors that are due to missing CLDR data.
     pub fn is_missing_cldr_error(mut e: DataError) -> bool {
-        e.marker_path = None;
+        e.marker = None;
         e == Self::MISSING_CLDR_ERROR
     }
 
     /// Identifies errors that are due to missing ICU export data.
     pub fn is_missing_icuexport_error(mut e: DataError) -> bool {
-        e.marker_path = None;
+        e.marker = None;
         e == Self::MISSING_ICUEXPORT_ERROR
     }
 
     /// Identifies errors that are due to missing segmenter LSTM data.
     pub fn is_missing_segmenter_lstm_error(mut e: DataError) -> bool {
-        e.marker_path = None;
+        e.marker = None;
         e == Self::MISSING_SEGMENTER_LSTM_ERROR
+    }
+
+    /// Identifies errors that are due to missing TZDB data.
+    pub fn is_missing_tzdb_error(mut e: DataError) -> bool {
+        e.marker = None;
+        e == Self::MISSING_TZDB_ERROR
+    }
+
+    /// Identifies errors that are due to missing Unicode RSCD data.
+    #[deprecated]
+    pub fn is_missing_unihan_error(e: DataError) -> bool {
+        Self::is_missing_rscd_error(e)
+    }
+
+    /// Identifies errors that are due to missing Unicode RSCD data.
+    #[deprecated]
+    pub fn is_missing_ucd_error(e: DataError) -> bool {
+        Self::is_missing_rscd_error(e)
+    }
+
+    /// Identifies errors that are due to missing Unicode RSCD data.
+    pub fn is_missing_rscd_error(mut e: DataError) -> bool {
+        e.marker = None;
+        e == Self::MISSING_RSCD_ERROR
     }
 
     fn cldr(&self) -> Result<&CldrCache, DataError> {
@@ -284,7 +456,18 @@ impl SourceDataProvider {
             .ok_or(Self::MISSING_SEGMENTER_LSTM_ERROR)
     }
 
-    /// Set this to use tries optimized for speed instead of data size
+    fn rscd(&self) -> Result<&RscdCache, DataError> {
+        self.rscd_paths.as_deref().ok_or(Self::MISSING_RSCD_ERROR)
+    }
+
+    fn tzdb(&self) -> Result<&TzdbCache, DataError> {
+        self.tzdb_paths.as_deref().ok_or(Self::MISSING_TZDB_ERROR)
+    }
+
+    /// Set this to use tries optimized for speed instead of data size.
+    ///
+    /// The tries for the core (UAX #15 but not UAX #46) normalization
+    /// forms use the fast trie type regardless of this setting.
     pub fn with_fast_tries(self) -> Self {
         Self {
             trie_type: TrieType::Fast,
@@ -292,10 +475,38 @@ impl SourceDataProvider {
         }
     }
 
-    /// Set the [`CollationHanDatabase`] version.
-    pub fn with_collation_han_database(self, collation_han_database: CollationHanDatabase) -> Self {
+    /// Set the [`CollationRootHan`] version.
+    pub fn with_collation_root_han(self, collation_root_han: CollationRootHan) -> Self {
         Self {
-            collation_han_database,
+            collation_root_han,
+            ..self
+        }
+    }
+
+    /// Set the [`AltVariantKind`]s to enable when generating data.
+    ///
+    /// This allows enabling alternative data variants, such as `alt="ascii"` for datetime patterns.
+    pub fn with_alt_variants(self, variants: impl IntoIterator<Item = AltVariantKind>) -> Self {
+        Self {
+            alt_variants: variants.into_iter().collect(),
+            ..self
+        }
+    }
+
+    /// Set the timezone horizon from a UTC date.
+    ///
+    /// Timezone names that have not been in use since before this date are not included,
+    /// formatting will fall back to formats like "Germany Time" or "GMT+1".
+    ///
+    /// Defaults to 2015-01-01, which is a reasonable time frame where people remember
+    /// time zone changes.
+    pub fn with_timezone_horizon(self, date: Date<Iso>) -> Self {
+        Self {
+            timezone_horizon: time_zones::Timestamp {
+                date,
+                time: Time::start_of_day(),
+                zone: UtcOffset::zero(),
+            },
             ..self
         }
     }
@@ -304,17 +515,48 @@ impl SourceDataProvider {
         self.trie_type
     }
 
-    fn collation_han_database(&self) -> CollationHanDatabase {
-        self.collation_han_database
+    fn collation_root_han(&self) -> CollationRootHan {
+        self.collation_root_han
     }
 
     /// List the locales for the given CLDR coverage levels
     pub fn locales_for_coverage_levels(
         &self,
         levels: impl IntoIterator<Item = CoverageLevel>,
-    ) -> Result<impl IntoIterator<Item = icu::locale::LanguageIdentifier>, DataError> {
+    ) -> Result<impl IntoIterator<Item = DataLocale>, DataError> {
         self.cldr()?.locales(levels)
     }
+}
+
+#[test]
+#[cfg(feature = "networking")]
+fn test_icu_tags() {
+    SourceDataProvider::new()
+        .with_icuexport_for_tag("release-78.1")
+        .icuexport()
+        .unwrap()
+        .file_exists("foo")
+        .unwrap();
+    SourceDataProvider::new()
+        .with_icuexport_for_tag("icu4x/2026-07-01/79.x")
+        .icuexport()
+        .unwrap()
+        .file_exists("foo")
+        .unwrap();
+
+    // Legacy naming scheme, still supported for older tags
+    SourceDataProvider::new()
+        .with_icuexport_for_tag("release-77-1")
+        .icuexport()
+        .unwrap()
+        .file_exists("foo")
+        .unwrap();
+    SourceDataProvider::new()
+        .with_icuexport_for_tag("icu4x/2025-05-21/77.x")
+        .icuexport()
+        .unwrap()
+        .file_exists("foo")
+        .unwrap();
 }
 
 impl SourceDataProvider {
@@ -323,7 +565,7 @@ impl SourceDataProvider {
         SourceDataProvider: IterableDataProviderCached<M>,
     {
         if <M as DataMarker>::INFO.is_singleton {
-            if !req.id.locale.is_und() {
+            if !req.id.locale.is_unknown() {
                 Err(DataErrorKind::InvalidRequest)
             } else {
                 Ok(())
@@ -339,34 +581,40 @@ impl SourceDataProvider {
 
 #[test]
 fn test_check_req() {
-    use icu::locale::langid;
+    use icu::locale::data_locale;
     use icu_provider::hello_world::*;
 
-    impl DataProvider<HelloWorldV1Marker> for SourceDataProvider {
-        fn load(&self, req: DataRequest) -> Result<DataResponse<HelloWorldV1Marker>, DataError> {
+    #[allow(non_local_definitions)] // test-scoped, only place that uses it
+    impl DataProvider<HelloWorldV1> for SourceDataProvider {
+        fn load(&self, req: DataRequest) -> Result<DataResponse<HelloWorldV1>, DataError> {
             HelloWorldProvider.load(req)
         }
     }
 
-    impl crate::IterableDataProviderCached<HelloWorldV1Marker> for SourceDataProvider {
+    #[allow(non_local_definitions)] // test-scoped, only place that uses it
+    impl IterableDataProviderCached<HelloWorldV1> for SourceDataProvider {
         fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
             Ok(HelloWorldProvider.iter_ids()?.into_iter().collect())
         }
     }
 
     let provider = SourceDataProvider::new_testing();
-    assert!(provider
-        .check_req::<HelloWorldV1Marker>(DataRequest {
-            id: DataIdentifierBorrowed::for_locale(&langid!("fi").into()),
-            ..Default::default()
-        })
-        .is_ok());
-    assert!(provider
-        .check_req::<HelloWorldV1Marker>(DataRequest {
-            id: DataIdentifierBorrowed::for_locale(&langid!("arc").into()),
-            ..Default::default()
-        })
-        .is_err());
+    assert!(
+        provider
+            .check_req::<HelloWorldV1>(DataRequest {
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("fi")),
+                ..Default::default()
+            })
+            .is_ok()
+    );
+    assert!(
+        provider
+            .check_req::<HelloWorldV1>(DataRequest {
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("arc")),
+                ..Default::default()
+            })
+            .is_err()
+    );
 }
 
 trait IterableDataProviderCached<M: DataMarker>: DataProvider<M> {
@@ -374,10 +622,9 @@ trait IterableDataProviderCached<M: DataMarker>: DataProvider<M> {
 }
 
 impl SourceDataProvider {
-    #[allow(clippy::type_complexity)] // not as complex as it appears
     fn populate_requests_cache<M: DataMarker>(
         &self,
-    ) -> Result<&HashSet<DataIdentifierCow>, DataError>
+    ) -> Result<&HashSet<DataIdentifierCow<'_>>, DataError>
     where
         SourceDataProvider: IterableDataProviderCached<M>,
     {
@@ -394,7 +641,7 @@ impl<M: DataMarker> IterableDataProvider<M> for SourceDataProvider
 where
     SourceDataProvider: IterableDataProviderCached<M>,
 {
-    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow>, DataError> {
+    fn iter_ids(&self) -> Result<BTreeSet<DataIdentifierCow<'_>>, DataError> {
         Ok(if <M as DataMarker>::INFO.is_singleton {
             [Default::default()].into_iter().collect()
         } else {
@@ -412,7 +659,7 @@ where
 /// <https://github.com/unicode-org/icu/blob/main/docs/userguide/icu::data/buildtool.md#collation-ucadata>
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
-pub enum CollationHanDatabase {
+pub enum CollationRootHan {
     /// Implicit
     #[serde(rename = "implicit")]
     #[default]
@@ -422,13 +669,23 @@ pub enum CollationHanDatabase {
     Unihan,
 }
 
-impl std::fmt::Display for CollationHanDatabase {
+impl std::fmt::Display for CollationRootHan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            CollationHanDatabase::Implicit => write!(f, "implicithan"),
-            CollationHanDatabase::Unihan => write!(f, "unihan"),
+            CollationRootHan::Implicit => write!(f, "implicithan"),
+            CollationRootHan::Unihan => write!(f, "unihan"),
         }
     }
+}
+
+/// Specifies an alt variant to enable when generating data.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum AltVariantKind {
+    /// `alt="ascii"` on certain datetime patterns.
+    ///
+    /// Intended for compatibility with older websites.
+    DatetimeAscii,
 }
 
 /// A language's CLDR coverage level.
@@ -471,11 +728,47 @@ enum TrieType {
     Small,
 }
 
+impl From<TrieType> for icu::collections::codepointtrie::TrieType {
+    fn from(other: TrieType) -> Self {
+        match other {
+            TrieType::Fast => Self::Fast,
+            TrieType::Small => Self::Small,
+        }
+    }
+}
+
 impl std::fmt::Display for TrieType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
             TrieType::Fast => write!(f, "fast"),
             TrieType::Small => write!(f, "small"),
         }
+    }
+}
+
+struct DataHasher(twox_hash::XxHash64);
+
+impl DataHasher {
+    pub fn new() -> Self {
+        Self(twox_hash::XxHash64::with_seed(0))
+    }
+}
+
+impl std::hash::Hasher for DataHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0.finish()
+    }
+
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.write(bytes);
+    }
+
+    // This override is important for portability, we always need to
+    // hash a usize as the same number of bytes. See icu4x#8356.
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.write_u64(i as u64);
     }
 }

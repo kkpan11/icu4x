@@ -2,85 +2,96 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+use crate::options::{ListFormatterOptions, ListLength};
 use crate::provider::*;
-use crate::ListLength;
+#[cfg(feature = "alloc")]
+use alloc::string::String;
 use core::fmt::{self, Write};
+use icu_locale_core::preferences::define_preferences;
+use icu_provider::marker::ErasedMarker;
 use icu_provider::prelude::*;
 use writeable::*;
 
 #[cfg(doc)]
 extern crate writeable;
 
+define_preferences!(
+    /// The preferences for list formatting.
+    [Copy]
+    ListFormatterPreferences,
+    {}
+);
+
 /// A formatter that renders sequences of items in an i18n-friendly way. See the
 /// [crate-level documentation](crate) for more details.
 #[derive(Debug)]
 pub struct ListFormatter {
-    data: DataPayload<ErasedListV2Marker>,
-    length: ListLength,
+    data: DataPayload<ErasedMarker<ListFormatterPatterns<'static>>>,
 }
 
 macro_rules! constructor {
-    ($name: ident, $name_any: ident, $name_buffer: ident, $name_unstable: ident, $marker: ty, $doc: literal) => {
-        icu_provider::gen_any_buffer_data_constructors!(
-            (locale, style: ListLength) ->  error: DataError,
+    ($name: ident, $name_buffer: ident, $name_unstable: ident, $marker: ty, $doc: literal) => {
+        icu_provider::gen_buffer_data_constructors!(
+            (prefs: ListFormatterPreferences, options: ListFormatterOptions) ->  error: DataError,
             #[doc = concat!("Creates a new [`ListFormatter`] that produces a ", $doc, "-type list using compiled data.")]
             ///
             /// See the [CLDR spec](https://unicode.org/reports/tr35/tr35-general.html#ListPatterns) for
             /// an explanation of the different types.
-            ///
-            /// ✨ *Enabled with the `compiled_data` Cargo feature.*
-            ///
-            /// [📚 Help choosing a constructor](icu_provider::constructors)
             functions: [
                 $name,
-                $name_any,
                 $name_buffer,
                 $name_unstable,
                 Self
             ]
         );
 
-        #[doc = icu_provider::gen_any_buffer_unstable_docs!(UNSTABLE, Self::$name)]
+        #[doc = icu_provider::gen_buffer_unstable_docs!(UNSTABLE, Self::$name)]
         pub fn $name_unstable(
             provider: &(impl DataProvider<$marker> + ?Sized),
-            locale: &DataLocale,
-            length: ListLength,
+            prefs: ListFormatterPreferences,
+            options: ListFormatterOptions,
         ) -> Result<Self, DataError> {
+            let length = match options.length.unwrap_or_default() {
+                ListLength::Narrow => ListFormatterPatterns::NARROW,
+                ListLength::Short => ListFormatterPatterns::SHORT,
+                ListLength::Wide => ListFormatterPatterns::WIDE,
+            };
+            let locale = <$marker>::make_locale(prefs.locale_preferences);
             let data = provider
                 .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(locale),
+                    id: DataIdentifierBorrowed::for_marker_attributes_and_locale(
+                        length,
+                        &locale
+                    ),
                     ..Default::default()
                 })?
                 .payload
                 .cast();
-            Ok(Self { data, length })
+            Ok(Self { data })
         }
     };
 }
 
 impl ListFormatter {
     constructor!(
-        try_new_and_with_length,
-        try_new_and_with_length_with_any_provider,
-        try_new_and_with_length_with_buffer_provider,
-        try_new_and_with_length_unstable,
-        AndListV2Marker,
+        try_new_and,
+        try_new_and_with_buffer_provider,
+        try_new_and_unstable,
+        ListAndV1,
         "and"
     );
     constructor!(
-        try_new_or_with_length,
-        try_new_or_with_length_with_any_provider,
-        try_new_or_with_length_with_buffer_provider,
-        try_new_or_with_length_unstable,
-        OrListV2Marker,
+        try_new_or,
+        try_new_or_with_buffer_provider,
+        try_new_or_unstable,
+        ListOrV1,
         "or"
     );
     constructor!(
-        try_new_unit_with_length,
-        try_new_unit_with_length_with_any_provider,
-        try_new_unit_with_length_with_buffer_provider,
-        try_new_unit_with_length_unstable,
-        UnitListV2Marker,
+        try_new_unit,
+        try_new_unit_with_buffer_provider,
+        try_new_unit_unstable,
+        ListUnitV1,
         "unit"
     );
 
@@ -93,12 +104,13 @@ impl ListFormatter {
     /// # Example
     ///
     /// ```
-    /// use icu::list::*;
+    /// use icu::list::options::*;
+    /// use icu::list::{ListFormatter, parts};
     /// # use icu::locale::locale;
     /// # use writeable::*;
-    /// let formatteur = ListFormatter::try_new_and_with_length(
-    ///     &locale!("fr").into(),
-    ///     ListLength::Wide,
+    /// let formatteur = ListFormatter::try_new_and(
+    ///     locale!("fr").into(),
+    ///     ListFormatterOptions::default().with_length(ListLength::Wide),
     /// )
     /// .unwrap();
     /// let pays = ["Italie", "France", "Espagne", "Allemagne"];
@@ -129,10 +141,13 @@ impl ListFormatter {
 
     /// Returns a [`String`] composed of the input [`Writeable`]s and the language-dependent
     /// formatting.
+    ///
+    /// ✨ *Enabled with the `alloc` Cargo feature.*
+    #[cfg(feature = "alloc")]
     pub fn format_to_string<W: Writeable, I: Iterator<Item = W> + Clone>(
         &self,
         values: I,
-    ) -> alloc::string::String {
+    ) -> String {
         self.format(values).write_to_string().into_owned()
     }
 }
@@ -184,6 +199,8 @@ impl<'a, W: Writeable + 'a, I: Iterator<Item = W> + Clone + 'a> Writeable
             };
         }
 
+        let patterns = self.formatter.data.get();
+
         let mut values = self.values.clone();
 
         if let Some(first) = values.next() {
@@ -193,12 +210,7 @@ impl<'a, W: Writeable + 'a, I: Iterator<Item = W> + Clone + 'a> Writeable
                     // start_before + values[0] + start_between + (values[1..n-3] + middle_between)* +
                     // values[n-2] + end_between + values[n-1] + end_after
 
-                    let (start_before, start_between, _) = self
-                        .formatter
-                        .data
-                        .get()
-                        .start(self.formatter.length)
-                        .parts(&second);
+                    let (start_before, start_between, _) = patterns.start.parts();
 
                     literal!(start_before)?;
                     value!(first)?;
@@ -208,33 +220,22 @@ impl<'a, W: Writeable + 'a, I: Iterator<Item = W> + Clone + 'a> Writeable
                     let mut next = third;
 
                     for next_next in values {
-                        let (_, between, _) = self
-                            .formatter
-                            .data
-                            .get()
-                            .middle(self.formatter.length)
-                            .parts(&next);
+                        let between = &*patterns.middle;
                         literal!(between)?;
                         value!(next)?;
                         next = next_next;
                     }
 
-                    let (_, end_between, end_after) = self
-                        .formatter
-                        .data
-                        .get()
-                        .end(self.formatter.length)
-                        .parts(&next);
+                    let (_, end_between, end_after) = patterns.end.parts(&next);
                     literal!(end_between)?;
                     value!(next)?;
                     literal!(end_after)
                 } else {
                     // Pair(values[0], values[1]) = pair_before + values[0] + pair_between + values[1] + pair_after
-                    let (before, between, after) = self
-                        .formatter
-                        .data
-                        .get()
-                        .pair(self.formatter.length)
+                    let (before, between, after) = patterns
+                        .pair
+                        .as_ref()
+                        .unwrap_or(&patterns.end)
                         .parts(&second);
                     literal!(before)?;
                     value!(first)?;
@@ -260,19 +261,14 @@ impl<'a, W: Writeable + 'a, I: Iterator<Item = W> + Clone + 'a> Writeable
                 w.writeable_length_hint()
             })
             .sum::<LengthHint>();
-        item_length
-            + self
-                .formatter
-                .data
-                .get()
-                .size_hint(self.formatter.length, count)
+        item_length + self.formatter.data.get().length_hint(count)
     }
 }
 
-impl<'a, W: Writeable + 'a, I: Iterator<Item = W> + Clone + 'a> core::fmt::Display
+impl<'a, W: Writeable + 'a, I: Iterator<Item = W> + Clone + 'a> fmt::Display
     for FormattedList<'a, W, I>
 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.write_to(f)
     }
 }
@@ -282,16 +278,15 @@ mod tests {
     use super::*;
     use writeable::{assert_writeable_eq, assert_writeable_parts_eq};
 
-    fn formatter(length: ListLength) -> ListFormatter {
+    fn formatter(patterns: ListFormatterPatterns<'static>) -> ListFormatter {
         ListFormatter {
-            data: DataPayload::from_owned(crate::patterns::test::test_patterns()),
-            length,
+            data: DataPayload::from_owned(patterns),
         }
     }
 
     #[test]
     fn test_slices() {
-        let formatter = formatter(ListLength::Wide);
+        let formatter = formatter(crate::patterns::test::test_patterns_general());
         let values = ["one", "two", "three", "four", "five"];
 
         assert_writeable_eq!(formatter.format(values[0..0].iter()), "");
@@ -324,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_into_iterator() {
-        let formatter = formatter(ListLength::Wide);
+        let formatter = formatter(crate::patterns::test::test_patterns_general());
 
         let mut vecdeque = std::collections::vec_deque::VecDeque::<u8>::new();
         vecdeque.push_back(10);
@@ -345,10 +340,10 @@ mod tests {
 
     #[test]
     fn test_iterator() {
-        let formatter = formatter(ListLength::Wide);
+        let formatter = formatter(crate::patterns::test::test_patterns_general());
 
         assert_writeable_parts_eq!(
-            formatter.format(core::iter::repeat(5).take(2)),
+            formatter.format(core::iter::repeat_n(5, 2)),
             "$5;5+",
             [
                 (0, 1, parts::LITERAL),
@@ -362,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_conditional() {
-        let formatter = formatter(ListLength::Narrow);
+        let formatter = formatter(crate::patterns::test::test_patterns_conditional());
 
         assert_writeable_eq!(formatter.format(["beta", "alpha"].iter()), "beta :o alpha");
     }
@@ -370,8 +365,8 @@ mod tests {
     macro_rules! test {
         ($locale:literal, $type:ident, $(($input:expr, $output:literal),)+) => {
             let f = ListFormatter::$type(
-                &icu::locale::locale!($locale).into(),
-                ListLength::Wide
+                icu_locale_core::locale!($locale).into(),
+                Default::default(),
             ).unwrap();
             $(
                 assert_writeable_eq!(f.format($input.iter()), $output);
@@ -381,14 +376,14 @@ mod tests {
 
     #[test]
     fn test_basic() {
-        test!("fr", try_new_or_with_length, (["A", "B"], "A ou B"),);
+        test!("fr", try_new_or, (["A", "B"], "A ou B"),);
     }
 
     #[test]
     fn test_spanish() {
         test!(
             "es",
-            try_new_and_with_length,
+            try_new_and,
             (["x", "Mallorca"], "x y Mallorca"),
             (["x", "Ibiza"], "x e Ibiza"),
             (["x", "Hidalgo"], "x e Hidalgo"),
@@ -397,7 +392,7 @@ mod tests {
 
         test!(
             "es",
-            try_new_or_with_length,
+            try_new_or,
             (["x", "Ibiza"], "x o Ibiza"),
             (["x", "Okinawa"], "x u Okinawa"),
             (["x", "8 más"], "x u 8 más"),
@@ -414,18 +409,14 @@ mod tests {
             (["x", "11.000,92"], "x u 11.000,92"),
         );
 
-        test!(
-            "es-AR",
-            try_new_and_with_length,
-            (["x", "Ibiza"], "x e Ibiza"),
-        );
+        test!("es-AR", try_new_and, (["x", "Ibiza"], "x e Ibiza"),);
     }
 
     #[test]
     fn test_hebrew() {
         test!(
             "he",
-            try_new_and_with_length,
+            try_new_and,
             (["x", "יפו"], "x ויפו"),
             (["x", "Ibiza"], "x ו‑Ibiza"),
         );

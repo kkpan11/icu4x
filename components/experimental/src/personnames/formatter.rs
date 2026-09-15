@@ -4,8 +4,9 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use icu_locale::LocaleFallbacker;
-use icu_properties::names::PropertyEnumToValueNameLinearTiny4Mapper;
+use icu_locale_fallback::LocaleFallbacker;
+use icu_properties::PropertyNamesShort;
+use icu_properties::props::Script;
 use icu_properties::script::ScriptWithExtensions;
 
 use super::api::{
@@ -13,7 +14,7 @@ use super::api::{
     PersonNamesFormatterOptions, PreferredOrder,
 };
 use super::provider::{
-    PersonNamesFormatV1, PersonNamesFormatV1Marker, PersonNamesFormattingAttributes,
+    PersonNamesFormat, PersonNamesFormatV1, PersonNamesFormattingAttributes,
     PersonNamesFormattingAttributesMask, PersonNamesFormattingData,
 };
 use super::specifications;
@@ -21,10 +22,11 @@ use icu_locale_core::Locale;
 use icu_provider::prelude::*;
 use zerofrom::ZeroFrom;
 
+#[derive(Debug)]
 pub struct PersonNamesFormatter {
     pub(crate) default_options: PersonNamesFormatterOptions,
     swe: ScriptWithExtensions,
-    scripts: PropertyEnumToValueNameLinearTiny4Mapper<icu_properties::Script>,
+    scripts: PropertyNamesShort<Script>,
     fallbacker: LocaleFallbacker,
 }
 
@@ -44,15 +46,13 @@ impl PersonNamesFormatter {
     ) -> Result<PersonNamesFormatter, PersonNamesFormatterError>
     where
         P: ?Sized
-            + DataProvider<icu_properties::provider::ScriptWithExtensionsPropertyV1Marker>
-            + DataProvider<icu_properties::provider::ScriptValueToShortNameV1Marker>
-            + DataProvider<icu_locale::provider::LocaleFallbackLikelySubtagsV1Marker>
-            + DataProvider<icu_locale::provider::LocaleFallbackParentsV1Marker>
-            // TODO: We shouldn't need the collation supplement here
-            + DataProvider<icu_locale::provider::CollationFallbackSupplementV1Marker>,
+            + DataProvider<icu_properties::provider::PropertyScriptWithExtensionsV1>
+            + DataProvider<icu_properties::provider::PropertyNameShortScriptV1>
+            + DataProvider<icu_locale_fallback::provider::LocaleLikelySubtagsLanguageV1>
+            + DataProvider<icu_locale_fallback::provider::LocaleParentsV1>,
     {
-        let swe = icu_properties::script::load_script_with_extensions_unstable(provider)?;
-        let scripts = icu_properties::Script::get_enum_to_short_name_mapper(provider)?;
+        let swe = ScriptWithExtensions::try_new_unstable(provider)?;
+        let scripts = PropertyNamesShort::try_new_unstable(provider)?;
         let fallbacker = LocaleFallbacker::try_new_unstable(provider)?;
         Ok(PersonNamesFormatter {
             default_options: options,
@@ -68,7 +68,7 @@ impl PersonNamesFormatter {
         person_name: &N,
     ) -> Result<String, PersonNamesFormatterError>
     where
-        P: ?Sized + DataProvider<PersonNamesFormatV1Marker>,
+        P: ?Sized + DataProvider<PersonNamesFormatV1>,
         N: PersonName,
     {
         let available_name_fields = person_name.available_name_fields();
@@ -83,15 +83,15 @@ impl PersonNamesFormatter {
         let effective_locale = specifications::effective_locale(
             &self.default_options.target_locale,
             person_name_locale,
-        )?;
+        );
 
-        let data: DataResponse<PersonNamesFormatV1Marker> = provider
+        let data: DataResponse<PersonNamesFormatV1> = provider
             .load(DataRequest {
                 id: DataIdentifierBorrowed::for_locale(&DataLocale::from(effective_locale)),
                 ..Default::default()
             })
             .map_err(PersonNamesFormatterError::Data)?;
-        let formatting_definition: &PersonNamesFormatV1 = data.payload.get();
+        let formatting_definition: &PersonNamesFormat = data.payload.get();
         let option_with_proper_name_order = self.final_person_names_formatter_options(
             effective_locale,
             person_name,
@@ -145,18 +145,18 @@ impl PersonNamesFormatter {
             .as_ref()
             .map(|f| f.as_ref())
             .unwrap_or("{0} {1}");
-        return Ok(best_applicable_pattern
+        Ok(best_applicable_pattern
             .format_person_name(person_name, initial_pattern, initial_sequence_pattern)
             .split_whitespace()
             .collect::<Vec<_>>()
-            .join(space_replacement));
+            .join(space_replacement))
     }
 
     fn final_person_names_formatter_options<N>(
         &self,
         locale: &Locale,
         person_name: &N,
-        formatting_definition: &PersonNamesFormatV1,
+        formatting_definition: &PersonNamesFormat,
     ) -> PersonNamesFormatterOptions
     where
         N: PersonName,
@@ -210,7 +210,7 @@ impl PersonNamesFormatter {
 
 /// Validate that the provided fields are valid.
 /// If the person name is not valid, it will not be formatted.
-pub(crate) fn validate_person_name(available_name_fields: &[&NameField]) -> bool {
+pub(crate) fn validate_person_name(available_name_fields: &[NameField]) -> bool {
     available_name_fields
         .iter()
         .any(|field| field.kind == NameFieldKind::Given || field.kind == NameFieldKind::Surname)

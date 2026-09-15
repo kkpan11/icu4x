@@ -2,47 +2,38 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+use core::ops::Deref;
 use std::collections::HashSet;
-use std::marker::PhantomData;
 
-use crate::cldr_serde;
 use crate::IterableDataProviderCached;
 use crate::SourceDataProvider;
+use crate::cldr_serde;
 use icu::collections::codepointinvliststringlist::CodePointInversionListAndStringList;
-use icu::properties::provider::*;
+use icu::locale::provider::*;
 use icu_provider::prelude::*;
 use itertools::Itertools;
-
-#[derive(Debug)]
-struct AnnotatedResource<'a, M: DynamicDataMarker>(
-    &'a cldr_serde::exemplar_chars::Resource,
-    PhantomData<M>,
-);
 
 macro_rules! exemplar_chars_impls {
     ($data_marker_name:ident, $cldr_serde_field_name:ident) => {
         impl DataProvider<$data_marker_name> for SourceDataProvider {
             fn load(&self, req: DataRequest) -> Result<DataResponse<$data_marker_name>, DataError> {
                 self.check_req::<$data_marker_name>(req)?;
-                let langid = req.id.locale.get_langid();
 
                 let data: &cldr_serde::exemplar_chars::Resource = self
                     .cldr()?
                     .misc()
-                    .read_and_parse(&langid, "characters.json")?;
+                    .read_and_parse(req.id.locale, "characters.json")?;
 
                 Ok(DataResponse {
                     metadata: Default::default(),
-                    payload: DataPayload::from_owned(
-                        PropertyUnicodeSetV1::try_from(AnnotatedResource::<$data_marker_name>(
-                            &data,
-                            PhantomData,
-                        ))
-                        .map_err(|e| {
-                            DataError::custom("data for exemplar characters")
-                                .with_display_context(&e)
-                        })?,
-                    ),
+                    payload: DataPayload::from_owned(string_to_prop_unicodeset(
+                        data.main
+                            .value
+                            .characters
+                            .$cldr_serde_field_name
+                            .as_deref()
+                            .unwrap_or("[]"),
+                    )),
                 })
             }
         }
@@ -52,42 +43,28 @@ macro_rules! exemplar_chars_impls {
                 Ok(self
                     .cldr()?
                     .misc()
-                    .list_langs()?
-                    .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
+                    .list_locales()?
+                    .map(DataIdentifierCow::from_locale)
                     .collect())
-            }
-        }
-
-        impl<'a> TryFrom<AnnotatedResource<'a, $data_marker_name>>
-            for PropertyUnicodeSetV1<'static>
-        {
-            type Error = DataError;
-            fn try_from(
-                annotated_resource: AnnotatedResource<$data_marker_name>,
-            ) -> Result<Self, Self::Error> {
-                let source_data_chars: Option<&String> = annotated_resource
-                    .0
-                    .main
-                    .value
-                    .characters
-                    .$cldr_serde_field_name
-                    .as_ref();
-
-                let chars_str = match source_data_chars {
-                    Some(chars_str) => chars_str,
-                    None => "[]",
-                };
-                Ok(string_to_prop_unicodeset(chars_str))
             }
         }
     };
 }
 
-exemplar_chars_impls!(ExemplarCharactersMainV1Marker, main);
-exemplar_chars_impls!(ExemplarCharactersAuxiliaryV1Marker, auxiliary);
-exemplar_chars_impls!(ExemplarCharactersPunctuationV1Marker, punctuation);
-exemplar_chars_impls!(ExemplarCharactersNumbersV1Marker, numbers);
-exemplar_chars_impls!(ExemplarCharactersIndexV1Marker, index);
+exemplar_chars_impls!(LocaleExemplarCharactersMainV1, main);
+exemplar_chars_impls!(LocaleExemplarCharactersAuxiliaryV1, auxiliary);
+exemplar_chars_impls!(LocaleExemplarCharactersPunctuationV1, punctuation);
+exemplar_chars_impls!(LocaleExemplarCharactersNumbersV1, numbers);
+exemplar_chars_impls!(LocaleExemplarCharactersIndexV1, index);
+
+fn string_to_prop_unicodeset(s: &str) -> ExemplarCharactersData<'static> {
+    ExemplarCharactersData(CodePointInversionListAndStringList::from_iter(
+        parse_exemplar_char_string(s)
+            .iter()
+            .map(Deref::deref)
+            .sorted(),
+    ))
+}
 
 /// In the occurrence of subsequences that are used to represent character literals,
 /// like "\\\\:" or "\\\\\\\\[", excise the subsequence from the input string
@@ -213,9 +190,7 @@ fn unescape_exemplar_chars(char_block: &str) -> String {
         panic!();
     };
 
-    let result = ch_lite.trim().to_string();
-
-    result
+    ch_lite.trim().to_string()
 }
 
 /// Parse the input string, and insert the represented exemplar "characters" (each of
@@ -311,16 +286,10 @@ fn parse_exemplar_char_string(s: &str) -> HashSet<String> {
     dedup_chars
 }
 
-fn string_to_prop_unicodeset(s: &str) -> PropertyUnicodeSetV1<'static> {
-    PropertyUnicodeSetV1::CPInversionListStrList(CodePointInversionListAndStringList::from_iter(
-        parse_exemplar_char_string(s).iter().map(|s| &**s).sorted(),
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use icu::locale::langid;
+    use icu::locale::data_locale;
 
     #[test]
     fn test_parse_exemplar_chars() {
@@ -330,7 +299,7 @@ mod tests {
         ]
         .iter()
         .copied()
-        .map(std::string::String::from)
+        .map(String::from)
         .collect();
         let actual = parse_exemplar_char_string(af_numbers);
 
@@ -346,7 +315,7 @@ mod tests {
         ]
         .iter()
         .copied()
-        .map(std::string::String::from)
+        .map(String::from)
         .collect();
         let actual = parse_exemplar_char_string(sr_main);
 
@@ -359,7 +328,7 @@ mod tests {
         let expected: HashSet<String> = ["万", "丈", "三", "上", "下"]
             .iter()
             .copied()
-            .map(std::string::String::from)
+            .map(String::from)
             .collect();
         let actual = parse_exemplar_char_string(ja_main_subset_range);
 
@@ -372,7 +341,7 @@ mod tests {
         let expected: HashSet<String> = ["万", "丈", "三", "上", "下", "a", "z"]
             .iter()
             .copied()
-            .map(std::string::String::from)
+            .map(String::from)
             .collect();
         let actual = parse_exemplar_char_string(range_amid_chars);
 
@@ -388,7 +357,7 @@ mod tests {
         ]
         .iter()
         .copied()
-        .map(std::string::String::from)
+        .map(String::from)
         .collect();
         let actual = parse_exemplar_char_string(sr_main);
 
@@ -404,7 +373,7 @@ mod tests {
         ]
         .iter()
         .copied()
-        .map(std::string::String::from)
+        .map(String::from)
         .collect();
         let actual = parse_exemplar_char_string(ar_eg_auxiliary);
 
@@ -414,11 +383,7 @@ mod tests {
     #[test]
     fn test_parse_quotes() {
         let quotes = "[\"＂]";
-        let expected: HashSet<String> = ["\"", "＂"]
-            .iter()
-            .copied()
-            .map(std::string::String::from)
-            .collect();
+        let expected: HashSet<String> = ["\"", "＂"].iter().copied().map(String::from).collect();
         let actual = parse_exemplar_char_string(quotes);
 
         assert_eq!(actual, expected);
@@ -514,13 +479,12 @@ mod tests {
         ];
         let exp_chars_cpilsl = CodePointInversionListAndStringList::from_iter(exp_chars);
 
-        let actual = icu::properties::exemplar_chars::load_exemplars_main(
+        let actual = icu::locale::exemplar_chars::ExemplarCharacters::try_new_main_unstable(
             &provider,
-            &langid!("en-001").into(),
+            &data_locale!("en-001"),
         )
         .unwrap();
-        let act_chars_cpilsl = actual.to_code_point_inversion_list_string_list();
 
-        assert_eq!(exp_chars_cpilsl, act_chars_cpilsl,);
+        assert_eq!(&*actual.as_borrowed(), &exp_chars_cpilsl);
     }
 }

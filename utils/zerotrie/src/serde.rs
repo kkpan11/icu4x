@@ -2,7 +2,7 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use crate::builder::bytestr::ByteStr;
+use crate::options::ZeroTrieWithOptions;
 use crate::zerotrie::ZeroTrieFlavor;
 use crate::ZeroAsciiIgnoreCaseTrie;
 use crate::ZeroTrie;
@@ -13,12 +13,12 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
 use litemap::LiteMap;
-use serde::de::Error;
-use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Deserializer;
-use serde::Serialize;
-use serde::Serializer;
+use serde_core::de::Error;
+use serde_core::de::Visitor;
+use serde_core::Deserialize;
+use serde_core::Deserializer;
+use serde_core::Serialize;
+use serde_core::Serializer;
 
 struct ByteStrVisitor;
 impl<'de> Visitor<'de> for ByteStrVisitor {
@@ -34,7 +34,7 @@ impl<'de> Visitor<'de> for ByteStrVisitor {
     }
     fn visit_seq<A>(self, mut v: A) -> Result<Self::Value, A::Error>
     where
-        A: serde::de::SeqAccess<'de>,
+        A: serde_core::de::SeqAccess<'de>,
     {
         let mut result = Vec::with_capacity(v.size_hint().unwrap_or(0));
         while let Some(x) = v.next_element::<u8>()? {
@@ -44,57 +44,64 @@ impl<'de> Visitor<'de> for ByteStrVisitor {
     }
 }
 
-impl<'de, 'data> Deserialize<'de> for &'data ByteStr
-where
-    'de: 'data,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = <&'data [u8]>::deserialize(deserializer)?;
-        Ok(ByteStr::from_bytes(s))
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub(crate) struct SerdeByteStrOwned(pub(crate) Box<[u8]>);
+
+impl SerdeByteStrOwned {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
     }
 }
 
-impl<'de, 'data> Deserialize<'de> for Box<ByteStr>
-where
-    'de: 'data,
-{
+impl<'de> Deserialize<'de> for SerdeByteStrOwned {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
             let s = deserializer.deserialize_any(ByteStrVisitor)?;
-            Ok(ByteStr::from_boxed_bytes(s))
+            Ok(SerdeByteStrOwned(s))
         } else {
             let s = Vec::<u8>::deserialize(deserializer)?;
-            Ok(ByteStr::from_boxed_bytes(s.into_boxed_slice()))
+            Ok(SerdeByteStrOwned(s.into_boxed_slice()))
         }
     }
 }
 
-impl<'data> Serialize for &'data ByteStr {
+impl Serialize for SerdeByteStrOwned {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let bytes = self.as_bytes();
+        let bytes: &[u8] = &self.0;
         if serializer.is_human_readable() {
-            match core::str::from_utf8(bytes) {
-                Ok(s) => serializer.serialize_str(s),
-                Err(_) => serializer.serialize_bytes(bytes),
+            if let Ok(s) = core::str::from_utf8(bytes) {
+                return serializer.serialize_str(s);
             }
-        } else {
-            serializer.serialize_bytes(bytes)
         }
+        serializer.serialize_bytes(bytes)
     }
 }
 
-impl<'de, 'data, Store> Deserialize<'de> for ZeroTrieSimpleAscii<Store>
+struct SerdeByteStr<'a>(&'a [u8]);
+
+impl Serialize for SerdeByteStr<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            if let Ok(s) = core::str::from_utf8(self.0) {
+                return serializer.serialize_str(s);
+            }
+        }
+        serializer.serialize_bytes(self.0)
+    }
+}
+
+impl<'data, 'de: 'data, Store> Deserialize<'de> for ZeroTrieSimpleAscii<Store>
 where
-    'de: 'data,
     // DISCUSS: There are several possibilities for the bounds here that would
     // get the job done. I could look for Deserialize, but this would require
     // creating a custom Deserializer for the map case. I also considered
@@ -106,19 +113,17 @@ where
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let lm = LiteMap::<Box<ByteStr>, usize>::deserialize(deserializer)?;
+            let lm = LiteMap::<SerdeByteStrOwned, usize>::deserialize(deserializer)?;
             ZeroTrieSimpleAscii::try_from_serde_litemap(&lm)
                 .map_err(D::Error::custom)
                 .map(|trie| trie.convert_store())
         } else {
             // Note: `impl Deserialize for &[u8]` uses visit_borrowed_bytes
             let (flags, trie_bytes) = <(u8, &[u8])>::deserialize(deserializer)?;
-            let store = Store::from(trie_bytes);
-            let zerotrie = match flags {
-                Self::FLAGS => ZeroTrieSimpleAscii::from_store(store),
-                _ => return Err(D::Error::custom("invalid ZeroTrie tag")),
+            if Self::OPTIONS.to_u8_flags() != flags {
+                return Err(D::Error::custom("invalid ZeroTrie tag"));
             };
-            Ok(zerotrie)
+            Ok(ZeroTrieSimpleAscii::from_store(Store::from(trie_bytes)))
         }
     }
 }
@@ -132,11 +137,10 @@ where
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let lm = self.to_litemap();
+            let lm = self.to_litemap_serde();
             lm.serialize(serializer)
         } else {
-            // Note: `impl Serialize for ByteStr` uses `serialize_bytes`
-            (Self::FLAGS, ByteStr::from_bytes(self.as_bytes())).serialize(serializer)
+            (Self::FLAGS, SerdeByteStr(self.as_bytes())).serialize(serializer)
         }
     }
 }
@@ -155,19 +159,17 @@ where
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let lm = LiteMap::<Box<ByteStr>, usize>::deserialize(deserializer)?;
+            let lm = LiteMap::<SerdeByteStrOwned, usize>::deserialize(deserializer)?;
             ZeroAsciiIgnoreCaseTrie::try_from_serde_litemap(&lm)
                 .map_err(D::Error::custom)
                 .map(|trie| trie.convert_store())
         } else {
             // Note: `impl Deserialize for &[u8]` uses visit_borrowed_bytes
             let (flags, trie_bytes) = <(u8, &[u8])>::deserialize(deserializer)?;
-            let store = Store::from(trie_bytes);
-            let zerotrie = match flags {
-                Self::FLAGS => ZeroAsciiIgnoreCaseTrie::from_store(store),
-                _ => return Err(D::Error::custom("invalid ZeroTrie tag")),
-            };
-            Ok(zerotrie)
+            if Self::OPTIONS.to_u8_flags() != flags {
+                return Err(D::Error::custom("invalid ZeroTrie tag"));
+            }
+            Ok(ZeroAsciiIgnoreCaseTrie::from_store(Store::from(trie_bytes)))
         }
     }
 }
@@ -181,11 +183,10 @@ where
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let lm = self.to_litemap();
+            let lm = self.to_litemap_serde();
             lm.serialize(serializer)
         } else {
-            // Note: `impl Serialize for ByteStr` uses `serialize_bytes`
-            (Self::FLAGS, ByteStr::from_bytes(self.as_bytes())).serialize(serializer)
+            (Self::OPTIONS.to_u8_flags(), SerdeByteStr(self.as_bytes())).serialize(serializer)
         }
     }
 }
@@ -200,19 +201,17 @@ where
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let lm = LiteMap::<Box<ByteStr>, usize>::deserialize(deserializer)?;
+            let lm = LiteMap::<SerdeByteStrOwned, usize>::deserialize(deserializer)?;
             ZeroTriePerfectHash::try_from_serde_litemap(&lm)
                 .map_err(D::Error::custom)
                 .map(|trie| trie.convert_store())
         } else {
             // Note: `impl Deserialize for &[u8]` uses visit_borrowed_bytes
             let (flags, trie_bytes) = <(u8, &[u8])>::deserialize(deserializer)?;
-            let store = Store::from(trie_bytes);
-            let zerotrie = match flags {
-                Self::FLAGS => ZeroTriePerfectHash::from_store(store),
-                _ => return Err(D::Error::custom("invalid ZeroTrie tag")),
-            };
-            Ok(zerotrie)
+            if Self::OPTIONS.to_u8_flags() != flags {
+                return Err(D::Error::custom("invalid ZeroTrie tag"));
+            }
+            Ok(ZeroTriePerfectHash::from_store(Store::from(trie_bytes)))
         }
     }
 }
@@ -226,15 +225,10 @@ where
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let lm = self.to_litemap();
-            let lm = lm
-                .iter()
-                .map(|(k, v)| (ByteStr::from_bytes(k), v))
-                .collect::<LiteMap<_, _>>();
+            let lm = self.to_litemap_serde();
             lm.serialize(serializer)
         } else {
-            // Note: `impl Serialize for ByteStr` uses `serialize_bytes`
-            (Self::FLAGS, ByteStr::from_bytes(self.as_bytes())).serialize(serializer)
+            (Self::OPTIONS.to_u8_flags(), SerdeByteStr(self.as_bytes())).serialize(serializer)
         }
     }
 }
@@ -249,19 +243,19 @@ where
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let lm = LiteMap::<Box<ByteStr>, usize>::deserialize(deserializer)?;
+            let lm = LiteMap::<SerdeByteStrOwned, usize>::deserialize(deserializer)?;
             ZeroTrieExtendedCapacity::try_from_serde_litemap(&lm)
                 .map_err(D::Error::custom)
                 .map(|trie| trie.convert_store())
         } else {
             // Note: `impl Deserialize for &[u8]` uses visit_borrowed_bytes
             let (flags, trie_bytes) = <(u8, &[u8])>::deserialize(deserializer)?;
-            let store = Store::from(trie_bytes);
-            let zerotrie = match flags {
-                Self::FLAGS => ZeroTrieExtendedCapacity::from_store(store),
-                _ => return Err(D::Error::custom("invalid ZeroTrie tag")),
-            };
-            Ok(zerotrie)
+            if Self::OPTIONS.to_u8_flags() != flags {
+                return Err(D::Error::custom("invalid ZeroTrie tag"));
+            }
+            Ok(ZeroTrieExtendedCapacity::from_store(Store::from(
+                trie_bytes,
+            )))
         }
     }
 }
@@ -275,15 +269,10 @@ where
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let lm = self.to_litemap();
-            let lm = lm
-                .iter()
-                .map(|(k, v)| (ByteStr::from_bytes(k), v))
-                .collect::<LiteMap<_, _>>();
+            let lm = self.to_litemap_serde();
             lm.serialize(serializer)
         } else {
-            // Note: `impl Serialize for ByteStr` uses `serialize_bytes`
-            (Self::FLAGS, ByteStr::from_bytes(self.as_bytes())).serialize(serializer)
+            (Self::OPTIONS.to_u8_flags(), SerdeByteStr(self.as_bytes())).serialize(serializer)
         }
     }
 }
@@ -298,7 +287,7 @@ where
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            let lm = LiteMap::<Box<ByteStr>, usize>::deserialize(deserializer)?;
+            let lm = LiteMap::<SerdeByteStrOwned, usize>::deserialize(deserializer)?;
             ZeroTrie::<Vec<u8>>::try_from(&lm)
                 .map_err(D::Error::custom)
                 .map(|trie| trie.convert_store())
@@ -307,19 +296,16 @@ where
             let bytes = <&[u8]>::deserialize(deserializer)?;
             let (tag, trie_bytes) = bytes
                 .split_first()
-                .ok_or(D::Error::custom("expected at least 1 byte for ZeroTrie"))?;
+                .ok_or_else(|| D::Error::custom("expected at least 1 byte for ZeroTrie"))?;
             let store = Store::from(trie_bytes);
-            let zerotrie = match *tag {
-                ZeroTrieSimpleAscii::<u8>::FLAGS => {
-                    ZeroTrieSimpleAscii::from_store(store).into_zerotrie()
-                }
-                ZeroTriePerfectHash::<u8>::FLAGS => {
-                    ZeroTriePerfectHash::from_store(store).into_zerotrie()
-                }
-                ZeroTrieExtendedCapacity::<u8>::FLAGS => {
-                    ZeroTrieExtendedCapacity::from_store(store).into_zerotrie()
-                }
-                _ => return Err(D::Error::custom("invalid ZeroTrie tag")),
+            let zerotrie = if *tag == ZeroTrieSimpleAscii::<u8>::OPTIONS.to_u8_flags() {
+                ZeroTrieSimpleAscii::from_store(store).into_zerotrie()
+            } else if *tag == ZeroTriePerfectHash::<u8>::OPTIONS.to_u8_flags() {
+                ZeroTriePerfectHash::from_store(store).into_zerotrie()
+            } else if *tag == ZeroTrieExtendedCapacity::<u8>::OPTIONS.to_u8_flags() {
+                ZeroTrieExtendedCapacity::from_store(store).into_zerotrie()
+            } else {
+                return Err(D::Error::custom("invalid ZeroTrie tag"));
             };
             Ok(zerotrie)
         }
@@ -335,19 +321,22 @@ where
         S: Serializer,
     {
         if serializer.is_human_readable() {
-            let lm = self.to_litemap();
-            let lm = lm
-                .iter()
-                .map(|(k, v)| (ByteStr::from_bytes(k), v))
-                .collect::<LiteMap<_, _>>();
+            let lm = self.to_litemap_serde();
             lm.serialize(serializer)
         } else {
             let (tag, bytes) = match &self.0 {
-                ZeroTrieFlavor::SimpleAscii(t) => (ZeroTrieSimpleAscii::<u8>::FLAGS, t.as_bytes()),
-                ZeroTrieFlavor::PerfectHash(t) => (ZeroTriePerfectHash::<u8>::FLAGS, t.as_bytes()),
-                ZeroTrieFlavor::ExtendedCapacity(t) => {
-                    (ZeroTrieExtendedCapacity::<u8>::FLAGS, t.as_bytes())
-                }
+                ZeroTrieFlavor::SimpleAscii(t) => (
+                    ZeroTrieSimpleAscii::<u8>::OPTIONS.to_u8_flags(),
+                    t.as_bytes(),
+                ),
+                ZeroTrieFlavor::PerfectHash(t) => (
+                    ZeroTriePerfectHash::<u8>::OPTIONS.to_u8_flags(),
+                    t.as_bytes(),
+                ),
+                ZeroTrieFlavor::ExtendedCapacity(t) => (
+                    ZeroTrieExtendedCapacity::<u8>::OPTIONS.to_u8_flags(),
+                    t.as_bytes(),
+                ),
             };
             let mut all_in_one_vec = Vec::with_capacity(bytes.len() + 1);
             all_in_one_vec.push(tag);
@@ -366,6 +355,7 @@ mod testdata {
 mod tests {
     use super::*;
     use alloc::borrow::Cow;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize)]
     pub struct ZeroTrieSimpleAsciiCow<'a> {
@@ -396,9 +386,9 @@ mod tests {
         assert_eq!(original.trie, bincode_recovered.trie);
         assert_eq!(original.trie, rmp_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -427,9 +417,9 @@ mod tests {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -458,9 +448,9 @@ mod tests {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -483,9 +473,9 @@ mod tests {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -508,9 +498,9 @@ mod tests {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -539,9 +529,9 @@ mod tests {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -564,9 +554,9 @@ mod tests {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(matches!(json_recovered.trie.take_store(), Cow::Owned(_)));
+        assert!(matches!(json_recovered.trie.into_store(), Cow::Owned(_)));
         assert!(matches!(
-            bincode_recovered.trie.take_store(),
+            bincode_recovered.trie.into_store(),
             Cow::Borrowed(_)
         ));
     }
@@ -576,6 +566,7 @@ mod tests {
 #[cfg(feature = "zerovec")]
 mod tests_zerovec {
     use super::*;
+    use serde::{Deserialize, Serialize};
     use zerovec::ZeroVec;
 
     #[derive(Serialize, Deserialize)]
@@ -603,8 +594,8 @@ mod tests_zerovec {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(json_recovered.trie.take_store().is_owned());
-        assert!(!bincode_recovered.trie.take_store().is_owned());
+        assert!(json_recovered.trie.into_store().is_owned());
+        assert!(!bincode_recovered.trie.into_store().is_owned());
     }
 
     #[derive(Serialize, Deserialize)]
@@ -632,7 +623,7 @@ mod tests_zerovec {
         assert_eq!(original.trie, json_recovered.trie);
         assert_eq!(original.trie, bincode_recovered.trie);
 
-        assert!(json_recovered.trie.take_store().is_owned());
-        assert!(!bincode_recovered.trie.take_store().is_owned());
+        assert!(json_recovered.trie.into_store().is_owned());
+        assert!(!bincode_recovered.trie.into_store().is_owned());
     }
 }

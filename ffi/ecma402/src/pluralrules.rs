@@ -7,8 +7,10 @@
 use icu::plurals as ipr;
 
 pub(crate) mod internal {
-    use ecma402_traits::pluralrules::options::Type;
+    use core::str::FromStr;
     use ecma402_traits::pluralrules::Options;
+    use ecma402_traits::pluralrules::options::Type;
+    use fixed_decimal::Decimal;
     use icu::plurals::{PluralCategory, PluralOperands, PluralRuleType};
     use std::cmp::{max, min};
 
@@ -45,13 +47,8 @@ pub(crate) mod internal {
         let frac_part = if n.fract() == 0.0 {
             ""
         } else {
-            #[allow(clippy::indexing_slicing)] // fract output shape
             &raw_frac_part[2..]
         };
-
-        dbg!("--> frac={}, fracf={}", &frac_part, &raw_frac_part);
-        dbg!("int_part='{}'; frac_part='{}'", &int_part, &frac_part);
-        dbg!("opts={:?}", opts);
 
         // Limit the min and max display digits first by individual field.
         let display_integer_digits = max(int_part.len(), opts.minimum_integer_digits as usize);
@@ -68,21 +65,13 @@ pub(crate) mod internal {
         );
 
         let significant_digits_in_fraction = clamp_diff(total_significant_digits, int_part.len());
-        dbg!(
-            "did={}; dfd={}; sd={}; rsd={}",
-            display_integer_digits,
-            display_fraction_digits,
-            total_significant_digits,
-            significant_digits_in_fraction
-        );
 
         // Integer fragment.
         let leading_zeros = clamp_diff(display_integer_digits, int_part.len());
         let trailing_zeros_in_int_part = clamp_diff(int_part.len(), total_significant_digits);
-        let i = std::iter::repeat('0')
-            .take(leading_zeros)
+        let i = std::iter::repeat_n('0', leading_zeros)
             .chain(int_part.chars().take(total_significant_digits))
-            .chain(std::iter::repeat('0').take(trailing_zeros_in_int_part));
+            .chain(std::iter::repeat_n('0', trailing_zeros_in_int_part));
 
         // Decimal dot is printed only if decimals will follow.
         let dd = match display_fraction_digits == 0 {
@@ -101,19 +90,14 @@ pub(crate) mod internal {
             // Take at most the number of fraction digits we're required to display.
             .take(display_fraction_digits);
         // "001234.500"
-        let nstr = i.chain(dd).chain(f).collect::<String>();
-        dbg!("nstr={}", &nstr);
-        nstr
+        i.chain(dd).chain(f).collect::<String>()
     }
 
     /// Converts the number to format into the operands representation.
     pub fn to_icu4x_operands(n: f64, opts: Options) -> PluralOperands {
-        dbg!("n={}", n);
         let nstr = fixed_format(n, &opts);
-        #[allow(clippy::unwrap_used)] // TODO(#1668) Clippy exceptions need docs or fixing.
-        let ret = nstr.parse().unwrap();
-        dbg!("ret={:?}\n---\n", &ret);
-        ret
+        #[expect(clippy::unwrap_used)] // TODO(#1668) Clippy exceptions need docs or fixing.
+        PluralOperands::from(&Decimal::from_str(&nstr).unwrap())
     }
 
     /// Expresses the [`PluralCategory`] as a `str`.
@@ -132,7 +116,7 @@ pub(crate) mod internal {
     mod testing {
         use super::*;
         use ecma402_traits::pluralrules::options::Type;
-        use icu::plurals::rules::RawPluralOperands;
+        use icu::plurals::RawPluralOperands;
 
         fn opt(
             minimum_integer_digits: u8,
@@ -188,7 +172,7 @@ pub(crate) mod internal {
             ];
             for test in tests {
                 let actual = fixed_format(test.n, &test.opts);
-                assert_eq!(test.expected, actual.as_str(), "test: {:?}", &test);
+                assert_eq!(test.expected, actual.as_str(), "test: {:?}", test);
             }
         }
 
@@ -222,7 +206,7 @@ pub(crate) mod internal {
             }];
             for test in tests {
                 let actual = to_icu4x_operands(test.n, test.opts.clone());
-                assert_eq!(test.expected, actual, "test: {:?}", &test);
+                assert_eq!(test.expected, actual, "test: {:?}", test);
             }
         }
     }
@@ -242,9 +226,14 @@ impl ecma402_traits::pluralrules::PluralRules for PluralRules {
         L: ecma402_traits::Locale,
         Self: Sized,
     {
+        #[expect(clippy::unwrap_used)] // ecma402_traits::Locale::to_string is a valid locale
+        let locale = icu::locale::Locale::try_from_str(&l.to_string()).unwrap();
+
+        let prefs = icu::plurals::PluralRulesPreferences::from(&locale);
+
         let rule_type = internal::to_icu4x_type(&opts.in_type);
 
-        let rep = ipr::PluralRules::try_new(&crate::DataLocale::from_ecma_locale(l), rule_type)?;
+        let rep = ipr::PluralRules::try_new(prefs, rule_type.into())?;
         Ok(Self { opts, rep })
     }
 
@@ -318,8 +307,7 @@ mod testing {
                     })
                     .collect::<Vec<_>>(),
                 test.expected,
-                "for test case: {}",
-                i
+                "for test case: {i}"
             );
         }
         Ok(())

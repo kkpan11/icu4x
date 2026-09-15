@@ -2,7 +2,7 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use std::marker::PhantomData;
+use core::marker::PhantomData;
 
 use super::*;
 
@@ -34,7 +34,7 @@ fn literal() {
     assert_eq!(42u16.borrows_size(), 0);
 }
 
-impl<'a> Bake for &'a str {
+impl Bake for &str {
     fn bake(&self, _: &CrateEnv) -> TokenStream {
         quote! {
             #self
@@ -42,13 +42,13 @@ impl<'a> Bake for &'a str {
     }
 }
 
-impl<'a> BakeSize for &'a str {
+impl BakeSize for &str {
     fn borrows_size(&self) -> usize {
         self.len()
     }
 }
 
-impl<'a, T> Bake for &'a T
+impl<T> Bake for &T
 where
     T: Bake,
 {
@@ -60,12 +60,12 @@ where
     }
 }
 
-impl<'a, T> BakeSize for &'a T
+impl<T> BakeSize for &T
 where
     T: BakeSize,
 {
     fn borrows_size(&self) -> usize {
-        core::mem::size_of_val::<T>(*self) + (*self).borrows_size()
+        size_of_val::<T>(*self) + (*self).borrows_size()
     }
 }
 
@@ -75,12 +75,12 @@ fn r#ref() {
     assert_eq!(BakeSize::borrows_size(&&934.34f32), 4);
 }
 
-impl<'a, T> Bake for &'a [T]
+impl<T> Bake for &[T]
 where
     T: Bake,
 {
     fn bake(&self, ctx: &CrateEnv) -> TokenStream {
-        if core::mem::size_of::<T>() == core::mem::size_of::<u8>()
+        if size_of::<T>() == size_of::<u8>()
             && core::any::type_name::<T>() == core::any::type_name::<u8>()
         {
             // Safety: self.as_ptr()'s allocation is at least self.len() bytes long,
@@ -97,12 +97,12 @@ where
     }
 }
 
-impl<'a, T> BakeSize for &'a [T]
+impl<T> BakeSize for &[T]
 where
     T: BakeSize,
 {
     fn borrows_size(&self) -> usize {
-        std::mem::size_of_val(*self) + self.iter().map(BakeSize::borrows_size).sum::<usize>()
+        size_of_val(*self) + self.iter().map(BakeSize::borrows_size).sum::<usize>()
     }
 }
 
@@ -137,7 +137,7 @@ where
     T: Bake,
 {
     fn bake(&self, ctx: &CrateEnv) -> TokenStream {
-        if core::mem::size_of::<T>() == core::mem::size_of::<u8>()
+        if size_of::<T>() == size_of::<u8>()
             && core::any::type_name::<T>() == core::any::type_name::<u8>()
         {
             // Safety: self.as_ptr()'s allocation is at least self.len() bytes long,
@@ -315,15 +315,15 @@ fn tuple() {
     assert_eq!(BakeSize::borrows_size(&("hi", 8u8)), 2);
 }
 
-impl<T> Bake for PhantomData<T> {
+impl<T: ?Sized> Bake for PhantomData<T> {
     fn bake(&self, _ctx: &CrateEnv) -> TokenStream {
         quote! {
-            ::core::marker::PhantomData
+            core::marker::PhantomData
         }
     }
 }
 
-impl<T> BakeSize for PhantomData<T> {
+impl<T: ?Sized> BakeSize for PhantomData<T> {
     fn borrows_size(&self) -> usize {
         0
     }
@@ -331,5 +331,5 @@ impl<T> BakeSize for PhantomData<T> {
 
 #[test]
 fn phantom_data() {
-    test_bake!(PhantomData<usize>, const, ::core::marker::PhantomData);
+    test_bake!(PhantomData<usize>, const, core::marker::PhantomData);
 }

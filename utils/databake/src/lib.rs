@@ -2,6 +2,19 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
+// https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
+// #![cfg_attr(not(any(test, doc)), no_std)]
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::indexing_slicing,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+    )
+)]
+#![warn(missing_docs)]
+
 //! This crate allows data to write itself into Rust code (bake itself in).
 //!
 //! Types that implement the `Bake` trait can be written into Rust expressions,
@@ -30,14 +43,14 @@
 //! #[derive(Bake)]
 //! #[databake(path = my_crate)]
 //! struct MyStruct {
-//!     number: u32,
-//!     string: &'static str,
-//!     slice: &'static [bool],
+//!     pub number: u32,
+//!     pub string: &'static str,
+//!     pub slice: &'static [bool],
 //! }
 //!
 //! #[derive(Bake)]
 //! #[databake(path = my_crate)]
-//! struct AnotherOne(MyStruct, char);
+//! struct AnotherOne(pub MyStruct, pub char);
 //! ```
 //!
 //! # Testing
@@ -48,21 +61,22 @@
 //! # #[derive(Bake)]
 //! # #[databake(path = my_crate)]
 //! # struct MyStruct {
-//! #   number: u32,
-//! #   string: &'static str,
-//! #   slice: &'static [bool],
+//! #   pub number: u32,
+//! #   pub string: &'static str,
+//! #   pub slice: &'static [bool],
 //! # }
 //! # #[derive(Bake)]
 //! # #[databake(path = my_crate)]
-//! # struct AnotherOne(MyStruct, char);
+//! # struct AnotherOne(pub MyStruct, pub char);
 //! # fn main() {
 //! test_bake!(
 //!     AnotherOne,
-//!     const, crate::AnotherOne(
+//!     const,
+//!     crate::AnotherOne(
 //!         crate::MyStruct {
-//!           number: 17u32,
-//!           string: "foo",
-//!           slice: &[true, false],
+//!             number: 17u32,
+//!             string: "foo",
+//!             slice: &[true, false],
 //!         },
 //!         'b',
 //!     ),
@@ -72,6 +86,7 @@
 //! ```
 
 mod alloc;
+pub mod converter;
 mod primitives;
 
 #[doc(no_inline)]
@@ -87,13 +102,14 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 
 /// A collection of crates that are required for the evaluation of some expression.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CrateEnv(Mutex<HashSet<&'static str>>);
 
 impl CrateEnv {
     /// Adds a crate to this collection. This can be called concurrently
     /// and without `mut`.
     pub fn insert(&self, krate: &'static str) {
+        #[allow(clippy::expect_used)] // poison
         self.0.lock().expect("poison").insert(krate);
     }
 }
@@ -103,6 +119,7 @@ impl IntoIterator for CrateEnv {
     type IntoIter = <HashSet<&'static str> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
+        #[allow(clippy::expect_used)] // poison
         self.0.into_inner().expect("poison").into_iter()
     }
 }
@@ -170,19 +187,21 @@ pub trait BakeSize: Sized + Bake {
 #[macro_export]
 macro_rules! test_bake {
     ($type:ty, const, $expr:expr $(, $krate:ident)? $(, [$($env_crate:ident),+])? $(,)?) => {
-        const _: &$type = &$expr;
+        #[allow(unused_qualifications)]
+        {const _: &$type = &$expr;}
         $crate::test_bake!($type, $expr $(, $krate)? $(, [$($env_crate),+])?);
     };
 
     ($type:ty, $expr:expr $(, $krate:ident)? $(, [$($env_crate:ident),+])? $(,)?) => {
         let env = Default::default();
+        #[allow(unused_qualifications)]
         let expr: &$type = &$expr;
         let bake = $crate::Bake::bake(expr, &env).to_string();
         // For some reason `TokenStream` behaves differently in this line
         let expected_bake = $crate::quote!($expr).to_string().replace("::<", ":: <").replace(">::", "> ::");
         // Trailing commas are a mess as well
-        let bake = bake.replace(" ,)", ")").replace(" ,]", "]").replace(" , }", " }");
-        let expected_bake = expected_bake.replace(" ,)", ")").replace(" ,]", "]").replace(" , }", " }");
+        let bake = bake.replace(" ,)", ")").replace(" ,]", "]").replace(" , }", " }").replace(" , >", " >");
+        let expected_bake = expected_bake.replace(" ,)", ")").replace(" ,]", "]").replace(" , }", " }").replace(" , >", " >");
         $(
             let expected_bake = expected_bake.replace("crate", stringify!($krate));
         )?

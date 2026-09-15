@@ -2,9 +2,6 @@
   "main": {
     "es-AR": {
       "identity": {
-        "version": {
-          "_cldrVersion": "45"
-        },
         "language": "es",
         "territory": "AR"
       },
@@ -82,9 +79,9 @@
           "CA": "Canadá",
           "CC": "Islas Cocos",
           "CD": "República Democrática del Congo",
-          "CD-alt-variant": "Congo (República Democrática del Congo)",
+          "CD-alt-variant": "Congo (RDC)",
           "CF": "República Centroafricana",
-          "CG": "República del Congo",
+          "CG": "Congo",
           "CG-alt-variant": "Congo (República)",
           "CH": "Suiza",
           "CI": "Costa de Marfil",
@@ -95,6 +92,7 @@
           "CN": "China",
           "CO": "Colombia",
           "CP": "Isla Clipperton",
+          "CQ": "Sark",
           "CR": "Costa Rica",
           "CU": "Cuba",
           "CV": "Cabo Verde",
@@ -161,7 +159,6 @@
           "IM": "Isla de Man",
           "IN": "India",
           "IO": "Territorio Británico del Océano Índico",
-          "IO-alt-biot": "Territorio Británico del Océano Índico",
           "IO-alt-chagos": "Archipiélago de Chagos",
           "IQ": "Irak",
           "IR": "Irán",
@@ -299,14 +296,14 @@
           "UM": "Islas menores alejadas de EE. UU.",
           "UN": "Naciones Unidas",
           "US": "Estados Unidos",
-          "US-alt-short": "EE. UU.",
+          "US-alt-short": "EE.UU.",
           "UY": "Uruguay",
           "UZ": "Uzbekistán",
           "VA": "Ciudad del Vaticano",
           "VC": "San Vicente y las Granadinas",
           "VE": "Venezuela",
           "VG": "Islas Vírgenes Británicas",
-          "VI": "Islas Vírgenes de EE. UU.",
+          "VI": "Islas Vírgenes de EE.UU.",
           "VN": "Vietnam",
           "VU": "Vanuatu",
           "WF": "Wallis y Futuna",

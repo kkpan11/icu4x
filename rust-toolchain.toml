@@ -3,5 +3,4 @@
 # (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
 [toolchain]
-# Version updated on 2024-05-07
-channel = "1.78"
+channel = "1.98.0"

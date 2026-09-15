@@ -2,16 +2,15 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-use icu_locale::fallback::LocaleFallbackerBorrowed;
-use icu_locale_core::subtags::Language;
 use icu_locale_core::Locale;
+use icu_locale_core::subtags::Language;
+use icu_locale_fallback::LocaleFallbackerBorrowed;
 use writeable::Writeable;
 use zerovec::VarZeroVec;
 
 use crate::personnames::api::FormattingOrder;
 
-///
-/// https://www.unicode.org/reports/tr35/tr35-personNames.html#derive-the-name-order
+/// <https://www.unicode.org/reports/tr35/tr35-personNames.html#derive-the-name-order>
 pub fn name_order_derive(
     person_name_locale: &Locale,
     surname_first: &VarZeroVec<str>,
@@ -25,12 +24,12 @@ pub fn name_order_derive(
         .fallback_for(person_name_locale.into());
 
     loop {
-        let chain_locale = fallback_iterator.get().clone().into_locale();
+        let chain_locale = fallback_iterator.get();
         let chain_locale_str = chain_locale.write_to_string();
 
         // switch lookup with UND
-        let mut chain_locale_und = chain_locale.clone();
-        chain_locale_und.id.language = Language::UND;
+        let mut chain_locale_und = *chain_locale;
+        chain_locale_und.language = Language::UNKNOWN;
         let chain_locale_und_str = chain_locale_und.write_to_string();
 
         if given_first
@@ -51,7 +50,7 @@ pub fn name_order_derive(
 
 #[cfg(test)]
 mod tests {
-    use icu_locale::LocaleFallbacker;
+    use icu_locale::fallback::LocaleFallbacker;
     use icu_locale_core::locale;
     use zerovec::VarZeroVec;
 
@@ -69,7 +68,7 @@ mod tests {
         // Match "und"
         assert_eq!(
             name_order_derive(
-                &locale!("de_Latn_ch"),
+                &locale!("de-Latn-ch"),
                 &surname_first,
                 &given_first,
                 fallbacker
@@ -84,7 +83,7 @@ mod tests {
         // since "und" is a catch all set in given first, it is a perfect match.
         assert_eq!(
             name_order_derive(
-                &locale!("ja_Jpan_jp"),
+                &locale!("ja-Jpan-jp"),
                 &surname_first,
                 &given_first,
                 fallbacker
@@ -104,7 +103,7 @@ mod tests {
 
         assert_eq!(
             name_order_derive(
-                &locale!("en_Latn_SG"),
+                &locale!("en-Latn-SG"),
                 &surname_first,
                 &given_first,
                 fallbacker
@@ -116,7 +115,7 @@ mod tests {
         // This is not matching because of zh, but because of und-CN
         assert_eq!(
             name_order_derive(
-                &locale!("zh_Hans_CN"),
+                &locale!("zh-Hans-CN"),
                 &surname_first,
                 &given_first,
                 fallbacker
@@ -128,7 +127,7 @@ mod tests {
         // This is not matching because of zh, but because of und-CN
         assert_eq!(
             name_order_derive(
-                &locale!("zh_Hans"),
+                &locale!("zh-Hans"),
                 &surname_first,
                 &given_first,
                 fallbacker

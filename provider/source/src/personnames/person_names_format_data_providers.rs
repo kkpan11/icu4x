@@ -10,21 +10,21 @@ use icu::experimental::personnames::provider::*;
 use icu_provider::prelude::*;
 use zerovec::VarZeroVec;
 
-use crate::cldr_serde::personnames::person_name_format_json_struct::Resource;
 use crate::IterableDataProviderCached;
+use crate::cldr_serde::personnames::person_name_format_json_struct::Resource;
 
-impl DataProvider<PersonNamesFormatV1Marker> for crate::SourceDataProvider {
-    fn load(&self, req: DataRequest) -> Result<DataResponse<PersonNamesFormatV1Marker>, DataError> {
-        let langid = req.id.locale.get_langid();
+impl DataProvider<PersonNamesFormatV1> for crate::SourceDataProvider {
+    fn load(&self, req: DataRequest) -> Result<DataResponse<PersonNamesFormatV1>, DataError> {
+        self.check_req::<PersonNamesFormatV1>(req)?;
 
         let data: &Resource = self
             .cldr()?
             .personnames()
-            .read_and_parse(&langid, "personNames.json")?;
+            .read_and_parse(req.id.locale, "personNames.json")?;
 
         Ok(DataResponse {
             metadata: Default::default(),
-            payload: DataPayload::from_owned(PersonNamesFormatV1::try_from(data).map_err(|e| {
+            payload: DataPayload::from_owned(PersonNamesFormat::try_from(data).map_err(|e| {
                 DataError::custom("data for PersonNamesFormattingDefinition")
                     .with_display_context(&e)
             })?),
@@ -32,21 +32,21 @@ impl DataProvider<PersonNamesFormatV1Marker> for crate::SourceDataProvider {
     }
 }
 
-impl IterableDataProviderCached<PersonNamesFormatV1Marker> for crate::SourceDataProvider {
+impl IterableDataProviderCached<PersonNamesFormatV1> for crate::SourceDataProvider {
     fn iter_ids_cached(&self) -> Result<HashSet<DataIdentifierCow<'static>>, DataError> {
         Ok(self
             .cldr()?
             .personnames()
-            .list_langs()?
-            .filter(|langid| {
+            .list_locales()?
+            .filter(|locale| {
                 // The directory might exist without personNames.json
                 self.cldr()
                     .unwrap()
                     .personnames()
-                    .file_exists(langid, "personNames.json")
+                    .file_exists(locale, "personNames.json")
                     .unwrap_or_default()
             })
-            .map(|l| DataIdentifierCow::from_locale(DataLocale::from(l)))
+            .map(DataIdentifierCow::from_locale)
             .collect())
     }
 }
@@ -80,10 +80,10 @@ fn to_mask(ordering: &str, size: &str, referring: &str, formality: &str) -> Resu
 }
 
 ///
-/// Transform the JSON Resource into a single PersonNamesFormattingDefinitionV1
+/// Transform the JSON Resource into a single `PersonNamesFormattingDefinitionV1`
 ///
 /// The JSON Structure is expected to be perfect and all combination should be provided.
-impl TryFrom<&'_ Resource> for PersonNamesFormatV1<'_> {
+impl TryFrom<&'_ Resource> for PersonNamesFormat<'_> {
     type Error = DataError;
     fn try_from(other: &'_ Resource) -> Result<Self, Self::Error> {
         let person_names = &other.main.value.person_names;
@@ -151,7 +151,7 @@ impl TryFrom<&'_ Resource> for PersonNamesFormatV1<'_> {
 
 #[cfg(test)]
 mod tests {
-    use icu::locale::langid;
+    use icu::locale::data_locale;
     use zerofrom::ZeroFrom;
 
     use super::*;
@@ -160,21 +160,21 @@ mod tests {
     fn test_initial_pattern() -> Result<(), DataError> {
         let provider = crate::SourceDataProvider::new_testing();
 
-        let data_payload: DataPayload<PersonNamesFormatV1Marker> = provider
+        let data_payload: DataPayload<PersonNamesFormatV1> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })?
             .payload;
 
-        let real_data: &PersonNamesFormatV1 = data_payload.get();
+        let real_data: &PersonNamesFormat = data_payload.get();
 
         assert_eq!(
             real_data.initial_pattern.as_ref().unwrap(),
-            "{0}.",
+            "{0}",
             "we are testing with {} and {}",
             real_data.initial_pattern.as_ref().unwrap(),
-            "{0}."
+            "{0}"
         );
         Ok(())
     }
@@ -183,14 +183,14 @@ mod tests {
     fn test_have_pattern() -> Result<(), DataError> {
         let provider = crate::SourceDataProvider::new_testing();
 
-        let data_payload: DataPayload<PersonNamesFormatV1Marker> = provider
+        let data_payload: DataPayload<PersonNamesFormatV1> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("en-001").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("en-001")),
                 ..Default::default()
             })?
             .payload;
 
-        let real_data: &PersonNamesFormatV1 = data_payload.get();
+        let real_data: &PersonNamesFormat = data_payload.get();
         let test_mask: PersonNamesFormattingAttributesMask =
             PersonNamesFormattingAttributes::GivenFirst.bit_value()
                 | PersonNamesFormattingAttributes::Long.bit_value()
@@ -219,10 +219,10 @@ mod tests {
         );
         assert_eq!(
             real_data.initial_pattern.as_ref().unwrap(),
-            "{0}.",
+            "{0}",
             "we are testing with {} and {}",
             real_data.initial_pattern.as_ref().unwrap(),
-            "{0}."
+            "{0}"
         );
         Ok(())
     }
@@ -231,14 +231,14 @@ mod tests {
     fn test_have_pattern_multi_formality() -> Result<(), DataError> {
         let provider = crate::SourceDataProvider::new_testing();
 
-        let data_payload: DataPayload<PersonNamesFormatV1Marker> = provider
+        let data_payload: DataPayload<PersonNamesFormatV1> = provider
             .load(DataRequest {
-                id: DataIdentifierBorrowed::for_locale(&langid!("es").into()),
+                id: DataIdentifierBorrowed::for_locale(&data_locale!("es")),
                 ..Default::default()
             })?
             .payload;
 
-        let real_data: &PersonNamesFormatV1 = data_payload.get();
+        let real_data: &PersonNamesFormat = data_payload.get();
         let test_mask: PersonNamesFormattingAttributesMask =
             PersonNamesFormattingAttributes::Sorting.bit_value()
                 | PersonNamesFormattingAttributes::Short.bit_value()

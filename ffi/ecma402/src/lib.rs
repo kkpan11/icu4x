@@ -2,9 +2,8 @@
 // called LICENSE at the top level of the ICU4X source tree
 // (online at: https://github.com/unicode-org/icu4x/blob/main/LICENSE ).
 
-//! This crate provides an experimental implementation of the `ECMA-402` traits using `ICU4X` library.
-
 // https://github.com/unicode-org/icu4x/blob/main/documents/process/boilerplate.md#library-annotations
+// #![cfg_attr(not(any(test, doc)), no_std)]
 #![cfg_attr(
     not(test),
     deny(
@@ -12,14 +11,14 @@
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::panic,
-        clippy::exhaustive_structs,
-        clippy::exhaustive_enums,
-        missing_debug_implementations,
     )
 )]
+// #![warn(missing_docs)]
+
+//! This crate provides an experimental implementation of the `ECMA-402` traits using `ICU4X` library.
 
 #[cfg(test)]
-pub mod testing;
+mod testing;
 
 /// Implements ECMA-402 [`Intl.PluralRules`][link].
 ///
@@ -35,20 +34,6 @@ pub mod list;
 #[derive(Debug, Hash, Clone, PartialEq)]
 pub struct DataLocale(icu_provider::DataLocale);
 
-impl DataLocale {
-    /// Creates a `DataLocale` from any other [`ecma402_traits::Locale`]
-    fn from_ecma_locale<L: ecma402_traits::Locale>(other: L) -> Self {
-        #[allow(clippy::unwrap_used)] // ecma402_traits::Locale::to_string is a valid locale
-        Self(
-            other
-                .to_string()
-                .parse::<icu::locale::Locale>()
-                .unwrap()
-                .into(),
-        )
-    }
-}
-
 impl core::ops::Deref for DataLocale {
     type Target = icu_provider::DataLocale;
     fn deref(&self) -> &Self::Target {
@@ -56,10 +41,10 @@ impl core::ops::Deref for DataLocale {
     }
 }
 
-impl ecma402_traits::Locale for crate::DataLocale {}
+impl ecma402_traits::Locale for DataLocale {}
 
-impl std::fmt::Display for crate::DataLocale {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for DataLocale {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         self.0.fmt(f)
     }
 }

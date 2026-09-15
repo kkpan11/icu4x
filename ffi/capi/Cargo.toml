@@ -5,32 +5,33 @@
 [package]
 name = "icu_capi"
 description = "C interface to ICU4X"
+categories = ["internationalization", "localization", "external-ffi-bindings", "no-std", "embedded"]
+keywords = ["ffi", "bindings", "c-api"]
 license = "Unicode-3.0"
 include = [
-    "bindings/**/*",
-    "!bindings/dart/**/*", # not yet stable
+    "bindings/c/**/*",
+    "bindings/cpp/**/*",
+    "bindings/js/**/*", # todo: remove, published through NPM
     "src/**/*",
     "tests/**/*",
     "Cargo.toml",
     "LICENSE",
     "README.md"
 ]
+version = "2.3.2"
 
 authors.workspace = true
-categories.workspace = true
 edition.workspace = true
 homepage.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
 
 [package.metadata.cargo-all-features]
-# Bench feature gets tested separately and is only relevant for CI.
-# logging enables a feature of a dependency that has no externally visible API changes
-denylist = ["bench"]
+# These features don't build on std targets
+denylist = ["looping_panic_handler", "libc_alloc"]
 # This has a lot of features, run a reduced test that is likely to catch 99% of bugs
 max_combination_size = 2
 
@@ -39,7 +40,6 @@ default = ["compiled_data", "default_components", "logging", "simple_logger", "s
 any_provider = []
 buffer_provider = [
     "dep:icu_provider_blob",
-    "dep:serde",
     "icu_calendar?/serde",
     "icu_casemap?/serde",
     "icu_collator?/serde",
@@ -47,40 +47,54 @@ buffer_provider = [
     "icu_decimal?/serde",
     "icu_list?/serde",
     "icu_locale?/serde",
+    "icu_locale_fallback?/serde",
     "icu_locale_core/serde",
     "icu_normalizer?/serde",
     "icu_plurals?/serde",
     "icu_properties?/serde",
     "icu_provider/serde",
-    "icu_provider_adapters/serde",
     "icu_segmenter?/serde",
-    "icu_timezone?/serde",
+    "icu_time?/serde",
     "icu_experimental?/serde",
 ]
 provider_fs = ["dep:icu_provider_fs", "buffer_provider", "std"]
-logging = ["icu_provider/logging", "dep:log", "diplomat-runtime/log", "std"]
+logging = ["icu_provider/logging", "diplomat-runtime/log", "std"]
 simple_logger = ["dep:simple_logger", "logging"]
 
 # Components
-default_components = ["icu_calendar", "icu_casemap", "icu_collator", "icu_datetime", "icu_decimal",
-                      "icu_list", "icu_locale",
-                      "icu_normalizer", "icu_plurals", "icu_properties",
-                      "icu_segmenter", "icu_timezone"]
-experimental_components = ["dep:icu_experimental"]
+default_components = [
+    "calendar",
+    "casemap",
+    "collator",
+    "datetime",
+    "decimal",
+    "list",
+    "locale",
+    "normalizer",
+    "plurals",
+    "properties",
+    "segmenter",
+    "timezone"
+]
 
-icu_calendar = ["dep:icu_calendar"]
-icu_casemap = ["dep:icu_casemap"]
-icu_collator = ["dep:icu_collator"]
-# icu_collections = ["dep:icu_collections"] # Not useful on its own: use icu_properties
-icu_datetime = ["dep:icu_datetime", "dep:icu_calendar", "dep:icu_timezone", "dep:icu_decimal", "dep:icu_plurals"]
-icu_decimal = ["dep:icu_decimal", "dep:fixed_decimal"]
-icu_list = ["dep:icu_list"]
-icu_locale = ["dep:icu_locale"]
-icu_normalizer = ["dep:icu_normalizer"]
-icu_plurals = ["dep:icu_plurals", "dep:fixed_decimal"]
-icu_properties = ["dep:icu_properties", "dep:icu_collections", "dep:unicode-bidi"]
-icu_segmenter = ["dep:icu_segmenter"]
-icu_timezone = ["dep:icu_timezone", "dep:icu_calendar"]
+calendar = ["dep:icu_calendar", "dep:icu_time", "dep:tinystr"]
+casemap = ["dep:icu_casemap"]
+collator = ["dep:icu_collator"]
+# collections = ["dep:icu_collections"] # Not useful on its own: use properties
+datetime = ["calendar", "dep:icu_datetime"]
+decimal = ["dep:icu_decimal", "dep:fixed_decimal", "dep:zerovec"]
+experimental = ["dep:icu_experimental"]
+list = ["dep:icu_list", "dep:potential_utf"]
+locale = ["dep:icu_locale", "locale_fallback"]
+locale_fallback = ["dep:icu_locale_fallback"]
+normalizer = ["dep:icu_normalizer", "icu_normalizer?/utf8_iter", "icu_normalizer?/utf16_iter"]
+plurals = ["dep:icu_plurals", "dep:fixed_decimal"]
+properties = ["dep:icu_properties", "dep:icu_collections", "dep:unicode-bidi"]
+segmenter = ["dep:icu_segmenter"]
+timezone = ["calendar"]
+
+# Unstable features on individual components
+unstable = ["icu_calendar?/unstable", "icu_datetime?/unstable", "icu_locale?/unstable", "icu_plurals?/unstable", "icu_time?/unstable"]
 
 compiled_data = [
     "icu_calendar?/compiled_data",
@@ -90,11 +104,12 @@ compiled_data = [
     "icu_decimal?/compiled_data",
     "icu_list?/compiled_data",
     "icu_locale?/compiled_data",
+    "icu_locale_fallback?/compiled_data",
     "icu_normalizer?/compiled_data",
     "icu_plurals?/compiled_data",
     "icu_properties?/compiled_data",
     "icu_segmenter?/compiled_data",
-    "icu_timezone?/compiled_data",
+    "icu_time?/compiled_data",
     "icu_experimental?/compiled_data",
 ]
 
@@ -106,11 +121,8 @@ libc_alloc = ["dep:libc_alloc"]
 
 [dependencies]
 # Mandatory ICU4X components and utils
-icu_locale_core = { workspace = true }
+icu_locale_core = { workspace = true, features = ["alloc"] }
 icu_provider = { workspace = true }
-icu_provider_adapters = { workspace = true }
-
-tinystr = { workspace = true }
 writeable = { workspace = true }
 
 # Diplomat
@@ -119,7 +131,7 @@ diplomat-runtime = { workspace = true }
 
 # Optional ICU4X components and their dependent utils
 fixed_decimal = { workspace = true, features = ["ryu"] , optional = true }
-icu_calendar = { workspace = true, features = ["ixdtf"], optional = true }
+icu_calendar = { workspace = true, features = ["alloc", "ixdtf"], optional = true }
 icu_casemap = { workspace = true, optional = true }
 icu_collator = { workspace = true, optional = true }
 icu_collections = { workspace = true, optional = true }
@@ -127,18 +139,22 @@ icu_datetime = { workspace = true, optional = true }
 icu_decimal = { workspace = true, optional = true }
 icu_list = { workspace = true, optional = true }
 icu_locale = { workspace = true, optional = true }
+icu_locale_fallback = { workspace = true, optional = true }
 icu_normalizer = { workspace = true, optional = true }
 icu_plurals = { workspace = true, optional = true }
-icu_properties = { workspace = true, features = ["bidi"], optional = true }
+icu_properties = { workspace = true, features = ["alloc", "unicode_bidi"], optional = true }
 icu_segmenter = { workspace = true, features = ["auto"], optional = true }
-icu_timezone = { workspace = true, optional = true }
+icu_time = { workspace = true, features = ["alloc", "ixdtf"], optional = true }
 icu_experimental = { workspace = true, optional = true }
 
 # Optional ICU4X features (not components)
-icu_provider_blob = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+icu_provider_adapters = { workspace = true, features = ["serde"] } # should be optional
+icu_provider_blob = { workspace = true, features = ["alloc"], optional = true }
+# log = { workspace = true, optional = true }
+potential_utf = { workspace = true, features = ["writeable"], optional = true }
+tinystr = { workspace = true, optional = true }
 unicode-bidi = { workspace = true, optional = true }
-log = { workspace = true, optional = true }
+zerovec = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Logging uses diplomat_runtime bindings in wasm, we only need this for native
@@ -148,3 +164,8 @@ libc_alloc = { workspace = true, features = ["global"], optional = true }
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "none")))'.dependencies]
 icu_provider_fs = { workspace = true, optional = true }
 
+[package.metadata.cargo-semver-checks.lints]
+workspace = true
+
+[lints]
+workspace = true

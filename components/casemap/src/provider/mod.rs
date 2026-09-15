@@ -20,14 +20,10 @@ use icu_provider::prelude::*;
 use crate::provider::data::CaseMapData;
 use crate::provider::exceptions::CaseMapExceptions;
 use icu_collections::codepointtrie::CodePointTrie;
-#[cfg(feature = "datagen")]
-use icu_collections::codepointtrie::CodePointTrieHeader;
 
 pub mod data;
 pub mod exception_helpers;
 pub mod exceptions;
-#[cfg(feature = "datagen")]
-mod exceptions_builder;
 mod unfold;
 
 #[cfg(feature = "compiled_data")]
@@ -50,15 +46,31 @@ const _: () = {
         pub use icu_collections as collections;
     }
     make_provider!(Baked);
-    impl_case_map_v1_marker!(Baked);
-    impl_case_map_unfold_v1_marker!(Baked);
+    impl_case_map_v1!(Baked);
+    impl_case_map_unfold_v1!(Baked);
 };
+
+icu_provider::data_marker!(
+    /// Marker for casemapping data.
+    CaseMapV1,
+    "case/map/v1",
+    CaseMap<'static>,
+    is_singleton = true
+);
+
+icu_provider::data_marker!(
+    /// Reverse case mapping data.
+    CaseMapUnfoldV1,
+    "case/map/unfold/v1",
+    CaseMapUnfold<'static>,
+    is_singleton = true
+);
 
 #[cfg(feature = "datagen")]
 /// The latest minimum set of markers required by this component.
-pub const MARKERS: &[DataMarkerInfo] = &[CaseMapUnfoldV1Marker::INFO, CaseMapV1Marker::INFO];
+pub const MARKERS: &[DataMarkerInfo] = &[CaseMapUnfoldV1::INFO, CaseMapV1::INFO];
 
-pub use self::unfold::{CaseMapUnfoldV1, CaseMapUnfoldV1Marker};
+pub use self::unfold::CaseMapUnfold;
 
 /// This type contains all of the casemapping data
 ///
@@ -71,25 +83,26 @@ pub use self::unfold::{CaseMapUnfoldV1, CaseMapUnfoldV1Marker};
 /// including in SemVer minor releases. While the serde representation of data structs is guaranteed
 /// to be stable, their Rust representation might not be. Use with caution.
 /// </div>
-#[icu_provider::data_struct(marker(CaseMapV1Marker, "props/casemap@1", singleton))]
-#[derive(Debug, PartialEq, Clone)]
-#[cfg_attr(
-    feature = "datagen",
-    derive(serde::Serialize, databake::Bake),
-    databake(path = icu_casemap::provider),
-)]
+#[derive(Debug, PartialEq, Clone, yoke::Yokeable, zerofrom::ZeroFrom)]
+#[cfg_attr(feature = "datagen", derive(serde::Serialize, databake::Bake))]
+#[cfg_attr(feature = "datagen", databake(path = icu_casemap::provider))]
 #[yoke(prove_covariance_manually)]
 /// CaseMapper provides low-level access to the data necessary to
 /// convert characters and strings to upper, lower, or title case.
-pub struct CaseMapV1<'data> {
+pub struct CaseMap<'data> {
     /// Case mapping data
     pub trie: CodePointTrie<'data, CaseMapData>,
     /// Exceptions to the case mapping data
     pub exceptions: CaseMapExceptions<'data>,
 }
 
+icu_provider::data_struct!(
+    CaseMap<'_>,
+    #[cfg(feature = "datagen")]
+);
+
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for CaseMapV1<'de> {
+impl<'de> serde::Deserialize<'de> for CaseMap<'de> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(serde::Deserialize)]
         pub struct Raw<'data> {
@@ -106,48 +119,13 @@ impl<'de> serde::Deserialize<'de> for CaseMapV1<'de> {
     }
 }
 
-impl<'data> CaseMapV1<'data> {
-    /// Creates a new CaseMapV1 using data exported by the
-    // `icuexportdata` tool in ICU4C. Validates that the data is
-    // consistent.
-    #[cfg(feature = "datagen")]
-    pub fn try_from_icu(
-        trie_header: CodePointTrieHeader,
-        trie_index: &[u16],
-        trie_data: &[u16],
-        exceptions: &[u16],
-    ) -> Result<Self, DataError> {
-        use self::exceptions_builder::CaseMapExceptionsBuilder;
-        use zerovec::ZeroVec;
-        let exceptions_builder = CaseMapExceptionsBuilder::new(exceptions);
-        let (exceptions, idx_map) = exceptions_builder.build()?;
-
-        let trie_index = ZeroVec::alloc_from_slice(trie_index);
-
-        #[allow(clippy::unwrap_used)] // datagen only
-        let trie_data = trie_data
-            .iter()
-            .map(|&i| {
-                CaseMapData::try_from_icu_integer(i)
-                    .unwrap()
-                    .with_updated_exception(&idx_map)
-            })
-            .collect::<ZeroVec<_>>();
-
-        let trie = CodePointTrie::try_new(trie_header, trie_index, trie_data)
-            .map_err(|_| DataError::custom("Casemapping data does not form valid trie"))?;
-
-        let result = Self { trie, exceptions };
-        result.validate().map_err(DataError::custom)?;
-        Ok(result)
-    }
-
-    /// Given an existing CaseMapper, validates that the data is
-    /// consistent. A CaseMapper created by the ICU transformer has
+impl CaseMap<'_> {
+    /// Given an existing [`CaseMap`], validates that the data is
+    /// consistent. A [`CaseMap`] created by the ICU transformer has
     /// already been validated. Calling this function is only
     /// necessary if you are concerned about data corruption after
     /// deserializing.
-    #[cfg(any(feature = "serde", feature = "datagen"))]
+    #[cfg(feature = "serde")]
     #[allow(unused)] // is only used in debug mode for serde
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         // First, validate that exception data is well-formed.

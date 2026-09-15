@@ -14,7 +14,7 @@ use super::{
 extern crate alloc;
 use alloc::string::String;
 
-use serde::{de, forward_to_deserialize_any, Deserialize};
+use serde_core::{de, forward_to_deserialize_any, Deserialize};
 
 /// The character set family of the current system.
 ///
@@ -23,7 +23,12 @@ const SYSTEM_CHARSET_FAMILY: CharsetFamily = CharsetFamily::Ascii;
 
 /// Deserializes an instance of type `T` from bytes representing a binary ICU
 /// resource bundle.
-pub fn from_bytes<'a, T>(input: &'a [u8]) -> Result<T, BinaryDeserializerError>
+///
+/// The input data must be in the platform's native endianness. ICU4C resource
+/// bundles such as `zoneinfo64.res` are generated in both little endian and
+/// big endian formats; callers must ensure the appropriate format is provided
+/// for the target platform.
+pub fn from_words<'a, T>(input: &'a [u32]) -> Result<T, BinaryDeserializerError>
 where
     T: Deserialize<'a>,
 {
@@ -65,7 +70,12 @@ struct ResourceTreeDeserializer<'de> {
 impl<'de> ResourceTreeDeserializer<'de> {
     /// Creates a new deserializer from the header and index of the resource
     /// bundle.
-    fn from_bytes(input: &'de [u8]) -> Result<Self, BinaryDeserializerError> {
+    fn from_bytes(input: &'de [u32]) -> Result<Self, BinaryDeserializerError> {
+        // Safety: All valid u32 slices are also valid u8 slices since u32 is plain-old-data.
+        // We're using size_of_val to directly get the length of the underlying data.
+        let input =
+            unsafe { core::slice::from_raw_parts(input.as_ptr() as *const u8, size_of_val(input)) };
+
         let header = BinHeader::try_from(input)?;
 
         // Verify that the representation in the resource bundle is one we're
@@ -93,24 +103,27 @@ impl<'de> ResourceTreeDeserializer<'de> {
         let body = get_subslice(input, header.size as usize..)?;
 
         // Skip the root resource descriptor and get the index area.
-        let index = get_subslice(body, core::mem::size_of::<u32>()..)?;
+        let index = get_subslice(body, size_of::<u32>()..)?;
         let index = BinIndex::try_from(index)?;
 
         // Keys begin at the start of the body.
-        let keys = get_subslice(
-            body,
-            ..(index.keys_end as usize) * core::mem::size_of::<u32>(),
-        )?;
+        let keys_subslice_len = (index.keys_end as usize)
+            .checked_mul(size_of::<u32>())
+            .ok_or(BinaryDeserializerError::invalid_data("Too many keys"))?;
+        let keys = get_subslice(body, ..keys_subslice_len)?;
 
         let data_16_bit = if header.repr_info.format_version < FormatVersion::V2_0 {
             // The 16-bit data area was not introduced until format version 2.0.
             None
         } else if let Some(data_16_bit_end) = index.data_16_bit_end {
-            let data_16_bit = get_subslice(
-                body,
-                (index.keys_end as usize) * core::mem::size_of::<u32>()
-                    ..(data_16_bit_end as usize) * core::mem::size_of::<u32>(),
-            )?;
+            let start = (index.keys_end as usize)
+                .checked_mul(size_of::<u32>())
+                .ok_or(BinaryDeserializerError::invalid_data("Offset overflow"))?;
+            let end = (data_16_bit_end as usize)
+                .checked_mul(size_of::<u32>())
+                .ok_or(BinaryDeserializerError::invalid_data("Offset overflow"))?;
+
+            let data_16_bit = get_subslice(body, start..end)?;
             Some(data_16_bit)
         } else {
             return Err(BinaryDeserializerError::invalid_data(
@@ -138,7 +151,7 @@ impl<'de> ResourceTreeDeserializer<'de> {
                 ))
             }
         };
-        let descriptor = u32::from_le_bytes(descriptor);
+        let descriptor = u32::from_ne_bytes(descriptor);
 
         ResDescriptor::try_from(descriptor)
     }
@@ -148,7 +161,7 @@ impl<'de> ResourceTreeDeserializer<'de> {
         let result = self.peek_next_resource_descriptor();
 
         // Pop resource descriptor from input.
-        self.input = get_subslice(self.input, core::mem::size_of::<u32>()..)?;
+        self.input = get_subslice(self.input, size_of::<u32>()..)?;
 
         result
     }
@@ -181,7 +194,7 @@ impl<'de> ResourceTreeDeserializer<'de> {
     }
 }
 
-impl<'de, 'a> de::Deserializer<'de> for &'a mut ResourceTreeDeserializer<'de> {
+impl<'de> de::Deserializer<'de> for &mut ResourceTreeDeserializer<'de> {
     type Error = BinaryDeserializerError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -376,7 +389,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut ResourceTreeDeserializer<'de> {
                 let input = get_subslice(self.body, descriptor.value_as_32_bit_offset()..)?;
                 let (length, input) = read_u32(input)?;
 
-                get_subslice(input, ..(length as usize) * core::mem::size_of::<u32>())?
+                get_subslice(input, ..(length as usize) * size_of::<u32>())?
             }
             ResourceReprType::StringV2 => {
                 // String resources are stored as UTF-16 strings in the bundle's
@@ -392,7 +405,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut ResourceTreeDeserializer<'de> {
 
                     let input = get_subslice(data_16_bit, descriptor.value_as_16_bit_offset()..)?;
                     let (length, input) = get_length_and_start_of_utf16_string(input)?;
-                    get_subslice(input, ..length * core::mem::size_of::<u16>())?
+                    get_subslice(input, ..length * size_of::<u16>())?
                 } else {
                     return Err(BinaryDeserializerError::invalid_data(
                         "StringV2 resource without 16-bit data block",
@@ -568,7 +581,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut ResourceTreeDeserializer<'de> {
                 // 16-bit values may be padded.
                 let length_with_padding = (length + ((length + 1) % 2)) as usize;
 
-                let values_offset = length_with_padding * core::mem::size_of::<u16>();
+                let values_offset = length_with_padding * size_of::<u16>();
                 let values = get_subslice(keys, values_offset..)?;
 
                 visitor.visit_map(TableMapAccess {
@@ -662,10 +675,7 @@ impl<'de> de::SeqAccess<'de> for Array16SeqAccess<'de> {
         self.offsets = rest;
         self.remaining -= 1;
 
-        let input = get_subslice(
-            self.data_16_bit,
-            (offset as usize) * core::mem::size_of::<u16>()..,
-        )?;
+        let input = get_subslice(self.data_16_bit, (offset as usize) * size_of::<u16>()..)?;
         let de = Resource16BitDeserializer::new(input);
         seed.deserialize(de).map(Some)
     }
@@ -685,7 +695,7 @@ struct ArraySeqAccess<'a, 'de: 'a> {
     remaining: usize,
 }
 
-impl<'de, 'a> de::SeqAccess<'de> for ArraySeqAccess<'a, 'de> {
+impl<'de> de::SeqAccess<'de> for ArraySeqAccess<'_, 'de> {
     type Error = BinaryDeserializerError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
@@ -699,7 +709,7 @@ impl<'de, 'a> de::SeqAccess<'de> for ArraySeqAccess<'a, 'de> {
         // Elements are stored as a sequence of resource descriptors. Pop one
         // and deserialize the corresponding resource.
         let input = self.descriptors;
-        self.descriptors = get_subslice(self.descriptors, core::mem::size_of::<u32>()..)?;
+        self.descriptors = get_subslice(self.descriptors, size_of::<u32>()..)?;
         self.remaining -= 1;
 
         // Input must always start at a resource descriptor. The rest of the
@@ -737,7 +747,7 @@ impl<'de> de::SeqAccess<'de> for IntVectorSeqAccess<'de> {
         // Elements are stored as a sequence of 32-bit integers. Pop one and
         // feed it into the specialized int vector deserializer.
         let input = self.values;
-        self.values = get_subslice(self.values, core::mem::size_of::<u32>()..)?;
+        self.values = get_subslice(self.values, size_of::<u32>()..)?;
         self.remaining -= 1;
 
         let de = IntVectorDeserializer::new(input);
@@ -782,7 +792,7 @@ impl<'de> de::MapAccess<'de> for EmptyMapAccess {
         Ok(None)
     }
 
-    #[allow(clippy::panic)]
+    #[expect(clippy::panic)]
     fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
     where
         V: de::DeserializeSeed<'de>,
@@ -810,7 +820,7 @@ struct TableMapAccess<'de, 'a> {
     remaining: usize,
 }
 
-impl<'de, 'a> de::MapAccess<'de> for TableMapAccess<'de, 'a> {
+impl<'de> de::MapAccess<'de> for TableMapAccess<'de, '_> {
     type Error = BinaryDeserializerError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
@@ -827,9 +837,11 @@ impl<'de, 'a> de::MapAccess<'de> for TableMapAccess<'de, 'a> {
         self.keys = keys;
         self.remaining -= 1;
 
-        let input = get_subslice(self.de.keys, key as usize..).or(Err(
-            BinaryDeserializerError::invalid_data("unexpected end of data while deserializing key"),
-        ))?;
+        let input = get_subslice(self.de.keys, key as usize..).or(const {
+            Err(BinaryDeserializerError::invalid_data(
+                "unexpected end of data while deserializing key",
+            ))
+        })?;
 
         let de = KeyDeserializer::new(input);
         seed.deserialize(de).map(Some)
@@ -842,7 +854,7 @@ impl<'de, 'a> de::MapAccess<'de> for TableMapAccess<'de, 'a> {
         // Values are stored as a sequence of resource descriptors. Pop one and
         // deserialize the corresponding resource.
         let value = self.values;
-        self.values = get_subslice(self.values, core::mem::size_of::<u32>()..)?;
+        self.values = get_subslice(self.values, size_of::<u32>()..)?;
 
         self.de.input = value;
         seed.deserialize(&mut *self.de)
@@ -881,9 +893,9 @@ impl<'de> Resource16BitDeserializer<'de> {
         let units = byte_slices.map(|bytes| {
             // We can safely unwrap as we guarantee above that this chunk is
             // exactly 2 bytes.
-            #[allow(clippy::unwrap_used)]
+            #[expect(clippy::unwrap_used)]
             let bytes = <[u8; 2]>::try_from(bytes).unwrap();
-            u16::from_le_bytes(bytes)
+            u16::from_ne_bytes(bytes)
         });
 
         char::decode_utf16(units)
@@ -929,7 +941,7 @@ impl<'de> de::Deserializer<'de> for Resource16BitDeserializer<'de> {
         // `StringV2` is a contiguous sequence of native-endian `u16`, so we can
         // zero-copy deserialize it if the visitor supports it.
         let (length, input) = get_length_and_start_of_utf16_string(self.input)?;
-        let bytes = get_subslice(input, 0..length * core::mem::size_of::<u16>())?;
+        let bytes = get_subslice(input, 0..length * size_of::<u16>())?;
 
         visitor.visit_borrowed_bytes(bytes)
     }
@@ -1056,9 +1068,10 @@ impl<'de> KeyDeserializer<'de> {
     fn read_key(self) -> Result<&'de str, BinaryDeserializerError> {
         // Keys are stored as null-terminated UTF-8 strings. Locate the
         // terminating byte and return as a borrowed string.
-        let terminator_pos = self.input.iter().position(|&byte| byte == 0).ok_or(
-            BinaryDeserializerError::invalid_data("unterminated key string"),
-        )?;
+        let terminator_pos =
+            self.input.iter().position(|&byte| byte == 0).ok_or(
+                const { BinaryDeserializerError::invalid_data("unterminated key string") },
+            )?;
 
         let input = get_subslice(self.input, 0..terminator_pos)?;
         core::str::from_utf8(input)
@@ -1119,9 +1132,13 @@ fn get_length_and_start_of_utf16_string(
             .chunks_exact(2)
             .take(40)
             .position(|chunk| chunk == [0, 0])
-            .ok_or(BinaryDeserializerError::invalid_data(
-                "unterminated string with implicit length",
-            ))?
+            .ok_or(
+                const {
+                    BinaryDeserializerError::invalid_data(
+                        "unterminated string with implicit length",
+                    )
+                },
+            )?
             + 1;
 
         (length, input)
@@ -1243,21 +1260,16 @@ impl TryFrom<u32> for ResDescriptor {
 fn read_u32(input: &[u8]) -> Result<(u32, &[u8]), BinaryDeserializerError> {
     // Safe to unwrap at the end of this because `try_into()` for arrays will
     // only fail if the slice is the wrong size.
-    #[allow(clippy::unwrap_used)]
+    #[expect(clippy::unwrap_used)]
     let bytes = input
-        .get(0..core::mem::size_of::<u32>())
-        .ok_or(BinaryDeserializerError::invalid_data(
-            "unexpected end of input",
-        ))?
+        .get(0..size_of::<u32>())
+        .ok_or(const { BinaryDeserializerError::invalid_data("unexpected end of input") })?
         .try_into()
         .unwrap();
-    let value = u32::from_le_bytes(bytes);
+    let value = u32::from_ne_bytes(bytes);
 
-    let rest =
-        input
-            .get(core::mem::size_of::<u32>()..)
-            .ok_or(BinaryDeserializerError::invalid_data(
-                "unexpected end of input",
-            ))?;
+    let rest = input
+        .get(size_of::<u32>()..)
+        .ok_or(const { BinaryDeserializerError::invalid_data("unexpected end of input") })?;
     Ok((value, rest))
 }

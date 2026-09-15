@@ -7,9 +7,10 @@
 //! Sample file:
 //! <https://github.com/unicode-org/cldr-json/blob/main/cldr-json/cldr-dates-full/main/en/timeZoneNames.json>
 
+use icu_pattern::{DoublePlaceholder, PatternString, SinglePlaceholder};
 use serde::{
-    de::{IgnoredAny, MapAccess, Visitor},
     Deserialize, Deserializer,
+    de::{IgnoredAny, MapAccess, Visitor},
 };
 use std::collections::BTreeMap;
 
@@ -20,6 +21,16 @@ pub(crate) struct ZoneFormat(pub(crate) BTreeMap<String, String>);
 pub(crate) struct Metazone {
     pub(crate) long: Option<ZoneFormat>,
     pub(crate) short: Option<ZoneFormat>,
+}
+
+impl Metazone {
+    pub(crate) fn long_short(&self, long: bool) -> Option<&ZoneFormat> {
+        if long {
+            self.long.as_ref()
+        } else {
+            self.short.as_ref()
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize)]
@@ -41,7 +52,19 @@ pub(crate) struct Location {
     #[serde(rename = "exemplarCity")]
     pub(crate) exemplar_city: Option<String>,
     #[serde(rename = "exemplarCity-alt-secondary")]
-    pub(crate) exemplar_city_alt_secondary: Option<String>,
+    pub(crate) _exemplar_city_alt_secondary: Option<String>,
+    #[serde(rename = "_type")]
+    pub(crate) _ty: Option<String>,
+}
+
+impl Location {
+    pub(crate) fn long_short(&self, long: bool) -> Option<&ZoneFormat> {
+        if long {
+            self.long.as_ref()
+        } else {
+            self.short.as_ref()
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize)]
@@ -60,11 +83,12 @@ pub(crate) struct Zones(pub(crate) BTreeMap<String, Region>);
 #[derive(PartialEq, Debug, Default, Clone)]
 pub(crate) struct TimeZoneNames {
     pub(crate) hour_format: String,
-    pub(crate) gmt_format: String,
-    pub(crate) gmt_zero_format: String,
-    pub(crate) region_format: String,
-    pub(crate) region_format_variants: BTreeMap<String, String>,
-    pub(crate) fallback_format: String,
+    pub(crate) gmt_format: PatternString<SinglePlaceholder>,
+    pub(crate) gmt_unknown_format: String,
+    pub(crate) region_format: PatternString<SinglePlaceholder>,
+    pub(crate) region_format_dt: PatternString<SinglePlaceholder>,
+    pub(crate) region_format_st: PatternString<SinglePlaceholder>,
+    pub(crate) fallback_format: PatternString<DoublePlaceholder>,
     pub(crate) zone: Zones,
     pub(crate) metazone: Option<Metazones>,
 }
@@ -89,22 +113,21 @@ impl<'de> Visitor<'de> for TimeZoneNamesVisitor {
                 let value = map.next_value::<String>()?;
                 time_zone_names.hour_format = value;
             } else if key.eq("gmtFormat") {
-                let value = map.next_value::<String>()?;
+                let value = map.next_value::<PatternString<SinglePlaceholder>>()?;
                 time_zone_names.gmt_format = value;
-            } else if key.eq("gmtZeroFormat") {
+            } else if key.eq("gmtUnknownFormat") {
                 let value = map.next_value::<String>()?;
-                time_zone_names.gmt_zero_format = value;
+                time_zone_names.gmt_unknown_format = value;
             } else if key.eq("fallbackFormat") {
-                let value = map.next_value::<String>()?;
+                let value = map.next_value::<PatternString<DoublePlaceholder>>()?;
                 time_zone_names.fallback_format = value;
             } else if key.starts_with("regionFormat") {
-                let value = map.next_value::<String>()?;
-                if key.contains('-') {
-                    // key is of the form: "regionFormat-type-variant"
-                    let variant = key.split('-').last().unwrap();
-                    time_zone_names
-                        .region_format_variants
-                        .insert(variant.into(), value);
+                let value = map.next_value::<PatternString<SinglePlaceholder>>()?;
+                // key is of the form: "regionFormat-type-variant"
+                if key.ends_with("-standard") {
+                    time_zone_names.region_format_st = value;
+                } else if key.ends_with("-daylight") {
+                    time_zone_names.region_format_dt = value;
                 } else {
                     time_zone_names.region_format = value
                 }

@@ -19,8 +19,6 @@
 //! Additionally, [`ShortBoxSlice`] has a smaller stack size than any of these:
 //!
 //! ```ignore
-//! use core::mem::size_of;
-//!
 //! // NonZeroU64 has a niche that this module utilizes
 //! use core::num::NonZeroU64;
 //!
@@ -41,18 +39,24 @@
 
 mod litemap;
 
+#[cfg(feature = "alloc")]
 use alloc::boxed::Box;
+#[cfg(feature = "alloc")]
 use alloc::vec;
+#[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 use core::ops::Deref;
 use core::ops::DerefMut;
 
 /// A boxed slice that supports no-allocation, constant values if length 0 or 1.
-/// Using ZeroOne(Option<T>) saves 8 bytes in ShortBoxSlice via niche optimization.
+/// Using `ZeroOne(Option<T>)` saves 8 bytes in [`ShortBoxSlice`] via niche optimization.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ShortBoxSliceInner<T> {
     ZeroOne(Option<T>),
+    #[cfg(feature = "alloc")]
     Multi(Box<[T]>),
+    #[cfg(not(feature = "alloc"))]
+    Two([T; 2]),
 }
 
 impl<T> Default for ShortBoxSliceInner<T> {
@@ -89,9 +93,18 @@ impl<T> ShortBoxSlice<T> {
         Self(ZeroOne(Some(item)))
     }
 
+    pub fn new_double(first: T, second: T) -> Self {
+        use ShortBoxSliceInner::*;
+        #[cfg(feature = "alloc")]
+        return Self(Multi(vec![first, second].into_boxed_slice()));
+        #[cfg(not(feature = "alloc"))]
+        return Self(Two([first, second]));
+    }
+
     /// Pushes an element onto this [`ShortBoxSlice`].
     ///
     /// Reallocs if more than 1 item is already in the collection.
+    #[cfg(feature = "alloc")]
     pub fn push(&mut self, item: T) {
         use ShortBoxSliceInner::*;
         self.0 = match core::mem::replace(&mut self.0, ZeroOne(None)) {
@@ -135,7 +148,10 @@ impl<T> ShortBoxSlice<T> {
         match self.0 {
             ZeroOne(None) => 0,
             ZeroOne(_) => 1,
+            #[cfg(feature = "alloc")]
             Multi(ref v) => v.len(),
+            #[cfg(not(feature = "alloc"))]
+            Two(_) => 2,
         }
     }
 
@@ -149,6 +165,7 @@ impl<T> ShortBoxSlice<T> {
     /// Inserts an element at the specified index into the collection.
     ///
     /// Reallocs if more than 1 item is already in the collection.
+    #[cfg(feature = "alloc")]
     pub fn insert(&mut self, index: usize, elt: T) {
         use ShortBoxSliceInner::*;
         assert!(
@@ -191,17 +208,20 @@ impl<T> ShortBoxSlice<T> {
         let (replaced, removed_item) = match core::mem::replace(&mut self.0, ZeroOne(None)) {
             ZeroOne(None) => unreachable!(),
             ZeroOne(Some(v)) => (ZeroOne(None), v),
+            #[cfg(feature = "alloc")]
             Multi(v) => {
                 let mut v = v.into_vec();
                 let removed_item = v.remove(index);
                 match v.len() {
-                    #[allow(clippy::unwrap_used)]
+                    #[expect(clippy::unwrap_used)]
                     // we know that the vec has exactly one element left
                     1 => (ZeroOne(Some(v.pop().unwrap())), removed_item),
                     // v has at least 2 elements, create a Multi variant
                     _ => (Multi(v.into_boxed_slice()), removed_item),
                 }
             }
+            #[cfg(not(feature = "alloc"))]
+            Two([f, s]) => (ZeroOne(Some(f)), s),
         };
         self.0 = replaced;
         removed_item
@@ -215,6 +235,7 @@ impl<T> ShortBoxSlice<T> {
     }
 
     /// Retains only the elements specified by the predicate.
+    #[allow(dead_code)]
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&T) -> bool,
@@ -223,10 +244,19 @@ impl<T> ShortBoxSlice<T> {
         match core::mem::take(&mut self.0) {
             ZeroOne(Some(one)) if f(&one) => self.0 = ZeroOne(Some(one)),
             ZeroOne(_) => self.0 = ZeroOne(None),
+            #[cfg(feature = "alloc")]
             Multi(slice) => {
                 let mut vec = slice.into_vec();
                 vec.retain(f);
                 *self = ShortBoxSlice::from(vec)
+            }
+            #[cfg(not(feature = "alloc"))]
+            Two([first, second]) => {
+                *self = match (Some(first).filter(&mut f), Some(second).filter(&mut f)) {
+                    (None, None) => ShortBoxSlice::new(),
+                    (None, Some(x)) | (Some(x), None) => ShortBoxSlice::new_single(x),
+                    (Some(f), Some(s)) => ShortBoxSlice::new_double(f, s),
+                }
             }
         };
     }
@@ -240,7 +270,10 @@ impl<T> Deref for ShortBoxSlice<T> {
         match self.0 {
             ZeroOne(None) => &[],
             ZeroOne(Some(ref v)) => core::slice::from_ref(v),
+            #[cfg(feature = "alloc")]
             Multi(ref v) => v,
+            #[cfg(not(feature = "alloc"))]
+            Two(ref v) => v,
         }
     }
 }
@@ -251,23 +284,28 @@ impl<T> DerefMut for ShortBoxSlice<T> {
         match self.0 {
             ZeroOne(None) => &mut [],
             ZeroOne(Some(ref mut v)) => core::slice::from_mut(v),
+            #[cfg(feature = "alloc")]
             Multi(ref mut v) => v,
+            #[cfg(not(feature = "alloc"))]
+            Two(ref mut v) => v,
         }
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> From<Vec<T>> for ShortBoxSlice<T> {
     fn from(v: Vec<T>) -> Self {
         use ShortBoxSliceInner::*;
         match v.len() {
             0 => Self(ZeroOne(None)),
-            #[allow(clippy::unwrap_used)] // we know that the vec is not empty
+            #[expect(clippy::unwrap_used)] // we know that the vec is not empty
             1 => Self(ZeroOne(Some(v.into_iter().next().unwrap()))),
             _ => Self(Multi(v.into_boxed_slice())),
         }
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> FromIterator<T> for ShortBoxSlice<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         use ShortBoxSliceInner::*;
@@ -293,7 +331,10 @@ pub struct ShortBoxSliceIntoIter<T>(ShortBoxSliceIntoIterInner<T>);
 #[derive(Debug)]
 pub(crate) enum ShortBoxSliceIntoIterInner<T> {
     ZeroOne(Option<T>),
-    Multi(alloc::vec::IntoIter<T>),
+    #[cfg(feature = "alloc")]
+    Multi(vec::IntoIter<T>),
+    #[cfg(not(feature = "alloc"))]
+    Two(core::array::IntoIter<T, 2>),
 }
 
 impl<T> Iterator for ShortBoxSliceIntoIter<T> {
@@ -302,7 +343,10 @@ impl<T> Iterator for ShortBoxSliceIntoIter<T> {
         use ShortBoxSliceIntoIterInner::*;
         match &mut self.0 {
             ZeroOne(option) => option.take(),
+            #[cfg(feature = "alloc")]
             Multi(into_iter) => into_iter.next(),
+            #[cfg(not(feature = "alloc"))]
+            Two(into_iter) => into_iter.next(),
         }
     }
 }
@@ -318,9 +362,14 @@ impl<T> IntoIterator for ShortBoxSlice<T> {
             }
             // TODO: Use a boxed slice IntoIter impl when available:
             // <https://github.com/rust-lang/rust/issues/59878>
+            #[cfg(feature = "alloc")]
             ShortBoxSliceInner::Multi(boxed_slice) => ShortBoxSliceIntoIter(
                 ShortBoxSliceIntoIterInner::Multi(boxed_slice.into_vec().into_iter()),
             ),
+            #[cfg(not(feature = "alloc"))]
+            ShortBoxSliceInner::Two(arr) => {
+                ShortBoxSliceIntoIter(ShortBoxSliceIntoIterInner::Two(arr.into_iter()))
+            }
         }
     }
 }
@@ -330,7 +379,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(clippy::get_first)]
+    #[expect(clippy::get_first)]
     fn test_new_single_const() {
         const MY_CONST_SLICE: ShortBoxSlice<i32> = ShortBoxSlice::new_single(42);
 
@@ -339,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_pattern_matching)]
+    #[expect(clippy::redundant_pattern_matching)]
     fn test_get_single() {
         let mut vec = ShortBoxSlice::new();
         assert!(matches!(vec.single(), None));
